@@ -109,32 +109,32 @@ class StorageSettings(BaseSettings):
         default=Path.home() / ".comind" / "data",
         description="Base directory for all CoMind data storage",
     )
-    
+
     @property
     def indexes_dir(self) -> Path:
         """Directory for search indexes"""
         return self.data_dir / "indexes"
-    
+
     @property
     def graphs_dir(self) -> Path:
         """Directory for knowledge graphs"""
         return self.data_dir / "graphs"
-    
+
     @property
     def wiki_dir(self) -> Path:
         """Directory for wiki content"""
         return self.data_dir / "wiki"
-    
+
     @property
     def cache_dir(self) -> Path:
         """Directory for cache"""
         return self.data_dir / "cache"
-    
+
     @property
     def repos_dir(self) -> Path:
         """Directory for persistent git repository clones"""
         return self.data_dir / "repos"
-    
+
     @property
     def duckdb_path(self) -> Path:
         """Path to single shared DuckDB database file"""
@@ -186,10 +186,10 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
-    
+
     # HuggingFace token (optional, suppresses warnings)
     hf_token: str | None = None
-    
+
     # Application metadata
     app_name: str = Field(default="CoMind", description="Application name")
     app_version: str = Field(default="0.1.0", description="Application version")
@@ -238,16 +238,16 @@ def _load_yaml_config(config_path: Path | None = None) -> dict[str, Any]:
             Path(__file__).parent.parent / "config.yml",
             Path.home() / ".comind" / "config.yml",
         ]
-        
+
         for path in search_paths:
             if path.exists():
                 config_path = path
                 break
-    
+
     if config_path is None or not config_path.exists():
         return {}
-    
-    with open(config_path, 'r') as f:
+
+    with open(config_path) as f:
         return yaml.safe_load(f) or {}
 
 
@@ -258,9 +258,9 @@ def _expand_path(value: Any) -> Any:
         expanded = os.path.expanduser(value)
         expanded = os.path.expandvars(expanded)
         return expanded
-    elif isinstance(value, dict):
+    if isinstance(value, dict):
         return {k: _expand_path(v) for k, v in value.items()}
-    elif isinstance(value, list):
+    if isinstance(value, list):
         return [_expand_path(item) for item in value]
     return value
 
@@ -268,19 +268,27 @@ def _expand_path(value: Any) -> Any:
 def _merge_yaml_with_settings(yaml_config: dict[str, Any]) -> dict[str, Any]:
     """Merge YAML config into pydantic settings format with path expansion"""
     merged = {}
-    
+
     # Map YAML structure to pydantic settings
     if "app" in yaml_config:
         merged["app_name"] = yaml_config["app"].get("name", "CoMind")
         merged["app_version"] = yaml_config["app"].get("version", "0.1.0")
         merged["debug"] = yaml_config["app"].get("debug", False)
         merged["environment"] = yaml_config["app"].get("environment", "development")
-    
+
     # Component settings - expand paths in all values
-    for component in ["storage", "search", "wiki", "indexing", "process_detection", "server", "mcp"]:
+    for component in [
+        "storage",
+        "search",
+        "wiki",
+        "indexing",
+        "process_detection",
+        "server",
+        "mcp",
+    ]:
         if component in yaml_config:
             merged[component] = _expand_path(yaml_config[component])
-    
+
     return merged
 
 
@@ -291,7 +299,7 @@ _settings: Settings | None = None
 def get_settings(config_path: Path | None = None) -> Settings:
     """
     Get global settings instance (singleton pattern)
-    
+
     Loads configuration from:
     1. config.yml (if found)
     2. Environment variables (overrides YAML)
@@ -301,7 +309,7 @@ def get_settings(config_path: Path | None = None) -> Settings:
         # Load YAML config first
         yaml_config = _load_yaml_config(config_path)
         merged_config = _merge_yaml_with_settings(yaml_config)
-        
+
         # Create settings with YAML defaults, then env vars override
         _settings = Settings(**merged_config)
     return _settings
@@ -310,11 +318,11 @@ def get_settings(config_path: Path | None = None) -> Settings:
 def reload_settings(config_path: Path | None = None) -> Settings:
     """Reload settings from YAML and environment"""
     global _settings
-    
+
     # Load YAML config first
     yaml_config = _load_yaml_config(config_path)
     merged_config = _merge_yaml_with_settings(yaml_config)
-    
+
     # Create settings with YAML defaults, then env vars override
     _settings = Settings(**merged_config)
     return _settings

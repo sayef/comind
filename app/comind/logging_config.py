@@ -7,7 +7,6 @@ Provides consistent, structured logging across the application.
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
 
 import structlog
@@ -22,15 +21,15 @@ def _format_event_message(logger, method_name, event_dict):
     # Remove redundant fields
     event_dict.pop("level", None)
     event_dict.pop("timestamp", None)
-    
+
     # Extract event as the main message
     event_msg = event_dict.pop("event", "")
-    
+
     # If there are remaining fields, format them as key=value
     if event_dict:
-        kv_pairs = " ".join(f"{k}={repr(v)}" for k, v in event_dict.items())
+        kv_pairs = " ".join(f"{k}={v!r}" for k, v in event_dict.items())
         return f"{event_msg} {kv_pairs}"
-    
+
     return event_msg
 
 
@@ -48,7 +47,7 @@ def configure_logging() -> None:
         show_time=True,
         omit_repeated_times=False,
     )
-    
+
     # Configure standard library logging
     logging.basicConfig(
         format="%(message)s",
@@ -56,7 +55,7 @@ def configure_logging() -> None:
         handlers=[rich_handler],
         force=True,
     )
-    
+
     # Suppress verbose third-party library logs
     logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)

@@ -7,23 +7,22 @@ following the SCAN_SPEC.md format.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
-from comind.style.style_extractor import StylePatterns
 from comind.logging_config import get_logger
+from comind.style.style_extractor import StylePatterns
 
 logger = get_logger(__name__)
 
 
 class StyleGuideGenerator:
     """Generate markdown style guide from extracted patterns"""
-    
+
     def __init__(self, patterns: StylePatterns, repo_name: str):
         self.patterns = patterns
         self.repo_name = repo_name
-    
+
     def generate(self) -> str:
         """Generate complete style guide markdown"""
         sections = [
@@ -38,18 +37,18 @@ class StyleGuideGenerator:
             self._generate_micro_idioms_section(),
             self._generate_consistency_assessment(),
         ]
-        
+
         return "\n\n".join(sections)
-    
+
     def _generate_header(self) -> str:
         """Generate document header"""
-        return f"""# {self.repo_name.upper().replace('-', '_')}_STYLE_GUIDE
+        return f"""# {self.repo_name.upper().replace("-", "_")}_STYLE_GUIDE
 
 **Auto-generated from repository analysis**
 
 This style guide documents the dominant coding patterns, conventions, and practices
 found in the `{self.repo_name}` repository. Follow these patterns to maintain consistency."""
-    
+
     def _generate_environment_section(self) -> str:
         """Generate Environment & Tooling section"""
         return f"""## 1. Environment & Tooling Assumptions
@@ -75,20 +74,20 @@ found in the `{self.repo_name}` repository. Follow these patterns to maintain co
 **Code formatting:** Likely using Black/Ruff with default settings
 
 **Prevalence:** High"""
-    
+
     def _generate_coding_style_section(self) -> str:
         """Generate General Coding Style section"""
-        
+
         # Get dominant function naming
         func_naming = "snake_case"
         if self.patterns.function_naming:
             func_naming = self.patterns.function_naming.most_common(1)[0][0]
-        
+
         # Get dominant class naming
         class_naming = "PascalCase"
         if self.patterns.class_naming:
             class_naming = self.patterns.class_naming.most_common(1)[0][0]
-        
+
         return f"""## 2. General Coding Style
 
 ### 2.1 Function Structure
@@ -160,7 +159,7 @@ async def search(
 ```
 
 **Prevalence:** {self.patterns.type_hints_usage.prevalence}"""
-    
+
     def _generate_documentation_section(self) -> str:
         """Generate Documentation Style section"""
         return f"""## 3. Documentation Style
@@ -210,10 +209,10 @@ async def analyze_repository(request: IndexRequest) -> dict[str, Any]:
 **Comment tone:** Explanatory - focus on "why" over "what"
 
 **Prevalence:** Medium"""
-    
+
     def _generate_error_handling_section(self) -> str:
         """Generate Error Handling section"""
-        return f"""## 4. Error Handling & Validation
+        return """## 4. Error Handling & Validation
 
 **Custom exception hierarchies:** HTTPException from FastAPI
 
@@ -232,7 +231,7 @@ try:
     if result.returncode != 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Git clone failed: {{result.stderr}}"
+            detail=f"Git clone failed: {result.stderr}"
         )
 except subprocess.TimeoutExpired:
     raise HTTPException(
@@ -243,16 +242,16 @@ except Exception as e:
     logger.error("Unexpected error", error=str(e))
     raise HTTPException(
         status_code=500,
-        detail=f"Failed to clone repository: {{str(e)}}"
+        detail=f"Failed to clone repository: {str(e)}"
     )
 ```
 
 **Prevalence:** High"""
-    
+
     def _generate_logging_section(self) -> str:
         """Generate Logging section"""
         structured = "Yes" if self.patterns.structured_logging else "No"
-        
+
         return f"""## 5. Logging & Observability
 
 **Logger initialization:** `{self.patterns.logger_init_pattern}`
@@ -292,7 +291,7 @@ logger.warning("Repository not found", repo_id=repo_id)
 ```
 
 **Prevalence:** High"""
-    
+
     def _generate_architecture_section(self) -> str:
         """Generate Architecture & Concurrency section"""
         return f"""## 6. Architecture & Concurrency Patterns
@@ -334,14 +333,14 @@ async def analyze_repository(request: IndexRequest) -> dict[str, Any]:
 **Batch processing:** Not heavily used
 
 **Prevalence:** Low"""
-    
+
     def _generate_library_usage_section(self) -> str:
         """Generate Library & Framework Usage section"""
-        
+
         # Get top imports
         top_imports = self.patterns.common_imports.most_common(10)
         imports_list = "\n".join([f"- `{name}` ({count} usages)" for name, count in top_imports])
-        
+
         return f"""## 7. Library & Framework Usage Patterns
 
 ### 7.1 HTTP & API Clients
@@ -382,10 +381,10 @@ settings = get_settings()
 ```
 
 **Prevalence:** High"""
-    
+
     def _generate_micro_idioms_section(self) -> str:
         """Generate Common Micro-Idioms section"""
-        return f"""## 8. Common Micro-Idioms & Performance
+        return """## 8. Common Micro-Idioms & Performance
 
 **Recurring patterns:**
 
@@ -411,7 +410,7 @@ finally:
         shutil.rmtree(cloned_repo, ignore_errors=True)
 
 # F-strings for formatting
-logger.info(f"Loaded {{len(repos)}} repositories")
+logger.info(f"Loaded {len(repos)} repositories")
 
 # Type checking before operations
 if isinstance(symbol_data, Symbol):
@@ -420,14 +419,14 @@ elif isinstance(symbol_data, dict):
     symbol = Symbol(**symbol_data)
 
 # Path objects
-graph_file = settings.storage.graphs_dir / f"{{repo_name}}.pkl"
+graph_file = settings.storage.graphs_dir / f"{repo_name}.pkl"
 
 # Dict .get() with defaults
 repo_name = metadata.get("repo_name") or metadata.get("repo_id")
 ```
 
 **Prevalence:** High"""
-    
+
     def _generate_consistency_assessment(self) -> str:
         """Generate Style Consistency Assessment"""
         return f"""## 9. Style Consistency Assessment
@@ -482,15 +481,15 @@ convention = "{self.patterns.docstring_format.lower()}"
 
 **Generated by CoMind Style Guide Extractor**  
 *Last updated: Auto-generated from latest repository analysis*"""
-    
+
     def _format_prevalence(self, stats: Any) -> str:
         """Format prevalence statistics"""
         if stats is None:
             return "Unknown"
-        if hasattr(stats, 'prevalence'):
+        if hasattr(stats, "prevalence"):
             return f"{stats.prevalence} ({stats.percentage:.1f}%)"
         return "Unknown"
-    
+
     def _format_counter_prevalence(self, counter: Any, key: str) -> str:
         """Format prevalence from Counter"""
         if not counter:
@@ -501,35 +500,33 @@ convention = "{self.patterns.docstring_format.lower()}"
             return "Low"
         ratio = count / total
         if ratio >= 0.7:
-            return f"High ({ratio*100:.1f}%)"
-        elif ratio >= 0.3:
-            return f"Medium ({ratio*100:.1f}%)"
-        return f"Low ({ratio*100:.1f}%)"
+            return f"High ({ratio * 100:.1f}%)"
+        if ratio >= 0.3:
+            return f"Medium ({ratio * 100:.1f}%)"
+        return f"Low ({ratio * 100:.1f}%)"
 
 
 async def generate_style_guide_markdown(
-    patterns: StylePatterns,
-    repo_name: str,
-    output_path: str | None = None
+    patterns: StylePatterns, repo_name: str, output_path: str | None = None
 ) -> str:
     """Generate style guide markdown from patterns
-    
+
     Args:
         patterns: Extracted style patterns
         repo_name: Repository name for the guide
         output_path: Optional path to save the markdown file
-        
+
     Returns:
         Generated markdown content
     """
     generator = StyleGuideGenerator(patterns, repo_name)
     markdown = generator.generate()
-    
+
     # Save to file if path provided
     if output_path:
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(markdown)
         logger.info("Style guide saved", path=output_path)
-    
+
     return markdown

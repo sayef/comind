@@ -17,14 +17,14 @@ This ensures documentation is:
 - Always accurate (regenerated from graph)
 """
 
-import json
 import asyncio
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
+from typing import Any
 
+from comind.core.graph import GraphBackend, Relationship, Symbol, SymbolType
 from comind.logging_config import get_logger
-from comind.core.graph import Symbol, Relationship, SymbolType, GraphBackend
 from comind.utils.snippet_extractor import CodeSnippetExtractor
 
 logger = get_logger(__name__)
@@ -33,21 +33,23 @@ logger = get_logger(__name__)
 @dataclass
 class NodeWiki:
     """Wiki page for a single node (symbol)"""
+
     node_id: str
     node_type: str
     name: str
     file_path: str
     signature: str
     natural_language: str  # LLM-generated description
-    structured_data: Dict[str, Any]  # Graph context
-    
-    def to_dict(self) -> Dict:
+    structured_data: dict[str, Any]  # Graph context
+
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
 @dataclass
 class RelationshipWiki:
     """Wiki page for a relationship (edge)"""
+
     relationship_id: str
     relationship_type: str
     source_id: str
@@ -55,57 +57,57 @@ class RelationshipWiki:
     target_id: str
     target_name: str
     natural_language: str  # LLM-generated description
-    structured_data: Dict[str, Any]  # Context about the relationship
-    
-    def to_dict(self) -> Dict:
+    structured_data: dict[str, Any]  # Context about the relationship
+
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
 class GraphWikiGenerator:
     """Generate LLM-enhanced wikis from knowledge graph"""
-    
+
     def __init__(
         self,
         graph: GraphBackend,
         snippet_extractor: CodeSnippetExtractor,
         llm_client=None,
-        output_dir: Optional[Path] = None
+        output_dir: Path | None = None,
     ):
         self.graph = graph
         self.snippet_extractor = snippet_extractor
         self.llm = llm_client
         self.output_dir = output_dir or Path.home() / ".comind/data/graph_wikis"
-        
+
         # Create output directories
         self.nodes_dir = self.output_dir / "nodes"
         self.relationships_dir = self.output_dir / "relationships"
         self.nodes_dir.mkdir(parents=True, exist_ok=True)
         self.relationships_dir.mkdir(parents=True, exist_ok=True)
-    
-    async def generate_all_wikis(self, repo_id: str, batch_size: int = 10) -> Dict[str, int]:
+
+    async def generate_all_wikis(self, repo_id: str, batch_size: int = 10) -> dict[str, int]:
         """
         Generate wikis for all nodes and relationships in the graph
-        
+
         Args:
             repo_id: Repository identifier
             batch_size: Number of wikis to generate in parallel
-            
+
         Returns:
             Statistics about generation (nodes_generated, relationships_generated)
         """
         logger.info(f"Starting graph wiki generation for repo: {repo_id}")
-        
+
         # Get all symbols from graph
         symbols = await self.graph.get_all_symbols(repo_id)
         logger.info(f"Found {len(symbols)} symbols to document")
-        
+
         # Generate node wikis in batches
         node_count = 0
         for i in range(0, len(symbols), batch_size):
-            batch = symbols[i:i + batch_size]
+            batch = symbols[i : i + batch_size]
             tasks = [self.generate_node_wiki(symbol) for symbol in batch]
             node_wikis = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Save successful wikis
             for wiki in node_wikis:
                 if isinstance(wiki, NodeWiki):
@@ -113,20 +115,20 @@ class GraphWikiGenerator:
                     node_count += 1
                 elif isinstance(wiki, Exception):
                     logger.error(f"Failed to generate node wiki: {wiki}")
-            
+
             logger.info(f"Generated {node_count}/{len(symbols)} node wikis")
-        
+
         # Get all relationships
         relationships = await self.graph.get_all_relationships(repo_id)
         logger.info(f"Found {len(relationships)} relationships to document")
-        
+
         # Generate relationship wikis in batches
         rel_count = 0
         for i in range(0, len(relationships), batch_size):
-            batch = relationships[i:i + batch_size]
+            batch = relationships[i : i + batch_size]
             tasks = [self.generate_relationship_wiki(rel) for rel in batch]
             rel_wikis = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Save successful wikis
             for wiki in rel_wikis:
                 if isinstance(wiki, RelationshipWiki):
@@ -134,17 +136,19 @@ class GraphWikiGenerator:
                     rel_count += 1
                 elif isinstance(wiki, Exception):
                     logger.error(f"Failed to generate relationship wiki: {wiki}")
-            
+
             logger.info(f"Generated {rel_count}/{len(relationships)} relationship wikis")
-        
-        logger.info(f"Graph wiki generation complete: {node_count} nodes, {rel_count} relationships")
-        
+
+        logger.info(
+            f"Graph wiki generation complete: {node_count} nodes, {rel_count} relationships"
+        )
+
         return {
             "nodes_generated": node_count,
             "relationships_generated": rel_count,
-            "total": node_count + rel_count
+            "total": node_count + rel_count,
         }
-    
+
     async def annotate_graph_descriptions(
         self,
         repo_id: str,
@@ -190,17 +194,17 @@ class GraphWikiGenerator:
     async def generate_node_wiki(self, symbol: Symbol) -> NodeWiki:
         """Generate wiki for a single node (function/class/module)"""
         logger.debug(f"Generating node wiki for: {symbol.name} ({symbol.type.value})")
-        
+
         # Extract rich context from graph
         context = await self._extract_node_context(symbol)
-        
+
         # Generate natural language description using LLM
         if self.llm:
             natural_language = await self._generate_node_description(symbol, context)
         else:
             # Fallback: Use docstring or basic description
             natural_language = symbol.docstring or f"{symbol.type.value} {symbol.name}"
-        
+
         return NodeWiki(
             node_id=symbol.id,
             node_type=symbol.type.value,
@@ -208,33 +212,37 @@ class GraphWikiGenerator:
             file_path=symbol.file_path,
             signature=symbol.signature or "",
             natural_language=natural_language,
-            structured_data=context
+            structured_data=context,
         )
-    
+
     async def generate_relationship_wiki(self, rel: Relationship) -> RelationshipWiki:
         """Generate wiki for a relationship (edge)"""
-        logger.debug(f"Generating relationship wiki: {rel.type} ({rel.source_id} -> {rel.target_id})")
-        
+        logger.debug(
+            f"Generating relationship wiki: {rel.type} ({rel.source_id} -> {rel.target_id})"
+        )
+
         # Get source and target symbols
         source = await self.graph.get_symbol(rel.source_id)
         target = await self.graph.get_symbol(rel.target_id)
-        
+
         if not source or not target:
-            raise ValueError(f"Cannot generate wiki for relationship with missing symbols")
-        
+            raise ValueError("Cannot generate wiki for relationship with missing symbols")
+
         # Generate relationship ID (Relationship model doesn't have id field)
         rel_id = f"{rel.source_id}_{rel.type}_{rel.target_id}".replace("/", "_").replace(":", "_")
-        
+
         # Extract relationship context
         context = await self._extract_relationship_context(rel, source, target)
-        
+
         # Generate natural language description using LLM
         if self.llm:
-            natural_language = await self._generate_relationship_description(rel, source, target, context)
+            natural_language = await self._generate_relationship_description(
+                rel, source, target, context
+            )
         else:
             # Fallback: Basic description
             natural_language = f"{source.name} {rel.type.lower()} {target.name}"
-        
+
         return RelationshipWiki(
             relationship_id=rel_id,
             relationship_type=rel.type,
@@ -243,10 +251,10 @@ class GraphWikiGenerator:
             target_id=target.id,
             target_name=target.name,
             natural_language=natural_language,
-            structured_data=context
+            structured_data=context,
         )
-    
-    async def _extract_node_context(self, symbol: Symbol) -> Dict[str, Any]:
+
+    async def _extract_node_context(self, symbol: Symbol) -> dict[str, Any]:
         """Extract rich context from graph for a node"""
         context = {
             "signature": symbol.signature or "",
@@ -255,7 +263,7 @@ class GraphWikiGenerator:
             "file_path": symbol.file_path,
             "line_range": f"{symbol.line_start}-{symbol.line_end}",
         }
-        
+
         # Get code snippet — extractors return dicts; pull out the code string
         try:
             if symbol.type == SymbolType.FUNCTION or symbol.type == SymbolType.METHOD:
@@ -279,15 +287,17 @@ class GraphWikiGenerator:
                 # extract_usage_examples(symbol) — no caller argument
                 usage_list = await self.snippet_extractor.extract_usage_examples(symbol)
                 first = usage_list[0] if usage_list else {}
-                context["callers"].append({
-                    "name": caller.name,
-                    "file": caller.file_path,
-                    "usage": first.get("line", "") if isinstance(first, dict) else "",
-                })
+                context["callers"].append(
+                    {
+                        "name": caller.name,
+                        "file": caller.file_path,
+                        "usage": first.get("line", "") if isinstance(first, dict) else "",
+                    }
+                )
         except Exception as e:
             logger.warning(f"Failed to get callers for {symbol.name}: {e}")
             context["callers"] = []
-        
+
         # Get callees
         try:
             callees = await self.graph.get_callees(symbol.id)
@@ -298,7 +308,7 @@ class GraphWikiGenerator:
         except Exception as e:
             logger.warning(f"Failed to get callees for {symbol.name}: {e}")
             context["callees"] = []
-        
+
         # Get community/module context
         try:
             community = await self.graph.get_community(symbol.id)
@@ -306,7 +316,7 @@ class GraphWikiGenerator:
         except Exception as e:
             logger.warning(f"Failed to get community for {symbol.name}: {e}")
             context["community"] = None
-        
+
         # Get process participation
         try:
             processes = await self.graph.get_symbol_processes(symbol.id)
@@ -314,34 +324,23 @@ class GraphWikiGenerator:
         except Exception as e:
             logger.warning(f"Failed to get processes for {symbol.name}: {e}")
             context["processes"] = []
-        
+
         # Add properties
         context["properties"] = symbol.properties or {}
-        
+
         return context
-    
+
     async def _extract_relationship_context(
-        self,
-        rel: Relationship,
-        source: Symbol,
-        target: Symbol
-    ) -> Dict[str, Any]:
+        self, rel: Relationship, source: Symbol, target: Symbol
+    ) -> dict[str, Any]:
         """Extract context for a relationship"""
         context = {
             "relationship_type": rel.type,
             "confidence": rel.confidence,
-            "source": {
-                "name": source.name,
-                "type": source.type.value,
-                "file": source.file_path
-            },
-            "target": {
-                "name": target.name,
-                "type": target.type.value,
-                "file": target.file_path
-            }
+            "source": {"name": source.name, "type": source.type.value, "file": source.file_path},
+            "target": {"name": target.name, "type": target.type.value, "file": target.file_path},
         }
-        
+
         # For CALLS relationships, get the call site
         if rel.type == "CALLS":
             try:
@@ -350,83 +349,89 @@ class GraphWikiGenerator:
             except Exception as e:
                 logger.warning(f"Failed to extract call site: {e}")
                 context["call_site"] = ""
-        
+
         # Add relationship properties
         context["properties"] = rel.properties or {}
-        
+
         return context
-    
-    async def _generate_node_description(self, symbol: Symbol, context: Dict) -> str:
+
+    async def _generate_node_description(self, symbol: Symbol, context: dict) -> str:
         """Generate natural language description for a node using LLM"""
         prompt = self._build_node_prompt(symbol, context)
-        
+
         try:
             response = await self.llm.generate(prompt)
             return response.strip()
         except Exception as e:
             logger.error(f"LLM generation failed for {symbol.name}: {e}")
             return symbol.docstring or f"{symbol.type.value} {symbol.name}"
-    
+
     async def _generate_relationship_description(
-        self,
-        rel: Relationship,
-        source: Symbol,
-        target: Symbol,
-        context: Dict
+        self, rel: Relationship, source: Symbol, target: Symbol, context: dict
     ) -> str:
         """Generate natural language description for a relationship using LLM"""
         prompt = self._build_relationship_prompt(rel, source, target, context)
-        
+
         try:
             response = await self.llm.generate(prompt)
             return response.strip()
         except Exception as e:
             logger.error(f"LLM generation failed for relationship: {e}")
             return f"{source.name} {rel.type.lower()} {target.name}"
-    
-    def _build_node_prompt(self, symbol: Symbol, context: Dict) -> str:
+
+    def _build_node_prompt(self, symbol: Symbol, context: dict) -> str:
         """Build LLM prompt for node documentation"""
-        callers_text = "\n".join([
-            f"  - {c['name']} in {c['file']}\n    Usage: {c['usage']}"
-            for c in context.get("callers", [])[:3]
-        ]) or "  None"
-        
-        callees_text = "\n".join([
-            f"  - {c['name']} ({c['type']}) in {c['file']}"
-            for c in context.get("callees", [])[:5]
-        ]) or "  None"
-        
+        callers_text = (
+            "\n".join(
+                [
+                    f"  - {c['name']} in {c['file']}\n    Usage: {c['usage']}"
+                    for c in context.get("callers", [])[:3]
+                ]
+            )
+            or "  None"
+        )
+
+        callees_text = (
+            "\n".join(
+                [
+                    f"  - {c['name']} ({c['type']}) in {c['file']}"
+                    for c in context.get("callees", [])[:5]
+                ]
+            )
+            or "  None"
+        )
+
         processes_text = ", ".join(context.get("processes", [])) or "None"
-        
+
         return f"""Generate clear, concise technical documentation for this code symbol.
 
 SYMBOL INFORMATION:
 Name: {symbol.name}
 Type: {symbol.type.value}
-Location: {context['file_path']}:{context['line_range']}
+Location: {context["file_path"]}:{context["line_range"]}
 
 SIGNATURE:
 ```python
-{context['signature']}
+{context["signature"]}
 ```
 
 CODE IMPLEMENTATION:
 ```python
-{context['code'][:500]}{'...' if len(str(context['code'])) > 500 else ''}
+{context["code"][:500]}{"..." if len(str(context["code"])) > 500 else ""}
 ```
 
 DOCSTRING:
-{context['docstring'] or 'None'}
+{context["docstring"] or "None"}
 
 RELATIONSHIPS:
-Called by ({len(context.get('callers', []))} function(s)):
+Called by ({len(context.get("callers", []))} function(s)):
 {callers_text}
 
-Calls ({len(context.get('callees', []))} function(s)):
+Calls ({len(context.get("callees", []))} function(s)):
 {callees_text}
 
 CONTEXT:
-Module/Community: {context.get('community') or 'Unknown'}
+Module/Community: {context.get("community") or "Unknown"}
 Used in execution flows: {processes_text}
 
 TASK:
@@ -437,17 +442,13 @@ Generate natural language documentation with these sections:
 4. **Important Notes** - Any gotchas, security considerations, or best practices (1-2 sentences, optional)
 
 Write in clear, professional language. Focus on understanding, not just describing. Be concise."""
-    
+
     def _build_relationship_prompt(
-        self,
-        rel: Relationship,
-        source: Symbol,
-        target: Symbol,
-        context: Dict
+        self, rel: Relationship, source: Symbol, target: Symbol, context: dict
     ) -> str:
         """Build LLM prompt for relationship documentation"""
-        call_site = context.get('call_site', '')
-        
+        call_site = context.get("call_site", "")
+
         return f"""Generate clear documentation for this code relationship.
 
 RELATIONSHIP: {source.name} {rel.type} {target.name}
@@ -474,35 +475,35 @@ Generate a 2-3 sentence explanation covering:
 3. Context - When/where in the execution flow does this occur?
 
 Be concise and focus on the "why" and "what" of the interaction."""
-    
+
     async def save_node_wiki(self, wiki: NodeWiki):
         """Save node wiki to disk"""
         file_path = self.nodes_dir / f"{wiki.node_id}.json"
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(wiki.to_dict(), f, indent=2)
-    
+
     async def save_relationship_wiki(self, wiki: RelationshipWiki):
         """Save relationship wiki to disk"""
         file_path = self.relationships_dir / f"{wiki.relationship_id}.json"
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(wiki.to_dict(), f, indent=2)
-    
-    async def load_node_wiki(self, node_id: str) -> Optional[NodeWiki]:
+
+    async def load_node_wiki(self, node_id: str) -> NodeWiki | None:
         """Load node wiki from disk"""
         file_path = self.nodes_dir / f"{node_id}.json"
         if not file_path.exists():
             return None
-        
-        with open(file_path, 'r') as f:
+
+        with open(file_path) as f:
             data = json.load(f)
             return NodeWiki(**data)
-    
-    async def load_relationship_wiki(self, rel_id: str) -> Optional[RelationshipWiki]:
+
+    async def load_relationship_wiki(self, rel_id: str) -> RelationshipWiki | None:
         """Load relationship wiki from disk"""
         file_path = self.relationships_dir / f"{rel_id}.json"
         if not file_path.exists():
             return None
-        
-        with open(file_path, 'r') as f:
+
+        with open(file_path) as f:
             data = json.load(f)
             return RelationshipWiki(**data)

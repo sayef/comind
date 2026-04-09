@@ -14,17 +14,26 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 # Silence noisy third-party libraries; keep WARNING+ for all others so
 # real errors are still visible.  Rich console is the primary UI output.
-for _noisy_lib in ("fastembed", "bm25s", "httpx", "httpcore", "urllib3",
-                   "filelock", "huggingface_hub", "tokenizers", "onnxruntime"):
+for _noisy_lib in (
+    "fastembed",
+    "bm25s",
+    "httpx",
+    "httpcore",
+    "urllib3",
+    "filelock",
+    "huggingface_hub",
+    "tokenizers",
+    "onnxruntime",
+):
     logging.getLogger(_noisy_lib).setLevel(logging.WARNING)
 os.environ["TQDM_DISABLE"] = "1"
 
@@ -33,6 +42,7 @@ os.environ["TQDM_DISABLE"] = "1"
 # disable=False explicitly, overriding TQDM_DISABLE.
 try:
     import tqdm as _tqdm_module
+
     _real_tqdm_init = _tqdm_module.tqdm.__init__
 
     def _silent_tqdm_init(self, *args, **kwargs):
@@ -110,9 +120,12 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
     if gitlab_token and "gitlab.com" in repo_url:
         # Strip any existing credentials from URL
         import re
-        clean_url = re.sub(r'https://[^@]+@gitlab\.com', 'https://gitlab.com', repo_url)
+
+        clean_url = re.sub(r"https://[^@]+@gitlab\.com", "https://gitlab.com", repo_url)
         if clean_url.startswith("https://gitlab.com"):
-            clone_url = clean_url.replace("https://gitlab.com", f"https://oauth2:{gitlab_token}@gitlab.com")
+            clone_url = clean_url.replace(
+                "https://gitlab.com", f"https://oauth2:{gitlab_token}@gitlab.com"
+            )
 
     if repo_dir.exists() and (repo_dir / ".git").exists():
         try:
@@ -133,19 +146,24 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
 
     try:
         import subprocess
+
         env = os.environ.copy()
-        env['GIT_TERMINAL_PROMPT'] = '0'
-        
+        env["GIT_TERMINAL_PROMPT"] = "0"
+
         cmd = [
-            'git', 'clone',
-            '--branch', branch,
-            '--depth', '1',
-            '-c', 'credential.helper=',
+            "git",
+            "clone",
+            "--branch",
+            branch,
+            "--depth",
+            "1",
+            "-c",
+            "credential.helper=",
             clone_url,
-            str(repo_dir)
+            str(repo_dir),
         ]
-        
-        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+
+        result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"git clone failed: {result.stderr}")
     except Exception as exc:
@@ -158,28 +176,29 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
 async def _load_engine(repo_name: str | None = None):
     """Initialise engine and load persisted state from ~/.comind/data."""
     from comind.config import get_settings
+    from comind.search.query_engine import WikiEnhancedQueryEngine
     from comind.storage.duckdb_backend import DuckDBBackend
     from comind.storage.graph_adapter import GraphAdapter
-    from comind.search.query_engine import WikiEnhancedQueryEngine
     from comind.wiki.wiki import load_wiki_pages
 
     settings = get_settings()
-    
+
     # Load single shared DuckDB database
     db_path = settings.storage.duckdb_path
     if not db_path.exists():
         return None, None, []
-    
+
     backend = DuckDBBackend(str(db_path))
-    
+
     # Wrap in adapter for compatibility
     graph = GraphAdapter(backend)
-    
+
     qe = WikiEnhancedQueryEngine(graph)
     await qe.initialize_search_indexes()
 
     # Register DuckDB-backed search engines for all repos before loading
     from comind.search.duckdb_search_engine import create_search_engines
+
     text_engine, semantic_engine = create_search_engines(graph)
 
     loaded = await qe.load_all_indexes(settings.storage.indexes_dir)
@@ -228,6 +247,7 @@ def _resolve_repo_root(repo_name: str) -> Path:
     Falls back to the default git clone location.
     """
     import json as _json
+
     from comind.config import get_settings
 
     settings = get_settings()
@@ -270,12 +290,27 @@ def _resolve_repo_root(repo_name: str) -> Path:
 @app.command()
 def analyze(
     repo: Annotated[str, typer.Argument(help="Local path or Git URL to analyze")],
-    repo_name: Annotated[Optional[str], typer.Option("--name", "-n", help="Name for this repo")] = None,
+    repo_name: Annotated[
+        str | None, typer.Option("--name", "-n", help="Name for this repo")
+    ] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="Git branch")] = "main",
     force: Annotated[bool, typer.Option("--force", "-f", help="Force full re-index")] = False,
-    gen_wiki: Annotated[bool, typer.Option("--gen-wiki/--no-gen-wiki", help="Generate wiki documentation (requires OPENAI_API_KEY)")] = False,
-    gen_style: Annotated[bool, typer.Option("--gen-style/--no-gen-style", help="Extract coding style guide (requires OPENAI_API_KEY)")] = False,
-    gen_queries: Annotated[bool, typer.Option("--gen-queries/--no-gen-queries", help="Generate query associations")] = False,
+    gen_wiki: Annotated[
+        bool,
+        typer.Option(
+            "--gen-wiki/--no-gen-wiki", help="Generate wiki documentation (requires OPENAI_API_KEY)"
+        ),
+    ] = False,
+    gen_style: Annotated[
+        bool,
+        typer.Option(
+            "--gen-style/--no-gen-style",
+            help="Extract coding style guide (requires OPENAI_API_KEY)",
+        ),
+    ] = False,
+    gen_queries: Annotated[
+        bool, typer.Option("--gen-queries/--no-gen-queries", help="Generate query associations")
+    ] = False,
 ) -> None:
     """Analyze a repository: index symbols, build knowledge graph, generate wiki and style guide.
 
@@ -285,7 +320,17 @@ def analyze(
     Use [bold]--no-gen-wiki[/] or [bold]--no-gen-style[/] to skip specific phases.
     Use [bold]--gen-queries[/] to generate natural language query associations (requires LLM).
     """
-    _run(_ingest(repo, repo_name, branch, force, gen_wiki=gen_wiki, gen_style=gen_style, gen_queries=gen_queries))
+    _run(
+        _ingest(
+            repo,
+            repo_name,
+            branch,
+            force,
+            gen_wiki=gen_wiki,
+            gen_style=gen_style,
+            gen_queries=gen_queries,
+        )
+    )
 
 
 async def _ingest(
@@ -299,12 +344,12 @@ async def _ingest(
     gen_queries: bool = False,
 ) -> None:
     from comind.config import get_settings
+    from comind.indexing.incremental_indexer import IncrementalIndexer
+    from comind.indexing.indexer import PythonIndexer
+    from comind.search.duckdb_search_engine import DuckDBSemanticSearchEngine, create_search_engines
+    from comind.search.query_engine import WikiEnhancedQueryEngine
     from comind.storage.duckdb_backend import DuckDBBackend
     from comind.storage.graph_adapter import GraphAdapter
-    from comind.indexing.incremental_indexer import IncrementalIndexer, smart_reindex
-    from comind.indexing.indexer import PythonIndexer
-    from comind.search.query_engine import WikiEnhancedQueryEngine
-    from comind.search.duckdb_search_engine import create_search_engines, DuckDBSemanticSearchEngine
 
     settings = get_settings()
     start = time.time()
@@ -338,28 +383,28 @@ async def _ingest(
         from comind.style.style_guide_generator import generate_style_guide_markdown
         from comind.style.style_guide_store import StyleGuideStore
     if gen_queries:
-        from comind.llm.query_association_indexer import QueryAssociationIndexer
         from comind.llm.llm_client import resolve_llm_config
+        from comind.llm.query_association_indexer import QueryAssociationIndexer
 
     # ── init DuckDB backend (single shared database) ─────────────────────
     db_path = settings.storage.duckdb_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
     backend = DuckDBBackend(str(db_path))
     incremental = IncrementalIndexer(backend)
-    
+
     # Wrap backend in adapter for compatibility
     graph = GraphAdapter(backend)
-    
+
     # Create DuckDB-based search engines
     text_engine, semantic_engine = create_search_engines(graph)
-    
+
     qe = WikiEnhancedQueryEngine(graph)
     indexer = PythonIndexer(graph, qe)
-    
+
     # Use DuckDB search engines instead of BM25S/FastEmbed
     qe.repo_text_engines[repo_id] = text_engine
     qe.repo_semantic_engines[repo_id] = semantic_engine
-    
+
     await qe.initialize_search_indexes()
 
     total_phases = 2 + (3 if gen_wiki else 0) + (1 if gen_style else 0) + (1 if gen_queries else 0)
@@ -373,7 +418,7 @@ async def _ingest(
     wiki_pages_count = 0
 
     from rich.progress import BarColumn, TaskProgressColumn
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -382,21 +427,23 @@ async def _ingest(
         TimeElapsedColumn(),
         console=console,
     ) as prog:
-
         # phase — parse & index (with incremental updates)
         t = prog.add_task(_phase("Scanning repository…"), total=100, transient=True)
-        
+
         if not force:
             # Detect changes for incremental update
             changed_files = await incremental.detect_changes(repo_id, repo_path)
             if changed_files:
-                new_count = sum(1 for status in changed_files.values() if status == 'new')
-                modified_count = sum(1 for status in changed_files.values() if status == 'modified')
-                deleted_count = sum(1 for status in changed_files.values() if status == 'deleted')
-                prog.update(t, description=f"[cyan]Detected changes: {new_count} new, {modified_count} modified, {deleted_count} deleted[/]")
-        
-        prog.update(t, description=f"[cyan]Parsing Python files…[/]")
-        
+                new_count = sum(1 for status in changed_files.values() if status == "new")
+                modified_count = sum(1 for status in changed_files.values() if status == "modified")
+                deleted_count = sum(1 for status in changed_files.values() if status == "deleted")
+                prog.update(
+                    t,
+                    description=f"[cyan]Detected changes: {new_count} new, {modified_count} modified, {deleted_count} deleted[/]",
+                )
+
+        prog.update(t, description="[cyan]Parsing Python files…[/]")
+
         # Progress callback to update CLI in real-time with different phases
         def on_progress(phase, current, total, symbols, relationships):
             if phase == "parsing":
@@ -404,66 +451,79 @@ async def _ingest(
                 prog.update(
                     t,
                     completed=pct * 0.6,  # Parsing is 60% of the work
-                    description=f"[cyan]Parsing {current}/{total} files ({pct}%) - {symbols} symbols, {relationships} rels[/]"
+                    description=f"[cyan]Parsing {current}/{total} files ({pct}%) - {symbols} symbols, {relationships} rels[/]",
                 )
             elif phase == "bulk_insert":
-                prog.update(t, completed=65, description=f"[cyan]Building knowledge graph - {symbols} symbols, {relationships} rels[/]")
+                prog.update(
+                    t,
+                    completed=65,
+                    description=f"[cyan]Building knowledge graph - {symbols} symbols, {relationships} rels[/]",
+                )
             elif phase == "resolving_calls":
-                prog.update(t, completed=75, description=f"[cyan]Resolving function calls…[/]")
+                prog.update(t, completed=75, description="[cyan]Resolving function calls…[/]")
             elif phase == "detecting_processes":
-                prog.update(t, completed=85, description=f"[cyan]Detecting execution flows…[/]")
+                prog.update(t, completed=85, description="[cyan]Detecting execution flows…[/]")
             elif phase == "generating_queries":
-                prog.update(t, completed=95, description=f"[cyan]Generating searchable queries for processes…[/]")
-        
+                prog.update(
+                    t,
+                    completed=95,
+                    description="[cyan]Generating searchable queries for processes…[/]",
+                )
+
         index_result = await indexer.index_repository(
-            repo_path=repo_path,
-            repo_id=repo_id,
-            force=force,
-            progress_callback=on_progress
+            repo_path=repo_path, repo_id=repo_id, force=force, progress_callback=on_progress
         )
         if "error" in index_result:
             err.print(f"[red]Indexing failed:[/] {index_result['error']}")
             raise typer.Exit(1)
-        
+
         qe.repo_roots[repo_id] = Path(repo_path)
         syms = index_result.get("total_symbols", 0)
         rels = index_result.get("total_relationships", 0)
         procs = index_result.get("processes_detected", 0)
         files_processed = index_result.get("files_processed", 0)
-        prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  Parsed {files_processed} files → {syms} symbols, {rels} relationships")
+        prog.update(
+            t,
+            completed=100,
+            description=f"[green]✓[/]  {phase}/{total_phases}  Parsed {files_processed} files → {syms} symbols, {rels} relationships",
+        )
         prog.stop_task(t)
 
         # phase — persist indexes (DuckDB auto-persists)
         t = prog.add_task(_phase("Persisting indexes…"), total=100, transient=True)
         settings.storage.indexes_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Build search indexes before saving
         prog.update(t, completed=10)
         await qe.build_repo_index(repo_id)
 
         # Generate embeddings in bulk (stored directly in DuckDB symbol_embeddings)
         if isinstance(semantic_engine, DuckDBSemanticSearchEngine):
-            prog.update(t, completed=30, description=f"[cyan]Generating semantic embeddings…[/]")
+            prog.update(t, completed=30, description="[cyan]Generating semantic embeddings…[/]")
             try:
                 n_embeddings = await semantic_engine.generate_embeddings_for_repo(repo_id)
-                prog.update(t, completed=80, description=f"[cyan]Generated {n_embeddings} embeddings[/]")
+                prog.update(
+                    t, completed=80, description=f"[cyan]Generated {n_embeddings} embeddings[/]"
+                )
             except Exception as _emb_err:
                 prog.update(t, description=f"[yellow]⚠ Embeddings skipped: {_emb_err}[/]")
-        
+
         await qe.save_repo_index(repo_id, settings.storage.indexes_dir, repo_path)
-        
+
         # Register repository in DuckDB
         await backend.register_repository(
             repo_id=repo_id,
             name=repo_name,
             path=repo_path,
             branch=branch,
-            metadata={"indexed_at": time.time()}
+            metadata={"indexed_at": time.time()},
         )
-        
+
         # Persist repo root path so grep/read can resolve it at query time
         (settings.storage.indexes_dir / repo_name / "repo_path.txt").write_text(repo_path)
-        prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  Indexes persisted")
+        prog.update(
+            t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  Indexes persisted"
+        )
         prog.stop_task(t)
 
         if gen_wiki:
@@ -484,7 +544,11 @@ async def _ingest(
                 wiki_dir_check = wiki_storage / "wiki"
                 if wiki_dir_check.exists():
                     wiki_pages_count = len(list(wiki_dir_check.glob("*.md")))
-            prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  {wiki_pages_count} wiki pages")
+            prog.update(
+                t,
+                completed=100,
+                description=f"[green]✓[/]  {phase}/{total_phases}  {wiki_pages_count} wiki pages",
+            )
             prog.stop_task(t)
 
             # phase — index wiki content
@@ -502,14 +566,18 @@ async def _ingest(
             if ws.semantic_engine:
                 await ws.semantic_engine.build_index()
             await ws.save(str(settings.storage.indexes_dir / repo_name))
-            prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  {len(wiki_pages)} wiki pages indexed")
+            prog.update(
+                t,
+                completed=100,
+                description=f"[green]✓[/]  {phase}/{total_phases}  {len(wiki_pages)} wiki pages indexed",
+            )
             prog.stop_task(t)
 
             # phase — annotate graph nodes with per-symbol descriptions
             t = prog.add_task(_phase("Annotating nodes…"), total=100, transient=True)
-            from comind.wiki.graph_wiki_generator import GraphWikiGenerator
-            from comind.utils.snippet_extractor import CodeSnippetExtractor
             from comind.llm.llm_client import LLMClient, resolve_llm_config
+            from comind.utils.snippet_extractor import CodeSnippetExtractor
+            from comind.wiki.graph_wiki_generator import GraphWikiGenerator
 
             _llm_cfg = resolve_llm_config({})
             _llm = LLMClient(_llm_cfg) if _llm_cfg.api_key else None
@@ -517,7 +585,11 @@ async def _ingest(
             _gw = GraphWikiGenerator(graph, _snippet_extractor, llm_client=_llm)
             annotated = await _gw.annotate_graph_descriptions(repo_id)
             # DuckDB auto-persists changes
-            prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  {annotated} nodes annotated")
+            prog.update(
+                t,
+                completed=100,
+                description=f"[green]✓[/]  {phase}/{total_phases}  {annotated} nodes annotated",
+            )
             prog.stop_task(t)
 
         if gen_style:
@@ -527,7 +599,11 @@ async def _ingest(
             style_markdown = await generate_style_guide_markdown(style_patterns, repo_name)
             store = StyleGuideStore(repo_name)
             await store.save(style_patterns, style_markdown)
-            prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  Style guide extracted")
+            prog.update(
+                t,
+                completed=100,
+                description=f"[green]✓[/]  {phase}/{total_phases}  Style guide extracted",
+            )
             prog.stop_task(t)
 
         if gen_queries:
@@ -535,49 +611,58 @@ async def _ingest(
             t = prog.add_task(_phase("Generating query associations…"), total=100, transient=True)
             _llm_cfg = resolve_llm_config({})
             if not _llm_cfg.api_key:
-                prog.update(t, description=f"[yellow]⚠[/]  {phase}/{total_phases}  Skipped (no LLM API key)")
+                prog.update(
+                    t, description=f"[yellow]⚠[/]  {phase}/{total_phases}  Skipped (no LLM API key)"
+                )
                 prog.stop_task(t)
             else:
                 query_indexer = QueryAssociationIndexer(
                     graph=graph,
                     llm_config=_llm_cfg,
                     repo_root=Path(repo_path),
-                    incremental_indexer=incremental
+                    incremental_indexer=incremental,
                 )
-                
+
                 # Progress callback to update Rich progress bar
                 def on_query_progress(current_batch, total_batches):
                     pct = int((current_batch / total_batches) * 100)
                     prog.update(
                         t,
                         completed=pct,
-                        description=f"[cyan]Generating query associations: {current_batch}/{total_batches} batches[/]"
+                        description=f"[cyan]Generating query associations: {current_batch}/{total_batches} batches[/]",
                     )
-                
+
                 query_stats = await query_indexer.generate_queries_for_repo(
-                    repo_id=repo_id,
-                    concurrency=5,
-                    progress_callback=on_query_progress
+                    repo_id=repo_id, concurrency=5, progress_callback=on_query_progress
                 )
                 # DuckDB auto-persists changes
                 prog.update(
                     t,
                     completed=100,
-                    description=f"[green]✓[/]  {phase}/{total_phases}  {query_stats['total_queries_generated']} queries for {query_stats['symbols_processed']} symbols"
+                    description=f"[green]✓[/]  {phase}/{total_phases}  {query_stats['total_queries_generated']} queries for {query_stats['symbols_processed']} symbols",
                 )
                 prog.stop_task(t)
-        
+
         # Regenerate embeddings with enriched data if wiki or queries were generated
         if (gen_wiki or gen_queries) and isinstance(semantic_engine, DuckDBSemanticSearchEngine):
-            t = prog.add_task(_phase("Regenerating enriched embeddings…"), total=100, transient=True)
+            t = prog.add_task(
+                _phase("Regenerating enriched embeddings…"), total=100, transient=True
+            )
             try:
                 n_embeddings = await semantic_engine.generate_embeddings_for_repo(
-                    repo_id, 
-                    include_enriched=True
+                    repo_id, include_enriched=True
                 )
-                prog.update(t, completed=100, description=f"[green]✓[/]  {phase}/{total_phases}  {n_embeddings} enriched embeddings")
+                prog.update(
+                    t,
+                    completed=100,
+                    description=f"[green]✓[/]  {phase}/{total_phases}  {n_embeddings} enriched embeddings",
+                )
             except Exception as e:
-                prog.update(t, completed=100, description=f"[yellow]⚠[/]  {phase}/{total_phases}  Enriched embeddings skipped: {e}")
+                prog.update(
+                    t,
+                    completed=100,
+                    description=f"[yellow]⚠[/]  {phase}/{total_phases}  Enriched embeddings skipped: {e}",
+                )
             prog.stop_task(t)
 
     elapsed = time.time() - start
@@ -592,8 +677,10 @@ async def _ingest(
     )
 
     # Calculate some useful metrics
-    symbols_per_sec = int(result.symbols / result.elapsed_seconds) if result.elapsed_seconds > 0 else 0
-    
+    symbols_per_sec = (
+        int(result.symbols / result.elapsed_seconds) if result.elapsed_seconds > 0 else 0
+    )
+
     console.print(
         Panel(
             f"[bold green]✓ Repository indexed successfully[/]\n\n"
@@ -677,9 +764,13 @@ async def _find(query: str, repo_name: str, limit: int, include_code: bool, outp
 def grep(
     pattern: Annotated[str, typer.Argument(help="Regex pattern to search")],
     repo: Annotated[str, typer.Option("--repo", "-r", help="Repository name")],
-    glob: Annotated[Optional[str], typer.Option("--glob", "-g", help="File filter, e.g. '*.py'")] = None,
+    glob: Annotated[
+        str | None, typer.Option("--glob", "-g", help="File filter, e.g. '*.py'")
+    ] = None,
     mode: Annotated[str, typer.Option("--mode", "-m", help="content | files | count")] = "content",
-    context: Annotated[int, typer.Option("--context", "-C", help="Context lines (content mode)")] = 2,
+    context: Annotated[
+        int, typer.Option("--context", "-C", help="Context lines (content mode)")
+    ] = 2,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 50,
     output: OutputFmt = "markdown",
 ) -> None:
@@ -691,8 +782,12 @@ def grep(
     root = _resolve_repo_root(repo)
     engine = GrepEngine()
     result = engine.search(
-        pattern, root, glob=glob, output_mode=output_mode,
-        context_lines=context, max_results=limit,
+        pattern,
+        root,
+        glob=glob,
+        output_mode=output_mode,
+        context_lines=context,
+        max_results=limit,
     )
 
     if output == "json":
@@ -708,8 +803,10 @@ def grep(
         for f, n in sorted(result.counts.items(), key=lambda x: -x[1]):
             console.print(f"  [cyan]{f}[/]  [dim]{n}[/]")
     else:
-        console.print(f"[bold]{result.total} match(es) for `{pattern}`[/]" +
-                      (" [yellow](truncated)[/]" if result.truncated else ""))
+        console.print(
+            f"[bold]{result.total} match(es) for `{pattern}`[/]"
+            + (" [yellow](truncated)[/]" if result.truncated else "")
+        )
         for m in result.matches:
             console.print(f"\n[cyan]{m.file}[/]:[bold]{m.line}[/]")
             for l in m.context_before:
@@ -749,10 +846,15 @@ def glob_cmd(
 
 @app.command()
 def read(
-    file: Annotated[str, typer.Argument(help="File path, optionally with :start-end (e.g. @repo/path/file.py:9-109)")],
+    file: Annotated[
+        str,
+        typer.Argument(
+            help="File path, optionally with :start-end (e.g. @repo/path/file.py:9-109)"
+        ),
+    ],
     repo: Annotated[str, typer.Option("--repo", "-r", help="Repository name")],
-    start: Annotated[Optional[int], typer.Option("--start", "-s", help="Start line (1-based)")] = None,
-    end: Annotated[Optional[int], typer.Option("--end", "-e", help="End line (inclusive)")] = None,
+    start: Annotated[int | None, typer.Option("--start", "-s", help="Start line (1-based)")] = None,
+    end: Annotated[int | None, typer.Option("--end", "-e", help="End line (inclusive)")] = None,
     output: OutputFmt = "markdown",
 ) -> None:
     """Read a file (or line range) from an indexed repository.
@@ -760,8 +862,9 @@ def read(
     Accepts @repo/path/file.py:9-109 syntax — line range is optional.
     --start/--end can also be used explicitly.
     """
-    from comind.indexing.file_search import FileReader
     import re as _re
+
+    from comind.indexing.file_search import FileReader
 
     # Parse :start-end suffix from file argument
     _range_match = _re.search(r":(\d+)-(\d+)$", file)
@@ -905,7 +1008,9 @@ def mcp(
     [bold]http[/]  — start the REST server with SSE MCP endpoint.
     """
     if transport == "http":
-        console.print(f"[bold]Starting CoMind MCP (HTTP/SSE)[/] on [cyan]http://{host}:{port}/mcp[/]")
+        console.print(
+            f"[bold]Starting CoMind MCP (HTTP/SSE)[/] on [cyan]http://{host}:{port}/mcp[/]"
+        )
         serve(host=host, port=port)
     else:
         from comind.mcp_server import run_stdio_server

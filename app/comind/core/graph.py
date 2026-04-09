@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class SymbolType(StrEnum):
     """Types of symbols in the codebase"""
+
     FILE = "file"
     MODULE = "module"
     CLASS = "class"
@@ -29,6 +30,7 @@ class SymbolType(StrEnum):
 
 class RelationType(StrEnum):
     """Types of relationships between symbols"""
+
     CONTAINS = "contains"
     IMPORTS = "imports"
     CALLS = "calls"
@@ -42,6 +44,7 @@ class RelationType(StrEnum):
 
 class Symbol(BaseModel):
     """Represents a symbol in the codebase"""
+
     model_config = ConfigDict(
         populate_by_name=True,
         frozen=False,
@@ -49,7 +52,7 @@ class Symbol(BaseModel):
         arbitrary_types_allowed=False,
         str_strip_whitespace=True,
     )
-    
+
     id: str
     name: str
     type: SymbolType
@@ -90,17 +93,18 @@ class Symbol(BaseModel):
 
 class Relationship(BaseModel):
     """Represents a relationship between symbols"""
+
     model_config = ConfigDict(
         frozen=False,
         validate_assignment=True,
     )
-    
+
     source_id: str
     target_id: str
     type: RelationType
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     properties: dict[str, Any] = Field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation"""
         return {
@@ -114,22 +118,19 @@ class Relationship(BaseModel):
 
 class GraphBackend(ABC):
     """Abstract base class for graph backends"""
-    
+
     @abstractmethod
     async def add_symbol(self, symbol: Symbol) -> None:
         """Add a symbol to the graph"""
-        pass
-    
+
     @abstractmethod
     async def add_relationship(self, relationship: Relationship) -> None:
         """Add a relationship to the graph"""
-        pass
-    
+
     @abstractmethod
     async def get_symbol(self, symbol_id: str) -> Symbol | None:
         """Get a symbol by ID"""
-        pass
-    
+
     @abstractmethod
     async def get_relationships(
         self,
@@ -138,22 +139,18 @@ class GraphBackend(ABC):
         direction: str = "outgoing",
     ) -> list[Relationship]:
         """Get relationships for a symbol"""
-        pass
-    
+
     @abstractmethod
     async def query(self, query: str) -> list[dict[str, Any]]:
         """Execute a graph query"""
-        pass
-    
+
     @abstractmethod
     async def get_communities(self) -> list[dict[str, Any]]:
         """Get detected communities/clusters"""
-        pass
-    
+
     @abstractmethod
     async def get_processes(self) -> list[dict[str, Any]]:
         """Get detected execution flows"""
-        pass
 
 
 # Legacy rustworkx-based implementation has been removed.

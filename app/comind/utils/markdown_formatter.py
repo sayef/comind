@@ -30,8 +30,7 @@ class MarkdownFormatter:
             # Already relative, just add repo prefix
             if repo_name:
                 return f"@{repo_name}/{file_path}"
-            else:
-                return file_path
+            return file_path
 
         # Handle absolute paths (old format) - extract repo name and relative path
         if not repo_name:
@@ -45,12 +44,11 @@ class MarkdownFormatter:
                     return file_path
             else:
                 return file_path
+        # Find repo name in path and extract relative part
+        elif f"/repos/{repo_name}/" in file_path:
+            relative_path = file_path.split(f"/repos/{repo_name}/", 1)[1]
         else:
-            # Find repo name in path and extract relative part
-            if f"/repos/{repo_name}/" in file_path:
-                relative_path = file_path.split(f"/repos/{repo_name}/", 1)[1]
-            else:
-                return file_path
+            return file_path
 
         return f"@{repo_name}/{relative_path}"
 
@@ -72,7 +70,7 @@ class MarkdownFormatter:
         - Code snippet (optional)
         - Callers and callees
         - Wiki/documentation context
-        
+
         Args:
             query: Search query string
             results: List of search result dictionaries
@@ -121,15 +119,22 @@ class MarkdownFormatter:
                 if code_text.strip():
                     snippet_end = (
                         code_snippet.get("absolute_lines", {}).get("end", line_end)
-                        if isinstance(code_snippet, dict) else line_end
+                        if isinstance(code_snippet, dict)
+                        else line_end
                     )
                     is_truncated = isinstance(code_snippet, dict) and line_end > snippet_end
-                    label = f"**Code** *(lines {line_start}–{line_end})*:" if not is_truncated else f"**Code** *(showing lines {line_start}–{snippet_end} of {line_end})*:"
+                    label = (
+                        f"**Code** *(lines {line_start}–{line_end})*:"
+                        if not is_truncated
+                        else f"**Code** *(showing lines {line_start}–{snippet_end} of {line_end})*:"
+                    )
                     lines.append(label)
                     lines.append("```python")
                     lines.append(code_text.rstrip())
                     if is_truncated:
-                        lines.append(f"# ... truncated. Use: comind read --repo {repo_id} {formatted_path}:{line_start}-{line_end}")
+                        lines.append(
+                            f"# ... truncated. Use: comind read --repo {repo_id} {formatted_path}:{line_start}-{line_end}"
+                        )
                     lines.append("```")
                     lines.append("")
 
@@ -215,7 +220,9 @@ class MarkdownFormatter:
 
             formatted_path = MarkdownFormatter._format_file_path(file_path, repo_id)
 
-            lines.append(f"{i}. **`{name}`** ({sym_type}) - `{formatted_path}:{line}` - score: {score:.2f}")
+            lines.append(
+                f"{i}. **`{name}`** ({sym_type}) - `{formatted_path}:{line}` - score: {score:.2f}"
+            )
 
         return "\n".join(lines)
 
@@ -266,8 +273,8 @@ class MarkdownFormatter:
             lines.append(f"**Location:** `{formatted_path}:{line}`")
 
             if context:
-                lines.append(f"**Context:**")
-                lines.append(f"```python")
+                lines.append("**Context:**")
+                lines.append("```python")
                 lines.append(context.strip())
                 lines.append("```")
 

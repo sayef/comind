@@ -2,12 +2,12 @@
 Core domain models for CoMind
 """
 
-from comind.core.graph import Symbol, Relationship, SymbolType, RelationType, GraphBackend
+from comind.core.graph import GraphBackend, Relationship, RelationType, Symbol, SymbolType
 
 __all__ = [
-    "Symbol",
-    "Relationship",
-    "SymbolType",
-    "RelationType",
     "GraphBackend",
+    "RelationType",
+    "Relationship",
+    "Symbol",
+    "SymbolType",
 ]

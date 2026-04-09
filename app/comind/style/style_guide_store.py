@@ -16,8 +16,6 @@ At query time:
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,15 +30,52 @@ logger = get_logger(__name__)
 # ─── keyword → category mappings ─────────────────────────────────────────────
 
 _TOPIC_MAP: dict[str, list[str]] = {
-    "naming": ["naming", "convention", "name", "snake", "camel", "pascal", "function name", "variable name"],
-    "typing": ["type", "hint", "annotation", "typed", "typevar", "protocol", "generic", "optional", "union"],
-    "docstring": ["doc", "docstring", "comment", "documentation", "sphinx", "google", "numpy", "rest", "reStructured"],
+    "naming": [
+        "naming",
+        "convention",
+        "name",
+        "snake",
+        "camel",
+        "pascal",
+        "function name",
+        "variable name",
+    ],
+    "typing": [
+        "type",
+        "hint",
+        "annotation",
+        "typed",
+        "typevar",
+        "protocol",
+        "generic",
+        "optional",
+        "union",
+    ],
+    "docstring": [
+        "doc",
+        "docstring",
+        "comment",
+        "documentation",
+        "sphinx",
+        "google",
+        "numpy",
+        "rest",
+        "reStructured",
+    ],
     "error": ["error", "exception", "raise", "try", "catch", "handling", "validation"],
     "logging": ["log", "logging", "logger", "structlog", "observability", "debug", "info", "warn"],
     "async": ["async", "await", "coroutine", "asyncio", "concurrent", "parallel"],
     "imports": ["import", "from import", "dependency", "module"],
     "formatting": ["format", "string", "f-string", "style", "lint", "line length", "ruff", "black"],
-    "environment": ["python version", "package manager", "poetry", "pipenv", "uv", "lockfile", "tooling"],
+    "environment": [
+        "python version",
+        "package manager",
+        "poetry",
+        "pipenv",
+        "uv",
+        "lockfile",
+        "tooling",
+    ],
     "patterns": ["comprehension", "list comp", "context manager", "with statement", "idiom"],
 }
 
@@ -52,6 +87,7 @@ def _match_topics(query: str) -> list[str]:
 
 
 # ─── serialisation helpers ────────────────────────────────────────────────────
+
 
 def _counter_to_dict(c: object) -> dict[str, int]:
     if hasattr(c, "most_common"):
@@ -73,7 +109,7 @@ def _pattern_stats_to_dict(ps: object) -> dict:
     return {}
 
 
-def _patterns_to_json(p: "StylePatterns") -> dict:
+def _patterns_to_json(p: StylePatterns) -> dict:
     """Convert StylePatterns dataclass to a JSON-safe dict."""
     return {
         "environment": {
@@ -129,6 +165,7 @@ class StyleGuideStore:
     def __init__(self, repo_name: str, data_dir: Path | None = None) -> None:
         if data_dir is None:
             from comind.config import get_settings
+
             data_dir = get_settings().storage.wiki_dir
         self._base = data_dir / repo_name
         self._json_path = self._base / "style_patterns.json"
@@ -136,7 +173,7 @@ class StyleGuideStore:
         self._repo_name = repo_name
         self._data: dict | None = None
 
-    async def save(self, patterns: "StylePatterns", markdown: str) -> None:
+    async def save(self, patterns: StylePatterns, markdown: str) -> None:
         """Persist both the structured JSON and the markdown style guide."""
         self._base.mkdir(parents=True, exist_ok=True)
         data = _patterns_to_json(patterns)
@@ -232,8 +269,16 @@ def _build_sections(data: dict) -> list[StyleSection]:
             details=[
                 f"Function naming: {fn_style} (use this for all functions and methods)",
                 f"Class naming: {cls_style} (use this for all class definitions)",
-                *([f"Constant naming: {_dominant(naming.get('constants', {}))}" ] if naming.get("constants") else []),
-                *([f"Private naming: {_dominant(naming.get('private', {}))}" ] if naming.get("private") else []),
+                *(
+                    [f"Constant naming: {_dominant(naming.get('constants', {}))}"]
+                    if naming.get("constants")
+                    else []
+                ),
+                *(
+                    [f"Private naming: {_dominant(naming.get('private', {}))}"]
+                    if naming.get("private")
+                    else []
+                ),
             ],
             examples=list(naming.get("functions", {}).keys())[:4],
         )
@@ -284,7 +329,7 @@ def _build_sections(data: dict) -> list[StyleSection]:
             category="error",
             summary=f"Exception style: {dominant_style or 'standard'}",
             details=[
-                *([ f"Primary style: {dominant_style}"] if dominant_style else []),
+                *([f"Primary style: {dominant_style}"] if dominant_style else []),
                 *[f"Exception type used: {e}" for e in err.get("exception_patterns", [])[:5]],
             ],
             examples=err.get("exception_patterns", [])[:5],
@@ -314,7 +359,11 @@ def _build_sections(data: dict) -> list[StyleSection]:
             summary=f"Async usage: {async_.get('prevalence', 'Unknown')} ({async_.get('percentage', 0):.0f}%)",
             details=[
                 f"Async/await prevalence: {async_.get('prevalence', '?')} ({async_.get('percentage', 0):.1f}% of functions are async)",
-                *(["Prefer async patterns for I/O operations"] if async_.get("percentage", 0) > 50 else []),
+                *(
+                    ["Prefer async patterns for I/O operations"]
+                    if async_.get("percentage", 0) > 50
+                    else []
+                ),
             ],
             prevalence=async_.get("prevalence"),
         )

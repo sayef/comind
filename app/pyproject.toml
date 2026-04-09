@@ -1,178 +1,134 @@
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [project]
 name = "comind"
 version = "0.1.0"
-description = "Graph-powered code intelligence for AI agents - Modern Python implementation of GitNexus"
 authors = [
-    {name = "CoMind Team", email = "team@comind.dev"}
+  {name = "CoMind Team", email = "team@comind.dev"}
 ]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Framework :: Pydantic",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed"
+]
+dependencies = [
+  "aiofiles>=24.1.0",
+  "bm25s>=0.2.0",
+  "duckdb>=1.4.4",
+  "fastapi>=0.115.0",
+  "fastembed>=0.4.0",
+  "gitpython>=3.1.0",
+  "httpx>=0.28.0",
+  "mcp>=1.1.0",
+  "numpy>=2.1.0",
+  "pathspec>=0.11.0",
+  "pydantic-settings>=2.6.0",
+  "pydantic>=2.9.0",
+  "PyStemmer>=2.2.0",
+  "python-multipart>=0.0.18",
+  "pyyaml>=6.0.0",
+  "rich>=13.9.0",
+  "structlog>=24.4.0",
+  "tree-sitter-python>=0.23.0",
+  "tree-sitter>=0.23.0",
+  "typer>=0.12.0",
+  "uvicorn[standard]>=0.32.0"
+]
+description = "Graph-powered code intelligence for AI agents - Modern Python implementation of GitNexus"
+keywords = ["ai-agents", "code-analysis", "code-intelligence", "knowledge-graph", "mcp"]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.13"
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Framework :: FastAPI",
-    "Framework :: Pydantic",
-    "Typing :: Typed",
-]
-keywords = ["code-intelligence", "knowledge-graph", "mcp", "ai-agents", "code-analysis"]
-
-dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.9.0",
-    "pydantic-settings>=2.6.0",
-    "tree-sitter>=0.23.0",
-    "tree-sitter-python>=0.23.0",
-    "duckdb>=1.4.4",
-    "bm25s>=0.2.0",
-    "PyStemmer>=2.2.0",
-    "fastembed>=0.4.0",
-    "aiofiles>=24.1.0",
-    "python-multipart>=0.0.18",
-    "httpx>=0.28.0",
-    "pyyaml>=6.0.0",
-    "mcp>=1.1.0",
-    "numpy>=2.1.0",
-    "structlog>=24.4.0",
-    "rich>=13.9.0",
-    "gitpython>=3.1.0",
-    "pathspec>=0.11.0",
-    "typer>=0.12.0",
-]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
-    "black>=24.10.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
-    "pre-commit>=4.0.0",
-    "ipython>=8.30.0",
-    "types-aiofiles>=24.1.0",
-]
 all = ["comind[dev]"]
+dev = [
+  "black>=24.10.0",
+  "ipython>=8.30.0",
+  "mypy>=1.13.0",
+  "pre-commit>=4.0.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-cov>=6.0.0",
+  "pytest>=8.3.0",
+  "ruff>=0.8.0",
+  "types-aiofiles>=24.1.0"
+]
 
 [project.scripts]
 comind = "comind.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/comind/comind-py"
 Documentation = "https://comind.readthedocs.io"
-Repository = "https://github.com/comind/comind-py"
+Homepage = "https://github.com/comind/comind-py"
 Issues = "https://github.com/comind/comind-py/issues"
+Repository = "https://github.com/comind/comind-py"
+
+[tool.coverage.report]
+exclude_lines = [
+  "@(abc\\.)?abstractmethod",
+  "class .*\\bProtocol\\):",
+  "def __repr__",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "pragma: no cover",
+  "raise AssertionError",
+  "raise NotImplementedError"
+]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.run]
+branch = true
+omit = [
+  "*/__pycache__/*",
+  "*/site-packages/*",
+  "*/tests/*"
+]
+parallel = true
+source = ["comind"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["comind"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py313"
-fix = true
-
-[tool.ruff.lint]
-select = [
-    "E",      # pycodestyle errors
-    "W",      # pycodestyle warnings
-    "F",      # pyflakes
-    "I",      # isort
-    "N",      # pep8-naming
-    "UP",     # pyupgrade
-    "ASYNC",  # flake8-async
-    "B",      # flake8-bugbear
-    "C4",     # flake8-comprehensions
-    "DTZ",    # flake8-datetimez
-    "T10",    # flake8-debugger
-    "EM",     # flake8-errmsg
-    "FA",     # flake8-future-annotations
-    "ISC",    # flake8-implicit-str-concat
-    "ICN",    # flake8-import-conventions
-    "LOG",    # flake8-logging
-    "G",      # flake8-logging-format
-    "PIE",    # flake8-pie
-    "T20",    # flake8-print
-    "PYI",    # flake8-pyi
-    "PT",     # flake8-pytest-style
-    "Q",      # flake8-quotes
-    "RSE",    # flake8-raise
-    "RET",    # flake8-return
-    "SLF",    # flake8-self
-    "SLOT",   # flake8-slots
-    "SIM",    # flake8-simplify
-    "TID",    # flake8-tidy-imports
-    "TCH",    # flake8-type-checking
-    "ARG",    # flake8-unused-arguments
-    "PTH",    # flake8-use-pathlib
-    "ERA",    # eradicate
-    "PL",     # pylint
-    "TRY",    # tryceratops
-    "FLY",    # flynt
-    "PERF",   # perflint
-    "RUF",    # ruff-specific rules
-]
-ignore = [
-    "E501",    # line too long (handled by formatter)
-    "PLR0913", # too many arguments
-    "PLR2004", # magic value comparison
-    "TRY003",  # long exception message
-    "EM101",   # raw string in exception
-    "EM102",   # f-string in exception
-]
-
-[tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
-"tests/**/*.py" = ["PLR2004", "S101", "ARG001"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["comind"]
-combine-as-imports = true
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
-
 [tool.mypy]
-python_version = "3.13"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_any_unimported = false
-disallow_any_expr = false
+check_untyped_defs = true
 disallow_any_decorated = false
 disallow_any_explicit = false
+disallow_any_expr = false
+disallow_any_unimported = false
 disallow_subclassing_any = false
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-strict_concatenate = true
-check_untyped_defs = true
+disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
+python_version = "3.13"
+strict = true
+strict_concatenate = true
+strict_equality = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = [
-    "tree_sitter.*",
-    "whoosh.*",
-    "chromadb.*",
-    "langchain.*",
-    "sentence_transformers.*",
-    "networkx.*",
-]
 ignore_missing_imports = true
+module = [
+  "chromadb.*",
+  "langchain.*",
+  "networkx.*",
+  "sentence_transformers.*",
+  "tree_sitter.*",
+  "whoosh.*"
+]
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
@@ -180,48 +136,91 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 addopts = [
-    "-ra",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=comind",
-    "--cov-report=term-missing:skip-covered",
-    "--cov-report=html",
-    "--cov-report=xml",
+  "--cov-report=html",
+  "--cov-report=term-missing:skip-covered",
+  "--cov-report=xml",
+  "--cov=comind",
+  "--strict-config",
+  "--strict-markers",
+  "-ra"
 ]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
+  "integration: marks tests as integration tests",
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "unit: marks tests as unit tests"
+]
+python_classes = ["Test*"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+testpaths = ["tests"]
+
+[tool.ruff]
+fix = true
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.format]
+indent-style = "space"
+line-ending = "auto"
+quote-style = "double"
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint]
+ignore = [
+  "E501", # line too long (handled by formatter)
+  "EM101", # raw string in exception
+  "EM102", # f-string in exception
+  "PLR0913", # too many arguments
+  "PLR2004", # magic value comparison
+  "TRY003" # long exception message
+]
+select = [
+  "ARG", # flake8-unused-arguments
+  "ASYNC", # flake8-async
+  "B", # flake8-bugbear
+  "C4", # flake8-comprehensions
+  "DTZ", # flake8-datetimez
+  "E", # pycodestyle errors
+  "EM", # flake8-errmsg
+  "ERA", # eradicate
+  "F", # pyflakes
+  "FA", # flake8-future-annotations
+  "FLY", # flynt
+  "G", # flake8-logging-format
+  "I", # isort
+  "ICN", # flake8-import-conventions
+  "ISC", # flake8-implicit-str-concat
+  "LOG", # flake8-logging
+  "N", # pep8-naming
+  "PERF", # perflint
+  "PIE", # flake8-pie
+  "PL", # pylint
+  "PT", # flake8-pytest-style
+  "PTH", # flake8-use-pathlib
+  "PYI", # flake8-pyi
+  "Q", # flake8-quotes
+  "RET", # flake8-return
+  "RSE", # flake8-raise
+  "RUF", # ruff-specific rules
+  "SIM", # flake8-simplify
+  "SLF", # flake8-self
+  "SLOT", # flake8-slots
+  "T10", # flake8-debugger
+  "T20", # flake8-print
+  "TCH", # flake8-type-checking
+  "TID", # flake8-tidy-imports
+  "TRY", # tryceratops
+  "UP", # pyupgrade
+  "W" # pycodestyle warnings
 ]
 
-[tool.coverage.run]
-source = ["comind"]
-branch = true
-parallel = true
-omit = [
-    "*/tests/*",
-    "*/__pycache__/*",
-    "*/site-packages/*",
-]
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["comind"]
 
-[tool.coverage.report]
-precision = 2
-show_missing = true
-skip_covered = false
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"tests/**/*.py" = ["ARG001", "PLR2004", "S101"]

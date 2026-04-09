@@ -5,8 +5,7 @@ All prompts produce deterministic, source-grounded documentation.
 Templates use {{PLACEHOLDER}} substitution.
 """
 
-from typing import List, Dict, Any
-
+from typing import Any
 
 # ─── Grouping Prompt ──────────────────────────────────────────────────
 
@@ -122,7 +121,8 @@ Write a clear overview of this project: what it does, how it's architected, and 
 
 # ─── Template Substitution Helper ─────────────────────────────────────
 
-def fill_template(template: str, vars: Dict[str, str]) -> str:
+
+def fill_template(template: str, vars: dict[str, str]) -> str:
     """Replace {{PLACEHOLDER}} tokens in a template string"""
     result = template
     for key, value in vars.items():
@@ -132,9 +132,8 @@ def fill_template(template: str, vars: Dict[str, str]) -> str:
 
 # ─── Formatting Helpers ───────────────────────────────────────────────
 
-def format_file_list_for_grouping(
-    files: List[Dict[str, Any]]
-) -> str:
+
+def format_file_list_for_grouping(files: list[dict[str, Any]]) -> str:
     """Format file list with exports for the grouping prompt"""
     lines = []
     for f in files:
@@ -147,56 +146,49 @@ def format_file_list_for_grouping(
     return "\n".join(lines)
 
 
-def format_directory_tree(file_paths: List[str]) -> str:
+def format_directory_tree(file_paths: list[str]) -> str:
     """Build a directory tree string from file paths"""
     dirs = set()
     for fp in file_paths:
         parts = fp.replace("\\", "/").split("/")
         for i in range(1, len(parts)):
             dirs.add("/".join(parts[:i]))
-    
+
     sorted_dirs = sorted(dirs)
     if not sorted_dirs:
         return "(flat structure)"
-    
+
     result = "\n".join(sorted_dirs[:50])
     if len(sorted_dirs) > 50:
         result += f"\n... and {len(sorted_dirs) - 50} more directories"
     return result
 
 
-def format_call_edges(
-    edges: List[Dict[str, str]]
-) -> str:
+def format_call_edges(edges: list[dict[str, str]]) -> str:
     """Format call edges as readable text"""
     if not edges:
         return "None"
-    
+
     lines = []
     for e in edges[:30]:
         from_file = short_path(e.get("from_file", ""))
         to_file = short_path(e.get("to_file", ""))
-        lines.append(
-            f"{e.get('from_name', '')} ({from_file}) → {e.get('to_name', '')} ({to_file})"
-        )
+        lines.append(f"{e.get('from_name', '')} ({from_file}) → {e.get('to_name', '')} ({to_file})")
     return "\n".join(lines)
 
 
-def format_processes(
-    processes: List[Dict[str, Any]]
-) -> str:
+def format_processes(processes: list[dict[str, Any]]) -> str:
     """Format process traces as readable text"""
     if not processes:
         return "No execution flows detected for this module."
-    
+
     lines = []
     for p in processes:
         steps_text = "\n".join(
-            f"  {s['step']}. {s['name']} ({short_path(s['file_path'])})"
-            for s in p.get("steps", [])
+            f"  {s['step']}. {s['name']} ({short_path(s['file_path'])})" for s in p.get("steps", [])
         )
         lines.append(f"**{p['label']}** ({p['type']}):\n{steps_text}")
-    
+
     return "\n\n".join(lines)
 
 

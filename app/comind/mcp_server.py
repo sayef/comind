@@ -59,33 +59,33 @@ async def _get_engine(repo_name: str | None = None) -> tuple:
         return _engine_cache[cache_key]
 
     from comind.config import get_settings
+    from comind.search.duckdb_search_engine import create_search_engines
+    from comind.search.query_engine import WikiEnhancedQueryEngine
     from comind.storage.duckdb_backend import DuckDBBackend
     from comind.storage.graph_adapter import GraphAdapter
-    from comind.search.query_engine import WikiEnhancedQueryEngine
-    from comind.search.duckdb_search_engine import create_search_engines
     from comind.wiki.wiki import load_wiki_pages
 
     settings = get_settings()
-    
+
     # Load single shared DuckDB database in read-only mode
     # (allows concurrent queries while indexing is happening)
     db_path = settings.storage.duckdb_path
     if not db_path.exists():
         return None, None, []
-    
+
     backend = DuckDBBackend(str(db_path), read_only=True)
-    
+
     # Wrap in adapter for compatibility
     graph = GraphAdapter(backend)
-    
+
     # Create DuckDB-based search engines
     text_engine, semantic_engine = create_search_engines(graph)
-    
+
     qe = WikiEnhancedQueryEngine(graph)
     await qe.initialize_search_indexes()
 
     loaded = await qe.load_all_indexes(settings.storage.indexes_dir)
-    
+
     # Register search engines for loaded repos
     for rname in loaded:
         if repo_name and rname != repo_name:
@@ -172,7 +172,7 @@ async def find(
     output_format: str = "markdown",
 ) -> str:
     """Search the codebase using hybrid BM25 + semantic search.
-    
+
     Searches both individual symbols (functions, classes) and execution flows (multi-step processes).
     Returns the most relevant results combining both types.
 
@@ -185,10 +185,11 @@ async def find(
     Returns:
         Matching symbols with code snippets, callers/callees counts, wiki excerpts, and relevant execution flows.
     """
-    from comind.utils.markdown_formatter import MarkdownFormatter
-    from fastembed import TextEmbedding
-    from comind.config import get_settings
     import numpy as np
+    from fastembed import TextEmbedding
+
+    from comind.config import get_settings
+    from comind.utils.markdown_formatter import MarkdownFormatter
 
     graph, qe, loaded = await _get_engine(repo_name)
     if repo_name not in loaded:
@@ -210,11 +211,11 @@ async def find(
     settings = get_settings()
     model = TextEmbedding(model_name=settings.search.embedding_model)
     query_embedding = next(model.embed([query]))
-    
+
     process_results = await graph.backend.search_process_queries(
         query_embedding=np.array(query_embedding),
         repo_id=repo_name,
-        limit=5  # Top 5 relevant flows
+        limit=5,  # Top 5 relevant flows
     )
 
     response = FindResponse(
@@ -228,6 +229,7 @@ async def find(
         result_dict = response.model_dump()
         result_dict["execution_flows"] = process_results
         import json
+
         return json.dumps(result_dict, indent=2)
 
     # Format markdown with both symbols and flows
@@ -237,15 +239,17 @@ async def find(
         total_results=response.total,
         include_code=True,
     )
-    
+
     # Append execution flows if found
     if process_results:
         markdown += f"\n\n---\n\n## Relevant Execution Flows ({len(process_results)})\n\n"
         for i, flow in enumerate(process_results, 1):
             markdown += f"### {i}. {flow['process_name']}\n"
-            markdown += f"**Similarity:** {flow['similarity']:.2%} | **Entry:** `{flow['entry_point']}`\n\n"
-            
-            steps = flow.get('steps', [])
+            markdown += (
+                f"**Similarity:** {flow['similarity']:.2%} | **Entry:** `{flow['entry_point']}`\n\n"
+            )
+
+            steps = flow.get("steps", [])
             if steps:
                 markdown += "**Steps:**\n"
                 for step in steps[:5]:  # Show first 5 steps
@@ -253,7 +257,7 @@ async def find(
                 if len(steps) > 5:
                     markdown += f"... and {len(steps) - 5} more steps\n"
             markdown += "\n"
-    
+
     return markdown
 
 
@@ -330,7 +334,7 @@ async def flows(
     output_format: str = "markdown",
 ) -> str:
     """Search for execution flows and processes in the codebase.
-    
+
     Use this to find multi-step execution paths, understand how features work end-to-end,
     or discover architectural patterns. Processes are detected execution flows that show
     how functions call each other across the codebase.
@@ -347,48 +351,48 @@ async def flows(
     graph, qe, loaded = await _get_engine(repo_name)
     if repo_name not in loaded:
         return _missing_repo_msg(repo_name, loaded)
-    
+
     # Generate embedding for query
-    from fastembed import TextEmbedding
-    from comind.config import get_settings
     import numpy as np
-    
+    from fastembed import TextEmbedding
+
+    from comind.config import get_settings
+
     settings = get_settings()
     model = TextEmbedding(model_name=settings.search.embedding_model)
     query_embedding = next(model.embed([query]))
-    
+
     # Search process queries
     results = await graph.backend.search_process_queries(
-        query_embedding=np.array(query_embedding),
-        repo_id=repo_name,
-        limit=min(limit, 20)
+        query_embedding=np.array(query_embedding), repo_id=repo_name, limit=min(limit, 20)
     )
-    
+
     if not results:
         return f"No execution flows found matching '{query}'"
-    
+
     if output_format == "json":
         import json
+
         return json.dumps({"query": query, "flows": results}, indent=2)
-    
+
     # Format as markdown
     lines = [f"# Execution Flows: {query}\n"]
     lines.append(f"Found {len(results)} matching flows\n")
-    
+
     for i, flow in enumerate(results, 1):
         lines.append(f"## {i}. {flow['process_name']}")
         lines.append(f"**Similarity:** {flow['similarity']:.2%}")
-        lines.append(f"**Matched query:** \"{flow['matched_query']}\"")
+        lines.append(f'**Matched query:** "{flow["matched_query"]}"')
         lines.append(f"**Entry point:** `{flow['entry_point']}`")
-        
-        steps = flow.get('steps', [])
+
+        steps = flow.get("steps", [])
         if steps:
             lines.append(f"\n**Execution steps ({len(steps)}):**")
             for step in steps:
                 lines.append(f"{step['step']}. `{step['name']}` — `{step['file_path']}`")
-        
+
         lines.append("")  # Blank line between flows
-    
+
     return "\n".join(lines)
 
 
@@ -417,51 +421,56 @@ async def flows(
     Returns:
         Matching execution flows with step-by-step breakdown and similarity scores.
     """
-    from fastembed import TextEmbedding
     import numpy as np
+    from fastembed import TextEmbedding
+
     from comind.config import get_settings
-    
+
     graph, _, loaded = await _get_engine(repo_name)
     if repo_name not in loaded:
         return _missing_repo_msg(repo_name, loaded)
-    
+
     # Generate query embedding
     settings = get_settings()
     model = TextEmbedding(model_name=settings.search.embedding_model)
     query_embedding = next(model.embed([query]))
-    
+
     # Search process queries
     process_results = await graph.backend.search_process_queries(
-        query_embedding=np.array(query_embedding),
-        repo_id=repo_name,
-        limit=min(limit, 20)
+        query_embedding=np.array(query_embedding), repo_id=repo_name, limit=min(limit, 20)
     )
-    
+
     if output_format == "json":
         import json
-        return json.dumps({
-            "query": query,
-            "repo_name": repo_name,
-            "total": len(process_results),
-            "flows": process_results
-        }, indent=2)
-    
+
+        return json.dumps(
+            {
+                "query": query,
+                "repo_name": repo_name,
+                "total": len(process_results),
+                "flows": process_results,
+            },
+            indent=2,
+        )
+
     # Format markdown
     if not process_results:
         return f"No execution flows found for query: '{query}'"
-    
+
     lines = [
         f"# Execution Flows — `{repo_name}`",
         f"**Query:** {query}",
         f"**Found:** {len(process_results)} flows\n",
     ]
-    
+
     for i, flow in enumerate(process_results, 1):
         lines.append(f"## {i}. {flow['process_name']}")
-        lines.append(f"**Similarity:** {flow['similarity']:.2%} | **Entry:** `{flow['entry_point']}` | **Priority:** {flow['priority']}")
-        lines.append(f"**Matched Query:** \"{flow['matched_query']}\"\n")
-        
-        steps = flow.get('steps', [])
+        lines.append(
+            f"**Similarity:** {flow['similarity']:.2%} | **Entry:** `{flow['entry_point']}` | **Priority:** {flow['priority']}"
+        )
+        lines.append(f'**Matched Query:** "{flow["matched_query"]}"\n')
+
+        steps = flow.get("steps", [])
         if steps:
             lines.append("**Execution Steps:**")
             for step in steps[:10]:  # Show first 10 steps
@@ -469,7 +478,7 @@ async def flows(
             if len(steps) > 10:
                 lines.append(f"... and {len(steps) - 10} more steps")
         lines.append("")
-    
+
     return "\n".join(lines)
 
 
@@ -655,7 +664,7 @@ def _render_guide_md(r: GuideResponse) -> str:
 # ─── grep ────────────────────────────────────────────────────────────────────
 
 
-def _repo_root(repo_name: str) -> "Path | None":
+def _repo_root(repo_name: str) -> Path | None:
     """Resolve the local root directory for an indexed repo."""
     from pathlib import Path
 
@@ -704,7 +713,8 @@ async def grep(
 
     mode_map = {"files": "files_with_matches", "content": "content", "count": "count"}
     result = GrepEngine().search(
-        pattern, root,
+        pattern,
+        root,
         glob=glob,
         output_mode=mode_map.get(mode, "content"),
         context_lines=context_lines,
@@ -796,6 +806,7 @@ async def read(
         File content with line range information.
     """
     import re as _re
+
     from comind.indexing.file_search import FileReader
 
     # Parse :start-end suffix
@@ -820,7 +831,9 @@ async def read(
     if result is None:
         return f"Cannot read '{file_path}' in '{repo_name}' — file not found or path is unsafe."
 
-    header = f"# `{result.file}` (lines {result.start_line}–{result.end_line} of {result.total_lines})\n"
+    header = (
+        f"# `{result.file}` (lines {result.start_line}–{result.end_line} of {result.total_lines})\n"
+    )
     return header + f"```python\n{result.content}\n```"
 
 

@@ -1,5 +1,6 @@
 """Code indexing and analysis"""
-from comind.indexing.indexer import PythonIndexer
-from comind.indexing.incremental_indexer import IncrementalIndexer
 
-__all__ = ['PythonIndexer', 'IncrementalIndexer']
+from comind.indexing.incremental_indexer import IncrementalIndexer
+from comind.indexing.indexer import PythonIndexer
+
+__all__ = ["IncrementalIndexer", "PythonIndexer"]

@@ -11,7 +11,6 @@ Read  — read a file or a line range from a repo-relative path
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import re
 import subprocess
@@ -52,10 +51,10 @@ def _expand_braces(pattern: str) -> list[str]:
 
 @dataclass
 class GrepMatch:
-    file: str          # repo-relative path
+    file: str  # repo-relative path
     line: int
     column: int
-    text: str          # the matched line (stripped)
+    text: str  # the matched line (stripped)
     context_before: list[str] = field(default_factory=list)
     context_after: list[str] = field(default_factory=list)
 
@@ -73,8 +72,8 @@ class GrepResult:
     pattern: str
     output_mode: str
     matches: list[GrepMatch] = field(default_factory=list)
-    files: list[str] = field(default_factory=list)       # for files_with_matches
-    counts: dict[str, int] = field(default_factory=dict) # for count
+    files: list[str] = field(default_factory=list)  # for files_with_matches
+    counts: dict[str, int] = field(default_factory=dict)  # for count
     total: int = 0
     truncated: bool = False
 
@@ -92,7 +91,7 @@ class GrepResult:
 
 @dataclass
 class ReadResult:
-    file: str          # repo-relative path
+    file: str  # repo-relative path
     content: str
     start_line: int
     end_line: int
@@ -123,7 +122,7 @@ class GrepEngine:
         root: Path,
         *,
         glob: str | None = None,
-        output_mode: str = "content",   # "content" | "files_with_matches" | "count"
+        output_mode: str = "content",  # "content" | "files_with_matches" | "count"
         context_lines: int = 2,
         case_sensitive: bool = False,
         max_results: int = 100,
@@ -131,16 +130,20 @@ class GrepEngine:
         result = GrepResult(pattern=pattern, output_mode=output_mode)
 
         try:
-            self._rg(result, pattern, root, glob, output_mode, context_lines,
-                     case_sensitive, max_results)
+            self._rg(
+                result, pattern, root, glob, output_mode, context_lines, case_sensitive, max_results
+            )
         except FileNotFoundError:
             # ripgrep not installed — use Python fallback
-            self._py(result, pattern, root, glob, output_mode, context_lines,
-                     case_sensitive, max_results)
+            self._py(
+                result, pattern, root, glob, output_mode, context_lines, case_sensitive, max_results
+            )
 
         result.total = (
-            len(result.matches) if output_mode == "content"
-            else len(result.files) if output_mode == "files_with_matches"
+            len(result.matches)
+            if output_mode == "content"
+            else len(result.files)
+            if output_mode == "files_with_matches"
             else sum(result.counts.values())
         )
         return result
@@ -172,7 +175,7 @@ class GrepEngine:
                 cmd += ["-g", g]
         cmd += [pattern, str(root)]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
         seen_files: set[str] = set()
         count = 0
 
@@ -239,7 +242,7 @@ class GrepEngine:
         files: list[Path] = []
         for g in globs:
             files.extend(root.rglob(g))
-        files = sorted(set(f for f in files if f.is_file()))
+        files = sorted({f for f in files if f.is_file()})
 
         count = 0
         for path in files:
@@ -260,14 +263,22 @@ class GrepEngine:
                             result.files.append(rel)
                             count += 1
                         break
-                    elif output_mode == "count":
+                    if output_mode == "count":
                         result.counts[rel] = result.counts.get(rel, 0) + 1
                     else:
                         before = [lines[j] for j in range(max(0, i - context_lines), i)]
-                        after = [lines[j] for j in range(i + 1, min(len(lines), i + 1 + context_lines))]
+                        after = [
+                            lines[j] for j in range(i + 1, min(len(lines), i + 1 + context_lines))
+                        ]
                         result.matches.append(
-                            GrepMatch(file=rel, line=i + 1, column=0, text=line,
-                                      context_before=before, context_after=after)
+                            GrepMatch(
+                                file=rel,
+                                line=i + 1,
+                                column=0,
+                                text=line,
+                                context_before=before,
+                                context_after=after,
+                            )
                         )
                         count += 1
 

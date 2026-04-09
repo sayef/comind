@@ -11,7 +11,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ─── shared primitives ────────────────────────────────────────────────────────
 
 
@@ -30,7 +29,7 @@ class SymbolRef(BaseModel):
     docstring: str | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SymbolRef":
+    def from_dict(cls, d: dict) -> SymbolRef:
         return cls(
             id=d.get("id", ""),
             name=d.get("name", ""),
@@ -102,7 +101,7 @@ class FindResult(BaseModel):
     callees_count: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> "FindResult":
+    def from_dict(cls, d: dict) -> FindResult:
         sym = d.get("symbol", {})
         bd = d.get("score_breakdown", {})
         snip = d.get("code_snippet")
@@ -163,7 +162,7 @@ class ZoomResponse(BaseModel):
     depth: int
 
     @classmethod
-    def from_dict(cls, d: dict, depth: int = 2) -> "ZoomResponse":
+    def from_dict(cls, d: dict, depth: int = 2) -> ZoomResponse:
         rels = d.get("relationships", {})
 
         def _to_refs(items: list[dict]) -> list[SymbolRef]:
@@ -217,7 +216,7 @@ class RippleResponse(BaseModel):
     total_affected: int
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RippleResponse":
+    def from_dict(cls, d: dict) -> RippleResponse:
         sym = SymbolRef.from_dict(d.get("symbol", {}))
 
         # Flatten upstream/downstream into a single affected list with depth tags
@@ -283,7 +282,7 @@ class ThreadResponse(BaseModel):
     total_steps: int
 
     @classmethod
-    def from_dict(cls, d: dict, entry_point: str) -> "ThreadResponse":
+    def from_dict(cls, d: dict, entry_point: str) -> ThreadResponse:
         steps: list[ThreadStep] = []
         for raw in d.get("flow", d.get("steps", [])):
             if isinstance(raw, dict):
