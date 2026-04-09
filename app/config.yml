@@ -1,0 +1,93 @@
+# CoMind Configuration
+# YAML-based configuration for CoMind service
+
+# ============================================================================
+# Application Settings
+# ============================================================================
+app:
+  name: CoMind
+  version: 0.1.0
+  debug: false
+  environment: development  # development, staging, production
+
+# ============================================================================
+# Storage - Centralized data storage for all CoMind data
+# ============================================================================
+storage:
+  # Base directory for all CoMind data (indexes, graphs, wiki, cache)
+  # Tilde (~) will be expanded to home directory
+  data_dir: ~/.comind/data
+  
+  # Individual directories are auto-generated from data_dir:
+  # - indexes_dir: {data_dir}/indexes
+  # - graphs_dir: {data_dir}/graphs
+  # - wiki_dir: {data_dir}/wiki
+  # - cache_dir: {data_dir}/cache
+
+# ============================================================================
+# Search - Search engine configuration
+# ============================================================================
+search:
+  enable_text_search: true
+  enable_semantic_search: true
+  embedding_model: BAAI/bge-small-en-v1.5
+  max_results: 10
+
+# ============================================================================
+# Wiki - LLM-powered documentation generation
+# ============================================================================
+wiki:
+  enable_llm: true
+  llm_provider: openai  # openai, anthropic, local
+  llm_model: gpt-4o-mini
+  # API keys should be set via environment variables:
+  # - OPENAI_API_KEY for OpenAI
+  # - ANTHROPIC_API_KEY for Anthropic
+  # - Or use COMIND_WIKI_LLM_API_KEY for any provider
+  llm_api_key: null
+  llm_base_url: null  # Optional: custom LLM endpoint
+
+# ============================================================================
+# Indexing - Code indexing configuration
+# ============================================================================
+indexing:
+  max_file_size_mb: 10
+  max_workers: 4
+  exclude_patterns:
+    - "**/__pycache__/**"
+    - "**/.git/**"
+    - "**/.venv/**"
+    - "**/venv/**"
+    - "**/node_modules/**"
+    - "**/.pytest_cache/**"
+    - "**/*.pyc"
+
+# ============================================================================
+# Process Detection - Execution flow detection
+# ============================================================================
+process_detection:
+  max_trace_depth: 10
+  max_branching: 4
+  max_processes: 75
+  min_steps: 3
+
+# ============================================================================
+# Server - API server configuration
+# ============================================================================
+server:
+  host: 0.0.0.0
+  port: 8000
+  reload: false
+  workers: 1
+  log_level: info  # debug, info, warning, error, critical
+  cors_origins:
+    - "*"
+
+# ============================================================================
+# MCP - Model Context Protocol server configuration
+# ============================================================================
+mcp:
+  server_name: comind-python
+  server_version: 0.1.0
+  enable_stdio: true
+  enable_http: false
