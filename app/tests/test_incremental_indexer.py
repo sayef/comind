@@ -3,7 +3,6 @@ Unit tests for incremental indexer
 """
 
 import hashlib
-import os
 import tempfile
 from pathlib import Path
 
@@ -18,8 +17,8 @@ from comind.storage.duckdb_backend import DuckDBBackend
 def temp_db():
     """Create a temporary DuckDB database for testing"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "test.duckdb")
-        backend = DuckDBBackend(db_path)
+        db_path = Path(tmpdir) / "test.duckdb"
+        backend = DuckDBBackend(str(db_path))
         yield backend
         backend.close()
 
@@ -75,7 +74,7 @@ class TestIncrementalIndexer:
         )
 
         # Update file metadata to simulate indexed state
-        for file_path, status in changed_files.items():
+        for file_path in changed_files:
             full_path = temp_repo / file_path
             file_hash = incremental_indexer._compute_file_hash(full_path)
             await temp_db.update_file_metadata(
@@ -105,7 +104,7 @@ class TestIncrementalIndexer:
         )
 
         # Update metadata
-        for file_path, status in changed_files.items():
+        for file_path in changed_files:
             full_path = temp_repo / file_path
             file_hash = incremental_indexer._compute_file_hash(full_path)
             await temp_db.update_file_metadata(
@@ -140,7 +139,7 @@ class TestIncrementalIndexer:
         )
 
         # Update metadata
-        for file_path, status in changed_files.items():
+        for file_path in changed_files:
             full_path = temp_repo / file_path
             file_hash = incremental_indexer._compute_file_hash(full_path)
             await temp_db.update_file_metadata(

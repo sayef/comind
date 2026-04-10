@@ -7,6 +7,8 @@ and structural information for the knowledge graph.
 
 import asyncio
 import hashlib
+from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +50,10 @@ def is_binary_file(file_path: Path) -> bool:
             # Try to decode as UTF-8
             try:
                 chunk.decode("utf-8")
-                return False
             except UnicodeDecodeError:
                 return True
+            else:
+                return False
     except Exception:
         return True
 
@@ -126,8 +129,8 @@ class PythonSymbolExtractor:
             )
 
             return self.symbols, self.relationships, self.unresolved_calls
-        except Exception as e:
-            logger.error("Symbol extraction failed", file=self.file_path, error=str(e))
+        except Exception:
+            logger.exception("Symbol extraction failed", file=self.file_path)
             return [], [], []
 
     def _get_signature_from_source(self, node: Node, include_decorators: bool = True) -> str:
@@ -143,7 +146,7 @@ class PythonSymbolExtractor:
             Original signature text from source
         """
         start_line = node.start_point[0]
-        end_line = node.end_point[0]
+        _end_line = node.end_point[0]
 
         # For functions/classes, we want just the definition line(s), not the body
         # Find the colon that ends the signature
@@ -296,12 +299,14 @@ class PythonSymbolExtractor:
         class_name = name_node.text.decode("utf8") if name_node else "UnknownClass"
 
         # Get base classes (for metadata)
-        bases = []
+        bases: list[str] = []
         superclasses_node = node.child_by_field_name("superclasses")
         if superclasses_node:
-            for child in superclasses_node.children:
-                if child.type == "identifier" or child.type == "attribute":
-                    bases.append(child.text.decode("utf8"))
+            bases.extend(
+                child.text.decode("utf8")
+                for child in superclasses_node.children
+                if child.type in {"identifier", "attribute"}
+            )
 
         # Extract original signature from source (language-agnostic)
         signature = self._get_signature_from_source(node, include_decorators=True)
@@ -348,9 +353,9 @@ class PythonSymbolExtractor:
                 if expr and expr.type == "string":
                     # Remove quotes from docstring
                     text = expr.text.decode("utf8")
-                    if text.startswith('"""') or text.startswith("'''"):
+                    if text.startswith(('"""', "'''")):
                         return text[3:-3].strip()
-                    if text.startswith('"') or text.startswith("'"):
+                    if text.startswith(('"', "'")):
                         return text[1:-1].strip()
         return None
 
@@ -476,15 +481,13 @@ class PythonSymbolExtractor:
 
     def _extract_import(self, node: Node) -> None:
         """Extract import statements from tree-sitter node"""
-        # import foo, bar, baz
         for child in node.children:
-            if child.type == "dotted_name" or child.type == "identifier":
+            if child.type in {"dotted_name", "identifier"}:
                 module_name = child.text.decode("utf8")
                 self.imports.append((module_name, module_name, node.start_point[0] + 1))
 
     def _extract_import_from(self, node: Node) -> None:
         """Extract from-import statements from tree-sitter node"""
-        # from foo import bar
         module_name = ""
         module_node = node.child_by_field_name("module_name")
         if module_node:
@@ -492,11 +495,10 @@ class PythonSymbolExtractor:
 
         # Get imported names
         for child in node.children:
-            if child.type == "dotted_name" or child.type == "identifier":
-                if child != module_node:  # Skip the module name itself
-                    imported_name = child.text.decode("utf8")
-                    full_name = f"{module_name}.{imported_name}" if module_name else imported_name
-                    self.imports.append((full_name, imported_name, node.start_point[0] + 1))
+            if child.type in {"dotted_name", "identifier"} and child != module_node:
+                imported_name = child.text.decode("utf8")
+                full_name = f"{module_name}.{imported_name}" if module_name else imported_name
+                self.imports.append((full_name, imported_name, node.start_point[0] + 1))
 
     def _extract_function_calls(self, func_symbol: Symbol, node: Node):
         """Extract function calls within a function using tree-sitter"""
@@ -524,7 +526,7 @@ class PythonSymbolExtractor:
                     # Capture the full call expression text as the call site snippet
                     call_text = n.text.decode("utf8").split("\n")[0].strip()  # first line only
                     if name and name != func_symbol.name:
-                        self.unresolved_calls.append((func_symbol.id, name, call_line, call_text))
+                        self.unresolved_calls.append((func_symbol.id, name, call_line, call_text))  # type: ignore[arg-type]
             for child in n.children:
                 find_calls(child)
 
@@ -580,7 +582,7 @@ class ConditionalFlowExtractor:
             "line_end": 15
         }
         """
-        branches = []
+        branches: list[Any] = []
 
         body_node = func_node.child_by_field_name("body")
         if not body_node:
@@ -773,10 +775,8 @@ class PythonIndexer:
         # Convert to relative path if we have a repo root
         relative_path = file_path
         if self.repo_root:
-            try:
+            with suppress(ValueError):
                 relative_path = str(Path(file_path).relative_to(self.repo_root))
-            except ValueError:
-                pass
 
         # Extract symbols (use relative path)
         extractor = PythonSymbolExtractor(relative_path, source_code)
@@ -812,7 +812,7 @@ class PythonIndexer:
         }
 
     async def index_directory(
-        self, directory_path: str, recursive: bool = True, progress_callback: callable | None = None
+        self, directory_path: str, recursive: bool = True, progress_callback: Callable | None = None
     ) -> dict[str, Any]:
         """Index all Python files in a directory"""
         path = Path(directory_path)
@@ -824,10 +824,7 @@ class PythonIndexer:
             return {"error": "Directory not found"}
 
         # Find Python files
-        if recursive:
-            python_files = list(path.rglob("*.py"))
-        else:
-            python_files = list(path.glob("*.py"))
+        python_files = list(path.rglob("*.py")) if recursive else list(path.glob("*.py"))
 
         logger.debug("Found Python files before filtering", count=len(python_files))
 
@@ -891,16 +888,13 @@ class PythonIndexer:
                 path = Path(file_path)
                 if not path.exists() or path.suffix != ".py":
                     return None, "File not found or not a Python file"
-
                 with open(path, encoding="utf-8") as f:
                     source_code = f.read()
 
                 relative_path = str(file_path)
                 if self.repo_root:
-                    try:
+                    with suppress(ValueError):
                         relative_path = str(Path(file_path).relative_to(self.repo_root))
-                    except ValueError:
-                        pass
 
                 from comind.indexing.indexer import PythonSymbolExtractor
 
@@ -931,7 +925,7 @@ class PythonIndexer:
                 *[process_file(str(fp)) for fp in batch], return_exceptions=True
             )
 
-            for result, error in batch_results:
+            for result, error in batch_results:  # type: ignore[misc]
                 files_processed += 1
 
                 if isinstance(result, Exception):
@@ -1203,8 +1197,8 @@ class PythonIndexer:
         self,
         repo_path: str,
         repo_id: str | None = None,
-        force: bool = False,
-        progress_callback: callable | None = None,
+        _force: bool = False,
+        progress_callback: Callable | None = None,
     ) -> dict[str, Any]:
         """Index a Python repository
 

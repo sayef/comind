@@ -2,8 +2,8 @@
 Unit tests for DuckDB backend
 """
 
-import os
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,8 +16,8 @@ from comind.storage.duckdb_backend import DuckDBBackend
 def temp_db():
     """Create a temporary DuckDB database for testing"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "test.duckdb")
-        backend = DuckDBBackend(db_path)
+        db_path = Path(tmpdir) / "test.duckdb"
+        backend = DuckDBBackend(str(db_path))
         yield backend
         backend.close()
 
@@ -65,7 +65,7 @@ class TestDuckDBBackend:
 
         # Check that tables exist using DuckDB's information schema
         tables = temp_db.conn.execute("""
-            SELECT table_name FROM information_schema.tables 
+            SELECT table_name FROM information_schema.tables
             WHERE table_schema = 'main'
         """).fetchall()
 
@@ -129,7 +129,7 @@ class TestDuckDBBackend:
         # Verify relationship was added
         result = temp_db.conn.execute(
             """
-            SELECT * FROM relationships 
+            SELECT * FROM relationships
             WHERE source_id = ? AND target_id = ?
         """,
             (relationship.source_id, relationship.target_id),

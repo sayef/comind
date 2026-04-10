@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from comind.core.graph import Symbol
 from comind.logging_config import get_logger
-from comind.storage.graph_adapter import KnowledgeGraph
+
+if TYPE_CHECKING:
+    from comind.core.graph import Symbol
+    from comind.storage.graph_adapter import KnowledgeGraph
 
 logger = get_logger(__name__)
 
@@ -129,9 +132,7 @@ class StyleExtractor:
         all_symbols = await self.graph.get_all_symbols()
 
         # Filter by repo_id
-        symbols = [s for s in all_symbols if s.repo_id == repo_id]
-
-        return symbols
+        return [s for s in all_symbols if s.repo_id == repo_id]
 
     async def _analyze_typing(self, symbols: list[Symbol]):
         """Analyze type hint usage patterns"""
@@ -165,11 +166,11 @@ class StyleExtractor:
                 return_typed += 1
 
             # Check for advanced typing
-            for pattern_name in advanced_patterns:
+            for pattern_name, pattern_stats in advanced_patterns.items():
                 if pattern_name in signature:
-                    advanced_patterns[pattern_name].count += 1
-                    advanced_patterns[pattern_name].examples.append(signature[:100])
-                advanced_patterns[pattern_name].total += 1
+                    pattern_stats.count += 1
+                    pattern_stats.examples.append(signature[:100])
+                pattern_stats.total += 1
 
         self.patterns.type_hints_usage = PatternStats(count=typed_functions, total=len(functions))
 
@@ -213,7 +214,7 @@ class StyleExtractor:
             return
 
         documented = 0
-        docstring_styles = Counter()
+        docstring_styles: Counter = Counter()
 
         for func in functions:
             # Check if function has docstring
@@ -293,5 +294,4 @@ class StyleExtractor:
 async def extract_style_guide(graph: KnowledgeGraph, repo_id: str) -> StylePatterns:
     """Main entry point for style guide extraction"""
     extractor = StyleExtractor(graph)
-    patterns = await extractor.analyze_repository(repo_id)
-    return patterns
+    return await extractor.analyze_repository(repo_id)

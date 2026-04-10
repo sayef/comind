@@ -16,10 +16,51 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
+import subprocess
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
+
+import git
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+
+from comind.config import get_settings
+from comind.indexing.incremental_indexer import IncrementalIndexer
+from comind.indexing.indexer import PythonIndexer
+from comind.llm.llm_client import LLMClient, resolve_llm_config
+from comind.llm.query_association_indexer import QueryAssociationIndexer
+from comind.models import (
+    FindResponse,
+    FindResult,
+    IngestResult,
+    RepoInfo,
+    ReposResponse,
+)
+from comind.search.duckdb_search_engine import DuckDBSemanticSearchEngine, create_search_engines
+from comind.search.query_engine import WikiEnhancedQueryEngine
+from comind.storage.duckdb_backend import DuckDBBackend
+from comind.storage.graph_adapter import GraphAdapter
+from comind.style.style_extractor import extract_style_guide
+from comind.style.style_guide_generator import generate_style_guide_markdown
+from comind.style.style_guide_store import StyleGuideStore
+from comind.utils.markdown_formatter import MarkdownFormatter
+from comind.utils.snippet_extractor import CodeSnippetExtractor
+from comind.wiki.graph_wiki_generator import GraphWikiGenerator
+from comind.wiki.wiki import generate_wiki as _gen_wiki, load_wiki_pages
 
 # Silence noisy third-party libraries; keep WARNING+ for all others so
 # real errors are still visible.  Rich console is the primary UI output.
@@ -52,20 +93,6 @@ try:
     _tqdm_module.tqdm.__init__ = _silent_tqdm_init
 except Exception:
     pass
-
-import typer
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from rich.table import Table
-
-from comind.models import (
-    FindResponse,
-    FindResult,
-    IngestResult,
-    RepoInfo,
-    ReposResponse,
-)
 
 console = Console()
 err = Console(stderr=True)
@@ -103,12 +130,6 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
 
     Returns (local_path, was_cloned).  Raises RuntimeError on failure.
     """
-    import os
-
-    import git
-
-    from comind.config import get_settings
-
     settings = get_settings()
     repo_dir = settings.storage.repos_dir / repo_name
     settings.storage.repos_dir.mkdir(parents=True, exist_ok=True)
@@ -119,8 +140,6 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
         gitlab_token = gitlab_token.strip()
     if gitlab_token and "gitlab.com" in repo_url:
         # Strip any existing credentials from URL
-        import re
-
         clean_url = re.sub(r"https://[^@]+@gitlab\.com", "https://gitlab.com", repo_url)
         if clean_url.startswith("https://gitlab.com"):
             clone_url = clean_url.replace(
@@ -145,8 +164,6 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
         shutil.rmtree(repo_dir, ignore_errors=True)
 
     try:
-        import subprocess
-
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
 
@@ -164,23 +181,19 @@ def _clone_or_pull(repo_url: str, repo_name: str, branch: str) -> tuple[str, boo
         ]
 
         result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {result.stderr}")
     except Exception as exc:
         shutil.rmtree(repo_dir, ignore_errors=True)
         raise RuntimeError(f"git clone failed: {exc}") from exc
+
+    if result.returncode != 0:
+        shutil.rmtree(repo_dir, ignore_errors=True)
+        raise RuntimeError(f"git clone failed: {result.stderr}")
 
     return str(repo_dir), True
 
 
 async def _load_engine(repo_name: str | None = None):
     """Initialise engine and load persisted state from ~/.comind/data."""
-    from comind.config import get_settings
-    from comind.search.query_engine import WikiEnhancedQueryEngine
-    from comind.storage.duckdb_backend import DuckDBBackend
-    from comind.storage.graph_adapter import GraphAdapter
-    from comind.wiki.wiki import load_wiki_pages
-
     settings = get_settings()
 
     # Load single shared DuckDB database
@@ -197,7 +210,6 @@ async def _load_engine(repo_name: str | None = None):
     await qe.initialize_search_indexes()
 
     # Register DuckDB-backed search engines for all repos before loading
-    from comind.search.duckdb_search_engine import create_search_engines
 
     text_engine, semantic_engine = create_search_engines(graph)
 
@@ -246,10 +258,6 @@ def _resolve_repo_root(repo_name: str) -> Path:
     Reads repo_path from metadata.json (preferred) or repo_path.txt (legacy).
     Falls back to the default git clone location.
     """
-    import json as _json
-
-    from comind.config import get_settings
-
     settings = get_settings()
     repo_index_dir = settings.storage.indexes_dir / repo_name
 
@@ -257,7 +265,7 @@ def _resolve_repo_root(repo_name: str) -> Path:
     metadata_file = repo_index_dir / "metadata.json"
     if metadata_file.exists():
         try:
-            meta = _json.loads(metadata_file.read_text())
+            meta = json.loads(metadata_file.read_text())
             rp = meta.get("repo_path")
             if rp:
                 root = Path(rp)
@@ -265,13 +273,6 @@ def _resolve_repo_root(repo_name: str) -> Path:
                     return root
         except Exception:
             pass
-
-    # Legacy: repo_path.txt
-    path_file = repo_index_dir / "repo_path.txt"
-    if path_file.exists():
-        root = Path(path_file.read_text().strip())
-        if root.exists():
-            return root
 
     # fallback: git clone location
     fallback = settings.storage.repos_dir / repo_name
@@ -343,14 +344,6 @@ async def _ingest(
     gen_style: bool = True,
     gen_queries: bool = False,
 ) -> None:
-    from comind.config import get_settings
-    from comind.indexing.incremental_indexer import IncrementalIndexer
-    from comind.indexing.indexer import PythonIndexer
-    from comind.search.duckdb_search_engine import DuckDBSemanticSearchEngine, create_search_engines
-    from comind.search.query_engine import WikiEnhancedQueryEngine
-    from comind.storage.duckdb_backend import DuckDBBackend
-    from comind.storage.graph_adapter import GraphAdapter
-
     settings = get_settings()
     start = time.time()
     is_git = _is_git_url(repo)
@@ -374,17 +367,6 @@ async def _ingest(
         console.print(f"[bold]Ingesting[/] [cyan]{repo_path}[/] as [cyan]{repo_name}[/]")
 
     repo_id = repo_name
-
-    # ── lazy imports for optional phases ─────────────────────────────────
-    if gen_wiki:
-        from comind.wiki.wiki import generate_wiki as _gen_wiki, load_wiki_pages
-    if gen_style:
-        from comind.style.style_extractor import extract_style_guide
-        from comind.style.style_guide_generator import generate_style_guide_markdown
-        from comind.style.style_guide_store import StyleGuideStore
-    if gen_queries:
-        from comind.llm.llm_client import resolve_llm_config
-        from comind.llm.query_association_indexer import QueryAssociationIndexer
 
     # ── init DuckDB backend (single shared database) ─────────────────────
     db_path = settings.storage.duckdb_path
@@ -416,8 +398,6 @@ async def _ingest(
         return f"[cyan]{phase}/{total_phases}  {label}"
 
     wiki_pages_count = 0
-
-    from rich.progress import BarColumn, TaskProgressColumn
 
     with Progress(
         SpinnerColumn(),
@@ -471,7 +451,7 @@ async def _ingest(
                 )
 
         index_result = await indexer.index_repository(
-            repo_path=repo_path, repo_id=repo_id, force=force, progress_callback=on_progress
+            repo_path=repo_path, repo_id=repo_id, _force=force, progress_callback=on_progress
         )
         if "error" in index_result:
             err.print(f"[red]Indexing failed:[/] {index_result['error']}")
@@ -575,10 +555,6 @@ async def _ingest(
 
             # phase — annotate graph nodes with per-symbol descriptions
             t = prog.add_task(_phase("Annotating nodes…"), total=100, transient=True)
-            from comind.llm.llm_client import LLMClient, resolve_llm_config
-            from comind.utils.snippet_extractor import CodeSnippetExtractor
-            from comind.wiki.graph_wiki_generator import GraphWikiGenerator
-
             _llm_cfg = resolve_llm_config({})
             _llm = LLMClient(_llm_cfg) if _llm_cfg.api_key else None
             _snippet_extractor = CodeSnippetExtractor(repo_path)
@@ -717,8 +693,6 @@ def search(
 
 
 async def _find(query: str, repo_name: str, limit: int, include_code: bool, output: str) -> None:
-    from comind.utils.markdown_formatter import MarkdownFormatter
-
     console.print(f"[dim]Loading [cyan]{repo_name}[/]…[/]")
     _, qe, loaded = await _load_engine(repo_name)
     _require_repo(repo_name, loaded)
@@ -733,10 +707,8 @@ async def _find(query: str, repo_name: str, limit: int, include_code: bool, outp
 
     parsed_results = []
     for r in raw.get("results", []):
-        try:
+        with suppress(Exception):
             parsed_results.append(FindResult.from_dict(r))
-        except Exception:
-            pass
     response = FindResponse(
         query=query,
         repo_name=repo_name,
@@ -890,7 +862,7 @@ def read(
         console.print_json(json.dumps(result.to_dict()))
         return
 
-    header = f"[cyan]{result.file}[/] lines [bold]{result.start_line}–{result.end_line}[/] / {result.total_lines}"
+    header = f"[cyan]{result.file}[/] lines [bold]{result.start_line}-{result.end_line}[/] / {result.total_lines}"
     console.print(header)
     console.print("```")
     console.print(result.content)

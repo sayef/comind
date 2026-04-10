@@ -4,6 +4,7 @@ Wiki generator for GitNexus Python
 LLM-powered documentation generation from knowledge graph.
 """
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -76,9 +77,7 @@ async def generate_wiki(
     )
 
     # Run generation
-    result = await generator.run()
-
-    return result
+    return await generator.run()
 
 
 async def load_wiki_pages(wiki_dir: str) -> list[WikiPage]:
@@ -100,8 +99,7 @@ async def load_wiki_pages(wiki_dir: str) -> list[WikiPage]:
         if md_file.name == "README.md":
             continue  # Skip overview page
 
-        with open(md_file, encoding="utf-8") as f:
-            content = f.read()
+        content = await asyncio.to_thread(md_file.read_text, encoding="utf-8")
 
         # Extract title from first heading
         title = md_file.stem.replace("-", " ").title()

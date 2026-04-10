@@ -48,7 +48,7 @@ class GitignoreHandler:
         # Load patterns from each file
         for ignore_file in all_ignore_files:
             try:
-                with open(ignore_file, encoding="utf-8") as f:
+                with Path(ignore_file).open(encoding="utf-8") as f:
                     patterns = f.read().splitlines()
 
                 # Filter out comments and empty lines
@@ -86,11 +86,7 @@ class GitignoreHandler:
             rel_path_str = str(rel_path)
 
             # Check against all loaded patterns
-            for spec in self.patterns:
-                if spec.match_file(rel_path_str):
-                    return True
-
-            return False
+            return any(spec.match_file(rel_path_str) for spec in self.patterns)
         except ValueError:
             # File is not under repo root
             return False
@@ -111,11 +107,7 @@ class GitignoreHandler:
             rel_path_str = str(rel_path) + "/"  # Add trailing slash for directory matching
 
             # Check against all loaded patterns
-            for spec in self.patterns:
-                if spec.match_file(rel_path_str):
-                    return True
-
-            return False
+            return any(spec.match_file(rel_path_str) for spec in self.patterns)
         except ValueError:
             # Directory is not under repo root
             return False
@@ -188,7 +180,7 @@ def create_default_comindignore(repo_root: Path):
     default_patterns = handler.get_default_patterns()
 
     try:
-        with open(comindignore_path, "w", encoding="utf-8") as f:
+        with Path(comindignore_path).open("w", encoding="utf-8") as f:
             f.write("# CoMind ignore patterns\n")
             f.write("# This file uses gitignore syntax\n\n")
             for pattern in default_patterns:

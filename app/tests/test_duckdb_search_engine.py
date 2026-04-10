@@ -2,8 +2,9 @@
 Unit tests for DuckDB search engines
 """
 
-import os
 import tempfile
+from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -20,8 +21,8 @@ from comind.storage.duckdb_backend import DuckDBBackend
 def temp_db():
     """Create a temporary DuckDB database for testing"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "test.duckdb")
-        backend = DuckDBBackend(db_path)
+        db_path = Path(tmpdir) / "test.duckdb"
+        backend = DuckDBBackend(str(db_path))
         yield backend
         backend.close()
 
@@ -105,8 +106,6 @@ class TestDuckDBTextSearchEngine:
     @pytest.mark.asyncio
     async def test_search_returns_scores(self, temp_db, sample_symbols):
         """Test that search returns symbol IDs and scores"""
-        from decimal import Decimal
-
         for symbol in sample_symbols:
             await temp_db.add_symbol(symbol)
 
@@ -237,7 +236,7 @@ class TestSearchEngineFactory:
     @pytest.mark.asyncio
     async def test_create_with_custom_model(self, temp_db):
         """Test factory with custom embedding model"""
-        text_engine, semantic_engine = create_search_engines(
+        _text_engine, semantic_engine = create_search_engines(
             temp_db, embedding_model="custom-model"
         )
 

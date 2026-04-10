@@ -74,7 +74,7 @@ class WikiGraphLinker:
 
     def _extract_mentions(self, content: str) -> list[SymbolMention]:
         """Extract symbol mentions from wiki markdown"""
-        mentions = []
+        mentions: list[SymbolMention] = []
         lines = content.split("\n")
         current_section = ""
 
@@ -86,15 +86,15 @@ class WikiGraphLinker:
                 continue
 
             # Extract function mentions: `function()`
-            for match in self.patterns["function"].finditer(line):
-                mentions.append(
-                    SymbolMention(
-                        name=match.group(1),
-                        context=line.strip(),
-                        line_number=line_num,
-                        section=current_section,
-                    )
+            mentions.extend(
+                SymbolMention(
+                    name=match.group(1),
+                    context=line.strip(),
+                    line_number=line_num,
+                    section=current_section,
                 )
+                for match in self.patterns["function"].finditer(line)
+            )
 
             # Extract class mentions: `ClassName`
             for match in self.patterns["class"].finditer(line):
@@ -112,7 +112,7 @@ class WikiGraphLinker:
 
         return mentions
 
-    async def _match_symbols(self, mentions: list[SymbolMention], page_id: str) -> list[Symbol]:
+    async def _match_symbols(self, mentions: list[SymbolMention], _page_id: str) -> list[Symbol]:
         """Match symbol mentions to graph symbols"""
         matched = []
         seen_ids = set()
@@ -135,20 +135,18 @@ class WikiGraphLinker:
 
     async def _find_symbol_candidates(self, name: str) -> list[Symbol]:
         """Find symbols matching the given name"""
-        candidates = []
-
         # Search all symbols in graph
         all_symbols = await self.graph.get_all_symbols()
 
-        for symbol in all_symbols:
+        return [
+            symbol
+            for symbol in all_symbols
             if (
                 symbol.name == name
                 or symbol.name.endswith(f".{name}")
                 or symbol.name.endswith(f"/{name}")
-            ):
-                candidates.append(symbol)
-
-        return candidates
+            )
+        ]
 
     def _disambiguate(self, candidates: list[Symbol], mention: SymbolMention) -> Symbol | None:
         """Disambiguate between multiple symbol candidates"""

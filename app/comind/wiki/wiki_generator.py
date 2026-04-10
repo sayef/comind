@@ -12,8 +12,10 @@ Supports incremental updates via git diff + module-file mapping.
 
 import asyncio
 import json
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +104,7 @@ class WikiGenerator:
         self.max_tokens_per_module = max_tokens_per_module
         self.concurrency = concurrency
         self.force = force
-        self.on_progress = on_progress or (lambda *args: None)
+        self.on_progress = on_progress or (lambda *_args: None)
         self.failed_modules: list[str] = []
         self.last_percent = 0
 
@@ -152,9 +154,7 @@ class WikiGenerator:
                 md_file.unlink()
 
         # Run full generation
-        result = await self._full_generation(current_commit)
-
-        return result
+        return await self._full_generation(current_commit)
 
     async def _full_generation(self, current_commit: str) -> WikiRunResult:
         """Full wiki generation pipeline"""
@@ -169,7 +169,7 @@ class WikiGenerator:
         source_files = [f for f in all_files if self._is_source_file(f)]
 
         if not source_files:
-            raise Exception("No source files found in the knowledge graph")
+            raise ValueError("No source files found in the knowledge graph")
 
         # Build enriched file list
         export_map = {f["file_path"]: f for f in files_with_exports}
@@ -201,9 +201,7 @@ class WikiGenerator:
         leaves, parents = self._flatten_module_tree(module_tree)
 
         # Process leaf modules in parallel
-        leaf_tasks = []
-        for node in leaves:
-            leaf_tasks.append(self._generate_leaf_page(node))
+        leaf_tasks = [self._generate_leaf_page(node) for node in leaves]
 
         # Run with concurrency limit
         for i in range(0, len(leaf_tasks), self.concurrency):
@@ -258,10 +256,10 @@ class WikiGenerator:
         # Check for existing snapshot
         snapshot_path = self.wiki_dir / "first_module_tree.json"
         if snapshot_path.exists() and not self.force:
-            with open(snapshot_path) as f:
-                data = json.load(f)
-                self._progress("grouping", 25, "Using cached module tree")
-                return [self._dict_to_node(n) for n in data]
+            data = await asyncio.to_thread(snapshot_path.read_text, encoding="utf-8")
+            snapshot_data = json.loads(data)
+            self._progress("grouping", 25, "Using cached module tree")
+            return [self._dict_to_node(n) for n in snapshot_data]
 
         # Call LLM to group files into modules
         self._progress("grouping", 15, "Grouping files into modules...")
@@ -298,8 +296,8 @@ class WikiGenerator:
             )
 
         # Save snapshot
-        with open(snapshot_path, "w") as f:
-            json.dump([self._node_to_dict(n) for n in tree], f, indent=2)
+        snapshot_content = json.dumps([self._node_to_dict(n) for n in tree], indent=2)
+        await asyncio.to_thread(snapshot_path.write_text, snapshot_content, encoding="utf-8")
 
         self._progress("grouping", 28, f"Created {len(tree)} modules")
         return tree
@@ -345,7 +343,7 @@ class WikiGenerator:
         )
 
         # Save page
-        with open(page_path, "w") as f:
+        with page_path.open("w") as f:
             f.write(response.content)
 
     async def _generate_parent_page(self, node: ModuleTreeNode):
@@ -359,8 +357,8 @@ class WikiGenerator:
         for child in node.children or []:
             child_path = self.wiki_dir / f"{child.slug}.md"
             if child_path.exists():
-                with open(child_path) as f:
-                    children_docs.append(f"## {child.name}\n\n{f.read()}")
+                child_content = await asyncio.to_thread(child_path.read_text, encoding="utf-8")
+                children_docs.append(f"## {child.name}\n\n{child_content}")
 
         # Get cross-module data
         all_files = node.files
@@ -392,7 +390,7 @@ class WikiGenerator:
         )
 
         # Save page
-        with open(page_path, "w") as f:
+        with page_path.open("w") as f:
             f.write(response.content)
 
     async def _generate_overview(self, module_tree: list[ModuleTreeNode]):
@@ -402,12 +400,11 @@ class WikiGenerator:
         for node in module_tree:
             page_path = self.wiki_dir / f"{node.slug}.md"
             if page_path.exists():
-                with open(page_path) as f:
-                    content = f.read()
-                    # Extract first paragraph as summary
-                    lines = content.split("\n")
-                    summary = "\n".join(lines[:5])
-                    module_summaries.append(f"### {node.name}\n\n{summary}")
+                content = await asyncio.to_thread(page_path.read_text, encoding="utf-8")
+                # Extract first paragraph as summary
+                lines = content.split("\n")
+                summary = "\n".join(lines[:5])
+                module_summaries.append(f"### {node.name}\n\n{summary}")
 
         # Get inter-module edges
         module_files = self._extract_module_files(module_tree)
@@ -439,7 +436,7 @@ class WikiGenerator:
         )
 
         # Save overview
-        with open(self.wiki_dir / "README.md", "w") as f:
+        with (self.wiki_dir / "README.md").open("w") as f:
             f.write(response.content)
 
     # Helper methods
@@ -507,8 +504,6 @@ class WikiGenerator:
     def _get_current_commit(self) -> str:
         """Get current git commit hash"""
         try:
-            import subprocess
-
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 check=False,
@@ -517,7 +512,7 @@ class WikiGenerator:
                 text=True,
             )
             return result.stdout.strip()
-        except:
+        except Exception:
             return "unknown"
 
     async def _load_wiki_meta(self) -> WikiMeta | None:
@@ -526,18 +521,16 @@ class WikiGenerator:
         if not meta_path.exists():
             return None
 
-        with open(meta_path) as f:
+        with meta_path.open() as f:
             data = json.load(f)
             return WikiMeta(**data)
 
     async def _save_wiki_meta(self, meta: WikiMeta):
         """Save wiki metadata"""
-        from datetime import datetime
-
-        meta.generated_at = datetime.utcnow().isoformat()
+        meta.generated_at = datetime.now(UTC).isoformat()
 
         meta_path = self.wiki_dir / "meta.json"
-        with open(meta_path, "w") as f:
+        with meta_path.open("w") as f:
             json.dump(
                 {
                     "from_commit": meta.from_commit,
@@ -553,14 +546,14 @@ class WikiGenerator:
     async def _save_module_tree(self, tree: list[ModuleTreeNode]):
         """Save module tree for editing"""
         tree_path = self.wiki_dir / "module_tree.json"
-        with open(tree_path, "w") as f:
-            json.dump([self._node_to_dict(n) for n in tree], f, indent=2)
+        with tree_path.open("w") as f:
+            json.dump([self._node_to_dict(n) for n in tree], f, indent=2)  # type: ignore[arg-type]
 
     def _node_to_dict(self, node: ModuleTreeNode) -> dict[str, Any]:
         """Convert node to dict"""
         result = {"name": node.name, "slug": node.slug, "files": node.files}
         if node.children:
-            result["children"] = [self._node_to_dict(c) for c in node.children]
+            result["children"] = [self._node_to_dict(c) for c in node.children]  # type: ignore[misc]
         return result
 
     def _dict_to_node(self, data: dict[str, Any]) -> ModuleTreeNode:

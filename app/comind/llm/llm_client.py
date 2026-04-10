@@ -15,6 +15,10 @@ from typing import Any
 import httpx
 
 
+class LLMMaxRetriesError(Exception):
+    """Raised when LLM call exceeds maximum retries"""
+
+
 @dataclass
 class LLMConfig:
     """LLM configuration"""
@@ -182,7 +186,7 @@ async def call_llm(
                                         chars_received += len(content)
                                         if on_chunk:
                                             on_chunk(chars_received)
-                                except:
+                                except Exception:
                                     continue
 
                     full_content = "".join(content_parts)
@@ -203,7 +207,7 @@ async def call_llm(
                 )
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 or e.response.status_code >= 500:
+            if e.response.status_code in {429} or e.response.status_code >= 500:
                 if attempt < max_retries - 1:
                     import asyncio
 
@@ -218,7 +222,7 @@ async def call_llm(
                 continue
             raise
 
-    raise Exception("Max retries exceeded")
+    raise LLMMaxRetriesError("Max retries exceeded")
 
 
 class LLMClient:

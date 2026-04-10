@@ -35,7 +35,7 @@ class DuckDBBackend:
         """
         self.db_path = db_path
         self.read_only = read_only
-        self.conn = None
+        self.conn: duckdb.DuckDBPyConnection = None  # type: ignore
         self._ensure_database()
 
     def _ensure_database(self):
@@ -137,8 +137,8 @@ class DuckDBBackend:
         try:
             # Index for symbol embeddings
             self.conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_symbol_embeddings_hnsw 
-                ON symbol_embeddings 
+                CREATE INDEX IF NOT EXISTS idx_symbol_embeddings_hnsw
+                ON symbol_embeddings
                 USING HNSW (embedding)
             """)
             logger.debug("VSS HNSW index created on symbol_embeddings")
@@ -148,8 +148,8 @@ class DuckDBBackend:
         try:
             # Index for process query embeddings
             self.conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_process_queries_hnsw 
-                ON process_queries 
+                CREATE INDEX IF NOT EXISTS idx_process_queries_hnsw
+                ON process_queries
                 USING HNSW (embedding)
             """)
             logger.debug("VSS HNSW index created on process_queries")
@@ -529,7 +529,7 @@ class DuckDBBackend:
         self.conn.execute(
             """
             INSERT OR REPLACE INTO file_metadata (
-                file_path, repo_id, hash, mtime, size, 
+                file_path, repo_id, hash, mtime, size,
                 symbol_count, last_indexed, needs_reindex
             ) VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)
         """,
@@ -576,8 +576,8 @@ class DuckDBBackend:
         for file_path in file_paths:
             self.conn.execute(
                 """
-                UPDATE file_metadata 
-                SET needs_reindex = TRUE 
+                UPDATE file_metadata
+                SET needs_reindex = TRUE
                 WHERE file_path = ?
             """,
                 (file_path,),
@@ -649,7 +649,7 @@ class DuckDBBackend:
             # Update access tracking
             self.conn.execute(
                 """
-                UPDATE llm_cache 
+                UPDATE llm_cache
                 SET access_count = access_count + 1,
                     last_accessed = CURRENT_TIMESTAMP
                 WHERE cache_key = ?
@@ -702,7 +702,7 @@ class DuckDBBackend:
 
         # Build query with optional repo filter
         sql = """
-            SELECT 
+            SELECT
                 pq.process_id,
                 pq.query,
                 p.name,
@@ -750,7 +750,7 @@ class DuckDBBackend:
     ) -> list[dict[str, Any]]:
         """Fallback process search using manual similarity calculation"""
         sql = """
-            SELECT 
+            SELECT
                 pq.process_id,
                 pq.query,
                 pq.embedding,
@@ -858,16 +858,16 @@ class DuckDBBackend:
                 search_pattern = f"%{query}%"
                 result = self.conn.execute(
                     """
-                    SELECT *, 
-                        CASE 
+                    SELECT *,
+                        CASE
                             WHEN name LIKE ? THEN 3.0
                             WHEN signature LIKE ? THEN 2.0
                             WHEN docstring LIKE ? THEN 1.0
                             ELSE 0.5
                         END as score
                     FROM symbols
-                    WHERE name LIKE ? 
-                        OR signature LIKE ? 
+                    WHERE name LIKE ?
+                        OR signature LIKE ?
                         OR docstring LIKE ?
                         OR description LIKE ?
                     ORDER BY score DESC, name
@@ -941,7 +941,7 @@ class DuckDBBackend:
         """Get statistics for a repository"""
         result = self.conn.execute(
             """
-            SELECT 
+            SELECT
                 r.repo_id,
                 r.name,
                 r.indexed_at,

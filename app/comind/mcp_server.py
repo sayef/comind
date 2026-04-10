@@ -13,9 +13,12 @@ Tools
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from comind.models import (
     FindResponse,
@@ -392,92 +395,6 @@ async def flows(
                 lines.append(f"{step['step']}. `{step['name']}` — `{step['file_path']}`")
 
         lines.append("")  # Blank line between flows
-
-    return "\n".join(lines)
-
-
-# ─── flows ───────────────────────────────────────────────────────────────────
-
-
-@mcp.tool()
-async def flows(
-    query: str,
-    repo_name: str,
-    limit: int = 10,
-    output_format: str = "markdown",
-) -> str:
-    """Search for execution flows and processes in the codebase.
-
-    Use this to find multi-step execution paths, understand how features work end-to-end,
-    or discover architectural patterns. Processes are detected execution flows that show
-    how functions call each other across the codebase.
-
-    Args:
-        query: Natural language query (e.g. "authentication flow", "how does login work", "user registration process")
-        repo_name: Repository name from `repos`
-        limit: Maximum number of flows to return (1-20, default 10)
-        output_format: "markdown" (default) or "json"
-
-    Returns:
-        Matching execution flows with step-by-step breakdown and similarity scores.
-    """
-    import numpy as np
-    from fastembed import TextEmbedding
-
-    from comind.config import get_settings
-
-    graph, _, loaded = await _get_engine(repo_name)
-    if repo_name not in loaded:
-        return _missing_repo_msg(repo_name, loaded)
-
-    # Generate query embedding
-    settings = get_settings()
-    model = TextEmbedding(model_name=settings.search.embedding_model)
-    query_embedding = next(model.embed([query]))
-
-    # Search process queries
-    process_results = await graph.backend.search_process_queries(
-        query_embedding=np.array(query_embedding), repo_id=repo_name, limit=min(limit, 20)
-    )
-
-    if output_format == "json":
-        import json
-
-        return json.dumps(
-            {
-                "query": query,
-                "repo_name": repo_name,
-                "total": len(process_results),
-                "flows": process_results,
-            },
-            indent=2,
-        )
-
-    # Format markdown
-    if not process_results:
-        return f"No execution flows found for query: '{query}'"
-
-    lines = [
-        f"# Execution Flows — `{repo_name}`",
-        f"**Query:** {query}",
-        f"**Found:** {len(process_results)} flows\n",
-    ]
-
-    for i, flow in enumerate(process_results, 1):
-        lines.append(f"## {i}. {flow['process_name']}")
-        lines.append(
-            f"**Similarity:** {flow['similarity']:.2%} | **Entry:** `{flow['entry_point']}` | **Priority:** {flow['priority']}"
-        )
-        lines.append(f'**Matched Query:** "{flow["matched_query"]}"\n')
-
-        steps = flow.get("steps", [])
-        if steps:
-            lines.append("**Execution Steps:**")
-            for step in steps[:10]:  # Show first 10 steps
-                lines.append(f"{step['step']:>3}. `{step['name']}` — `{step['file_path']}`")
-            if len(steps) > 10:
-                lines.append(f"... and {len(steps) - 10} more steps")
-        lines.append("")
 
     return "\n".join(lines)
 

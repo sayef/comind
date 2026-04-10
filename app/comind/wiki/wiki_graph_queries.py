@@ -4,6 +4,8 @@ Graph Queries for Wiki Generation
 Queries against the knowledge graph to extract structure for wiki generation.
 """
 
+import asyncio
+from pathlib import Path
 from typing import Any
 
 from comind.core.graph import GraphBackend, RelationType, SymbolType
@@ -176,10 +178,9 @@ async def get_processes_for_files(
 
     for process in all_processes:
         # Check if any step involves files in our set
-        steps_in_module = []
-        for step in process.get("steps", []):
-            if step.get("file_path") in file_set:
-                steps_in_module.append(step)
+        steps_in_module = [
+            step for step in process.get("steps", []) if step.get("file_path") in file_set
+        ]
 
         if steps_in_module:
             processes.append(
@@ -249,11 +250,13 @@ async def get_inter_module_edges_for_overview(
 async def read_file_content(file_path: str, max_lines: int = 500) -> str:
     """Read file content with line limit"""
     try:
-        with open(file_path, encoding="utf-8") as f:
-            lines = f.readlines()[:max_lines]
-            content = "".join(lines)
-            if len(lines) >= max_lines:
-                content += f"\n... (truncated at {max_lines} lines)"
-            return content
+        content = await asyncio.to_thread(Path(file_path).read_text, encoding="utf-8")
+        lines = content.splitlines()[:max_lines]
+        truncated_content = "\n".join(lines)
+        if len(lines) >= max_lines:
+            truncated_content += f"\n... (truncated at {max_lines} lines)"
+        else:
+            return truncated_content
     except Exception as e:
         return f"Error reading file: {e}"
+    return truncated_content

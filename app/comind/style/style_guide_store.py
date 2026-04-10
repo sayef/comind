@@ -16,13 +16,15 @@ At query time:
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from comind.config import get_settings
 from comind.logging_config import get_logger
 from comind.models import GuideResponse, StyleSection
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from comind.style.style_extractor import StylePatterns
 
 logger = get_logger(__name__)
@@ -97,7 +99,7 @@ def _counter_to_dict(c: object) -> dict[str, int]:
     return {}
 
 
-def _pattern_stats_to_dict(ps: object) -> dict:
+def _pattern_stats_to_dict(ps: Any) -> dict:
     if hasattr(ps, "count"):
         return {
             "count": ps.count,
@@ -164,8 +166,6 @@ class StyleGuideStore:
 
     def __init__(self, repo_name: str, data_dir: Path | None = None) -> None:
         if data_dir is None:
-            from comind.config import get_settings
-
             data_dir = get_settings().storage.wiki_dir
         self._base = data_dir / repo_name
         self._json_path = self._base / "style_patterns.json"
@@ -404,7 +404,7 @@ def _build_sections(data: dict) -> list[StyleSection]:
     return sections
 
 
-def _build_recommendation(query: str, data: dict, sections: list[StyleSection]) -> str:
+def _build_recommendation(_query: str, _data: dict, sections: list[StyleSection]) -> str:
     """Generate a concise, actionable recommendation based on matched sections."""
     if not sections:
         return "No specific style guidance found for this query."

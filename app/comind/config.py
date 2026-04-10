@@ -255,9 +255,7 @@ def _expand_path(value: Any) -> Any:
     """Recursively expand paths with tilde and environment variables"""
     if isinstance(value, str):
         # Expand tilde and environment variables
-        expanded = os.path.expanduser(value)
-        expanded = os.path.expandvars(expanded)
-        return expanded
+        return os.path.expandvars(str(Path(value).expanduser()))
     if isinstance(value, dict):
         return {k: _expand_path(v) for k, v in value.items()}
     if isinstance(value, list):

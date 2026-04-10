@@ -105,7 +105,7 @@ class ProcessDetector:
 
     async def _trace_execution_from_entry(self, entry_point: Symbol) -> list[list[Symbol]]:
         """Trace execution flow from an entry point using BFS"""
-        traces = []
+        traces: list[list[Symbol]] = []
         visited: set[str] = set()
         queue = deque([(entry_point, [entry_point])])
 
@@ -234,7 +234,7 @@ class ProcessDetector:
 
     def generate_queries_for_process(self, process: ProcessNode, trace: list[Symbol]) -> list[str]:
         """Generate natural language queries for a process to enable semantic search"""
-        queries = []
+        queries: list[str] = []
 
         if not trace or len(trace) < 2:
             return queries
@@ -342,8 +342,6 @@ class ProcessDetector:
 
     async def get_processes_for_symbol(self, symbol_id: str) -> list[ProcessNode]:
         """Get all processes that include this symbol"""
-        processes = await self.get_processes()
-
         # This would need to be implemented based on how we store process steps
         # For now, return all processes as a placeholder
-        return processes
+        return await self.get_processes()

@@ -931,9 +931,9 @@ class WikiEnhancedQueryEngine:
             ranked_lists["wiki"] = wiki_rankings
 
         # Calculate RRF scores for all symbols
-        rrf_scores = {}
-        score_breakdowns = {}
-        raw_scores = {}  # Store raw scores for quality filtering
+        rrf_scores: dict[str, float] = {}
+        score_breakdowns: dict[str, dict[str, float]] = {}
+        raw_scores: dict[str, dict[str, float]] = {}  # Store raw scores for quality filtering
 
         for strategy, rankings in ranked_lists.items():
             for symbol_id, rank in rankings.items():
@@ -1163,7 +1163,7 @@ class WikiEnhancedQueryEngine:
 
         # Prioritize pages that mention the symbol's file path
         best_page_id = None
-        best_score = 0
+        best_score: float = 0
 
         for page_id, score in wiki_results:
             page = wiki_store.pages.get(page_id)

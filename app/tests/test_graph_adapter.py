@@ -2,8 +2,8 @@
 Unit tests for GraphAdapter
 """
 
-import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -16,8 +16,8 @@ from comind.storage.graph_adapter import GraphAdapter
 def temp_db():
     """Create a temporary DuckDB database for testing"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "test.duckdb")
-        backend = DuckDBBackend(db_path)
+        db_path = Path(tmpdir) / "test.duckdb"
+        backend = DuckDBBackend(str(db_path))
         yield backend
         backend.close()
 

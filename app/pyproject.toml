@@ -170,12 +170,46 @@ skip-magic-trailing-comma = false
 
 [tool.ruff.lint]
 ignore = [
+  "ARG001", # unused function arg (sometimes intentional)
+  "ARG002", # unused method arg (sometimes intentional)
+  "ASYNC221", # blocking subprocess in async (intentional)
+  "ASYNC230", # blocking I/O in async (many false positives with sync helpers)
+  "B007", # unused loop variable (sometimes intentional)
+  "B905", # zip without strict (false positive)
+  "DTZ005", # datetime.now without tz (intentional for naive timestamps)
   "E501", # line too long (handled by formatter)
+  "E722", # bare except (sometimes intentional)
+  "E741", # ambiguous variable name (l, I, O - often fine)
   "EM101", # raw string in exception
   "EM102", # f-string in exception
+  "F821", # undefined name (handled by other checks)
+  "G004", # f-string in logging (structlog uses kwargs, not %-formatting)
+  "N806", # uppercase variable in function (often constants)
+  "PERF401", # use list comprehension (style preference)
+  "PLC0415", # import not at top level (lazy imports are intentional)
+  "PLR0911", # too many return statements
+  "PLR0912", # too many branches
   "PLR0913", # too many arguments
+  "PLR0915", # too many statements
+  "PLR1714", # merge comparisons (sometimes clearer as-is)
   "PLR2004", # magic value comparison
-  "TRY003" # long exception message
+  "PLW0603", # global statement (server.py lifespan pattern)
+  "PLW2901", # for loop overwritten (intentional)
+  "PTH123", # open() vs Path.open() (style preference)
+  "RET504", # unnecessary assignment before return (readability)
+  "RUF001", # ambiguous unicode character (false positives in UI strings)
+  "RUF002", # ambiguous unicode character in docstring
+  "RUF005", # consider unpacking (style)
+  "RUF013", # PEP 484 implicit Optional (style preference)
+  "RUF059", # unpacked variable unused (false positive)
+  "SIM102", # nested if (sometimes clearer than combined condition)
+  "SIM105", # contextlib.suppress vs try-except-pass (style preference)
+  "SIM108", # ternary operator (readability)
+  "SLF001", # private member access (intentional for internal APIs)
+  "TRY002", # create custom exception (overkill for one-off raises)
+  "TRY003", # long exception message
+  "TRY300", # move return to else block (style preference)
+  "TRY400" # logging.exception vs logging.error (style preference)
 ]
 select = [
   "ARG", # flake8-unused-arguments

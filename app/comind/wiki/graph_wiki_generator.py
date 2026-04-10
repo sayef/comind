@@ -95,11 +95,11 @@ class GraphWikiGenerator:
         Returns:
             Statistics about generation (nodes_generated, relationships_generated)
         """
-        logger.info(f"Starting graph wiki generation for repo: {repo_id}")
+        logger.info("Starting graph wiki generation for repo: %s", repo_id)
 
         # Get all symbols from graph
         symbols = await self.graph.get_all_symbols(repo_id)
-        logger.info(f"Found {len(symbols)} symbols to document")
+        logger.info("Found %d symbols to document", len(symbols))
 
         # Generate node wikis in batches
         node_count = 0
@@ -114,20 +114,20 @@ class GraphWikiGenerator:
                     await self.save_node_wiki(wiki)
                     node_count += 1
                 elif isinstance(wiki, Exception):
-                    logger.error(f"Failed to generate node wiki: {wiki}")
+                    logger.error("Failed to generate node wiki: %s", wiki)
 
-            logger.info(f"Generated {node_count}/{len(symbols)} node wikis")
+            logger.info("Generated %d/%d node wikis", node_count, len(symbols))
 
         # Get all relationships
         relationships = await self.graph.get_all_relationships(repo_id)
-        logger.info(f"Found {len(relationships)} relationships to document")
+        logger.info("Found %d relationships to document", len(relationships))
 
         # Generate relationship wikis in batches
         rel_count = 0
         for i in range(0, len(relationships), batch_size):
             batch = relationships[i : i + batch_size]
-            tasks = [self.generate_relationship_wiki(rel) for rel in batch]
-            rel_wikis = await asyncio.gather(*tasks, return_exceptions=True)
+            rel_tasks: list[Any] = [self.generate_relationship_wiki(rel) for rel in batch]  # type: ignore[assignment]
+            rel_wikis = await asyncio.gather(*rel_tasks, return_exceptions=True)
 
             # Save successful wikis
             for wiki in rel_wikis:
@@ -135,12 +135,12 @@ class GraphWikiGenerator:
                     await self.save_relationship_wiki(wiki)
                     rel_count += 1
                 elif isinstance(wiki, Exception):
-                    logger.error(f"Failed to generate relationship wiki: {wiki}")
+                    logger.error("Failed to generate relationship wiki: %s", wiki)
 
-            logger.info(f"Generated {rel_count}/{len(relationships)} relationship wikis")
+            logger.info("Generated %d/%d relationship wikis", rel_count, len(relationships))
 
         logger.info(
-            f"Graph wiki generation complete: {node_count} nodes, {rel_count} relationships"
+            "Graph wiki generation complete: %d nodes, %d relationships", node_count, rel_count
         )
 
         return {
@@ -183,9 +183,9 @@ class GraphWikiGenerator:
             results = await asyncio.gather(*[_describe(s) for s in batch], return_exceptions=True)
             for res in results:
                 if isinstance(res, Exception):
-                    logger.warning(f"Failed to annotate symbol: {res}")
+                    logger.warning("Failed to annotate symbol: %s", res)
                     continue
-                sym_id, description = res
+                sym_id, description = res  # type: ignore[misc]
                 await self.graph.update_symbol_description(sym_id, description)
                 annotated += 1
 
@@ -193,7 +193,7 @@ class GraphWikiGenerator:
 
     async def generate_node_wiki(self, symbol: Symbol) -> NodeWiki:
         """Generate wiki for a single node (function/class/module)"""
-        logger.debug(f"Generating node wiki for: {symbol.name} ({symbol.type.value})")
+        logger.debug("Generating node wiki for: %s (%s)", symbol.name, symbol.type.value)
 
         # Extract rich context from graph
         context = await self._extract_node_context(symbol)
@@ -218,7 +218,7 @@ class GraphWikiGenerator:
     async def generate_relationship_wiki(self, rel: Relationship) -> RelationshipWiki:
         """Generate wiki for a relationship (edge)"""
         logger.debug(
-            f"Generating relationship wiki: {rel.type} ({rel.source_id} -> {rel.target_id})"
+            "Generating relationship wiki: %s (%s -> %s)", rel.type, rel.source_id, rel.target_id
         )
 
         # Get source and target symbols
@@ -266,7 +266,7 @@ class GraphWikiGenerator:
 
         # Get code snippet — extractors return dicts; pull out the code string
         try:
-            if symbol.type == SymbolType.FUNCTION or symbol.type == SymbolType.METHOD:
+            if symbol.type in {SymbolType.FUNCTION, SymbolType.METHOD}:
                 code = await self.snippet_extractor.extract_function_snippet(symbol)
             elif symbol.type == SymbolType.CLASS:
                 code = await self.snippet_extractor.extract_class_snippet(symbol)
@@ -276,7 +276,7 @@ class GraphWikiGenerator:
                 code = code.get("code", "")
             context["code"] = code or ""
         except Exception as e:
-            logger.warning(f"Failed to extract code snippet for {symbol.name}: {e}")
+            logger.warning("Failed to extract code snippet for %s: %s", symbol.name, e)
             context["code"] = ""
 
         # Get callers with usage examples
@@ -295,7 +295,7 @@ class GraphWikiGenerator:
                     }
                 )
         except Exception as e:
-            logger.warning(f"Failed to get callers for {symbol.name}: {e}")
+            logger.warning("Failed to get callers for %s: %s", symbol.name, e)
             context["callers"] = []
 
         # Get callees
@@ -306,7 +306,7 @@ class GraphWikiGenerator:
                 for c in callees[:10]  # Limit to top 10
             ]
         except Exception as e:
-            logger.warning(f"Failed to get callees for {symbol.name}: {e}")
+            logger.warning("Failed to get callees for %s: %s", symbol.name, e)
             context["callees"] = []
 
         # Get community/module context
@@ -314,7 +314,7 @@ class GraphWikiGenerator:
             community = await self.graph.get_community(symbol.id)
             context["community"] = community.get("name") if community else None
         except Exception as e:
-            logger.warning(f"Failed to get community for {symbol.name}: {e}")
+            logger.warning("Failed to get community for %s: %s", symbol.name, e)
             context["community"] = None
 
         # Get process participation
@@ -322,7 +322,7 @@ class GraphWikiGenerator:
             processes = await self.graph.get_symbol_processes(symbol.id)
             context["processes"] = [p.get("name") for p in processes[:3]]
         except Exception as e:
-            logger.warning(f"Failed to get processes for {symbol.name}: {e}")
+            logger.warning("Failed to get processes for %s: %s", symbol.name, e)
             context["processes"] = []
 
         # Add properties
@@ -347,7 +347,7 @@ class GraphWikiGenerator:
                 usage = await self.snippet_extractor.extract_usage_examples(target, source)
                 context["call_site"] = usage[:300] if usage else ""
             except Exception as e:
-                logger.warning(f"Failed to extract call site: {e}")
+                logger.warning("Failed to extract call site: %s", e)
                 context["call_site"] = ""
 
         # Add relationship properties
@@ -362,8 +362,8 @@ class GraphWikiGenerator:
         try:
             response = await self.llm.generate(prompt)
             return response.strip()
-        except Exception as e:
-            logger.error(f"LLM generation failed for {symbol.name}: {e}")
+        except Exception:
+            logger.exception("LLM generation failed for %s", symbol.name)
             return symbol.docstring or f"{symbol.type.value} {symbol.name}"
 
     async def _generate_relationship_description(
@@ -375,8 +375,8 @@ class GraphWikiGenerator:
         try:
             response = await self.llm.generate(prompt)
             return response.strip()
-        except Exception as e:
-            logger.error(f"LLM generation failed for relationship: {e}")
+        except Exception:
+            logger.exception("LLM generation failed for relationship")
             return f"{source.name} {rel.type.lower()} {target.name}"
 
     def _build_node_prompt(self, symbol: Symbol, context: dict) -> str:
@@ -479,14 +479,14 @@ Be concise and focus on the "why" and "what" of the interaction."""
     async def save_node_wiki(self, wiki: NodeWiki):
         """Save node wiki to disk"""
         file_path = self.nodes_dir / f"{wiki.node_id}.json"
-        with open(file_path, "w") as f:
-            json.dump(wiki.to_dict(), f, indent=2)
+        content = json.dumps(wiki.to_dict(), indent=2)
+        await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
 
     async def save_relationship_wiki(self, wiki: RelationshipWiki):
         """Save relationship wiki to disk"""
         file_path = self.relationships_dir / f"{wiki.relationship_id}.json"
-        with open(file_path, "w") as f:
-            json.dump(wiki.to_dict(), f, indent=2)
+        content = json.dumps(wiki.to_dict(), indent=2)
+        await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
 
     async def load_node_wiki(self, node_id: str) -> NodeWiki | None:
         """Load node wiki from disk"""
@@ -494,9 +494,8 @@ Be concise and focus on the "why" and "what" of the interaction."""
         if not file_path.exists():
             return None
 
-        with open(file_path) as f:
-            data = json.load(f)
-            return NodeWiki(**data)
+        data = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+        return NodeWiki(**json.loads(data))
 
     async def load_relationship_wiki(self, rel_id: str) -> RelationshipWiki | None:
         """Load relationship wiki from disk"""
@@ -504,6 +503,5 @@ Be concise and focus on the "why" and "what" of the interaction."""
         if not file_path.exists():
             return None
 
-        with open(file_path) as f:
-            data = json.load(f)
-            return RelationshipWiki(**data)
+        data = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+        return RelationshipWiki(**json.loads(data))

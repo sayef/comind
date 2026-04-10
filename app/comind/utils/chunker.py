@@ -169,7 +169,7 @@ class CodeChunker:
 def chunk_file(
     file_path: str,
     content: str,
-    symbols: list[dict] = None,
+    symbols: list[dict] | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     overlap: int = DEFAULT_OVERLAP,
 ) -> list[tuple[str, int, int, str]]:

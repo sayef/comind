@@ -6,7 +6,9 @@ Provides REST API endpoints for code intelligence operations.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -31,6 +33,7 @@ from comind.style.style_extractor import extract_style_guide
 from comind.style.style_guide_generator import generate_style_guide_markdown
 from comind.utils.markdown_formatter import MarkdownFormatter
 from comind.utils.snippet_extractor import CodeSnippetExtractor
+from comind.wiki.graph_wiki_generator import GraphWikiGenerator
 from comind.wiki.wiki import generate_wiki as generate_wiki_docs, load_wiki_pages
 
 # Configure logging
@@ -68,8 +71,6 @@ def clone_or_pull_git_repo(repo_url: str, repo_name: str, branch: str = "main") 
     gitlab_token = os.getenv("GITLAB_API_PRIVATE_TOKEN")
     if gitlab_token and "gitlab.com" in repo_url:
         # Strip any existing credentials from URL
-        import re
-
         clean_url = re.sub(r"https://[^@]+@gitlab\.com", "https://gitlab.com", repo_url)
         if clean_url.startswith("https://gitlab.com"):
             clone_url = clean_url.replace(
@@ -136,16 +137,18 @@ def clone_or_pull_git_repo(repo_url: str, repo_name: str, branch: str = "main") 
             except git.GitCommandError as e:
                 if repo_dir.exists():
                     shutil.rmtree(repo_dir, ignore_errors=True)
-                raise HTTPException(status_code=400, detail=f"Git clone failed: {e!s}")
+                raise HTTPException(status_code=400, detail=f"Git clone failed: {e!s}") from e
 
     except git.GitCommandError as e:
         if repo_dir.exists() and not repo_dir.joinpath(".git").exists():
             shutil.rmtree(repo_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Git operation failed: {e!s}")
+        raise HTTPException(status_code=500, detail=f"Git operation failed: {e!s}") from e
     except Exception as e:
         if repo_dir.exists() and not repo_dir.joinpath(".git").exists():
             shutil.rmtree(repo_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Failed to clone/update repository: {e!s}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clone/update repository: {e!s}"
+        ) from e
 
 
 # Pydantic models for API
@@ -217,7 +220,7 @@ process_detector: ProcessDetector | None = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Manage application lifecycle"""
     global graph, query_engine, indexer, process_detector
 
@@ -226,9 +229,6 @@ async def lifespan(app: FastAPI):
 
     # Initialize components
     logger.info("Initializing knowledge graph", backend="duckdb")
-    from comind.config import get_settings
-
-    settings = get_settings()
     backend = DuckDBBackend(str(settings.storage.duckdb_path))
     graph = GraphAdapter(backend)
 
@@ -360,6 +360,9 @@ def create_app() -> FastAPI:
         """
         start_time = time.time()
 
+        def _raise_bad_request(detail: str) -> None:
+            raise HTTPException(status_code=400, detail=detail)
+
         # Determine if we need to clone or use local path
         is_git = is_git_url(request.repo)
 
@@ -378,7 +381,8 @@ def create_app() -> FastAPI:
             repo_path, was_cloned = clone_or_pull_git_repo(request.repo, repo_name, request.branch)
             action = "cloned" if was_cloned else "updated"
             logger.info(
-                f"Repository {action}",
+                "Repository synchronized",
+                action=action,
                 url=request.repo,
                 branch=request.branch,
                 path=repo_path,
@@ -406,11 +410,9 @@ def create_app() -> FastAPI:
 
             if "error" in index_result:
                 logger.error("Indexing failed", error=index_result["error"])
-                raise HTTPException(status_code=400, detail=index_result["error"])
+                _raise_bad_request(index_result["error"])
 
             # Store repo_root in query engine for snippet extraction
-            from pathlib import Path
-
             query_engine.repo_roots[repo_id] = Path(repo_path)
             logger.info(
                 "Phase 1 complete",
@@ -436,7 +438,7 @@ def create_app() -> FastAPI:
             wiki_result = None
             wiki_error = None
             # Get LLM config from environment
-            llm_config = {}
+            llm_config: dict[str, Any] = {}
 
             def on_progress(phase: str, percent: int, detail: str | None = None):
                 logger.info("Wiki generation progress", phase=phase, percent=percent, detail=detail)
@@ -486,8 +488,6 @@ def create_app() -> FastAPI:
             # Phase 4.5: Generate graph-native wikis for nodes and relationships
             logger.info("Phase 4.5: Generating graph-native wikis from knowledge graph")
 
-            from comind.wiki.graph_wiki_generator import GraphWikiGenerator
-
             # Get snippet extractor for the repo
             snippet_extractor = query_engine.get_or_create_snippet_extractor(repo_id)
 
@@ -511,7 +511,7 @@ def create_app() -> FastAPI:
                     relationships_generated=wiki_stats["relationships_generated"],
                 )
             except Exception as e:
-                logger.error(f"Graph wiki generation failed: {e}", exc_info=True)
+                logger.exception("Graph wiki generation failed", error=str(e))
                 # Continue even if graph wiki generation fails
 
             # Phase 5: Generate style guide
@@ -564,25 +564,22 @@ def create_app() -> FastAPI:
             }
 
         except Exception as e:
-            logger.error("Repository analysis failed", error=str(e), repo_name=repo_name)
+            logger.exception("Repository analysis failed", error=str(e), repo_name=repo_name)
             raise
 
     @app.get("/api/repos")
     async def list_repos() -> dict[str, Any]:
         """List all indexed repositories"""
-        repos = []
-
-        # Get repositories from query engine indexes
-        for repo_id in query_engine.repo_text_engines.keys():
-            repos.append(
-                {
-                    "repo_id": repo_id,
-                    "indexed": True,
-                    "has_text_index": repo_id in query_engine.repo_text_engines,
-                    "has_semantic_index": repo_id in query_engine.repo_semantic_engines,
-                    "has_wiki": repo_id in query_engine.repo_wiki_stores,
-                }
-            )
+        repos = [
+            {
+                "repo_id": repo_id,
+                "indexed": True,
+                "has_text_index": repo_id in query_engine.repo_text_engines,
+                "has_semantic_index": repo_id in query_engine.repo_semantic_engines,
+                "has_wiki": repo_id in query_engine.repo_wiki_stores,
+            }
+            for repo_id in query_engine.repo_text_engines
+        ]
 
         # Also get from graph
         graph_repos = await graph.list_repositories()
@@ -610,8 +607,6 @@ def create_app() -> FastAPI:
         Args:
             repo_name: Repository name (e.g., 'skills-api')
         """
-        import shutil
-
         logger.info("Deleting repository data", repo_name=repo_name)
 
         # Check if repo exists
@@ -661,23 +656,14 @@ def create_app() -> FastAPI:
         file_pattern: str | None = None,
         max_results: int = 50,
     ) -> dict[str, Any]:
-        """Search code in repository using grep
+        """Search raw code using ripgrep/grep"""
 
-        Args:
-            repo_name: Repository name
-            query: Search query (supports regex)
-            case_sensitive: Whether search is case-sensitive
-            file_pattern: Optional file pattern (e.g., '*.py', '*.js')
-            max_results: Maximum number of results
-        """
-        settings = get_settings()
-        repo_dir = settings.storage.repos_dir / repo_name
+        def _raise_search_failure(detail: str) -> None:
+            raise HTTPException(status_code=500, detail=detail)
 
-        if not repo_dir.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Repository '{repo_name}' not found. Clone it first with POST /api/analyze",
-            )
+        repo_dir = query_engine.repo_roots.get(repo_name)
+        if not repo_dir or not repo_dir.exists():
+            raise HTTPException(status_code=404, detail="Repository root not found")
 
         logger.info(
             "Searching code", repo_name=repo_name, query=query, case_sensitive=case_sensitive
@@ -706,11 +692,18 @@ def create_app() -> FastAPI:
         cmd.extend([query, str(repo_dir)])
 
         try:
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
 
             # grep returns 1 if no matches found, which is not an error
             if result.returncode not in (0, 1):
-                raise HTTPException(status_code=500, detail=f"Grep search failed: {result.stderr}")
+                _raise_search_failure(f"Grep search failed: {result.stderr}")
 
             # Parse results
             matches = []
@@ -741,11 +734,14 @@ def create_app() -> FastAPI:
                 "truncated": len(result.stdout.splitlines()) > max_results,
             }
 
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=408, detail="Search timeout (exceeded 30 seconds)")
+        except subprocess.TimeoutExpired as e:
+            raise HTTPException(
+                status_code=408,
+                detail="Search timeout (exceeded 30 seconds)",
+            ) from e
         except Exception as e:
-            logger.error("Code search failed", error=str(e), repo_name=repo_name)
-            raise HTTPException(status_code=500, detail=f"Search failed: {e!s}")
+            logger.exception("Code search failed", error=str(e), repo_name=repo_name)
+            raise HTTPException(status_code=500, detail=f"Search failed: {e!s}") from e
 
     @app.post("/api/repos/{repo_name}/style-guide")
     async def generate_style_guide(repo_name: str) -> dict[str, Any]:
@@ -987,7 +983,7 @@ def create_app() -> FastAPI:
         # Return overview page (README.md)
         readme_path = wiki_dir / "README.md"
         if readme_path.exists():
-            with open(readme_path) as f:
+            with readme_path.open() as f:
                 overview_content = f.read()
             return {
                 "title": "Overview",
@@ -1116,7 +1112,7 @@ def create_app() -> FastAPI:
     # Code snippet endpoints
     @app.get("/api/code/snippet/{symbol_id}")
     async def get_code_snippet(
-        symbol_id: str, context_lines: int = 5, include_structure: bool = True
+        symbol_id: str, context_lines: int = 5, _include_structure: bool = True
     ) -> dict[str, Any]:
         """Get code snippet with context"""
         symbol = await graph.get_symbol(symbol_id)
@@ -1137,18 +1133,15 @@ def create_app() -> FastAPI:
         return snippet
 
     @app.get("/api/code/file/{repo_id}/{file_path:path}")
-    async def get_file(repo_id: str, file_path: str) -> dict[str, Any]:
+    async def get_file(_repo_id: str, file_path: str) -> dict[str, Any]:
         """Get complete file content"""
         # This is a simplified implementation
         # In practice, you'd validate the file belongs to the repo
-        from pathlib import Path
-
         file_obj = Path(file_path)
         if not file_obj.exists():
             raise HTTPException(status_code=404, detail="File not found")
 
-        with open(file_obj, encoding="utf-8") as f:
-            content = f.read()
+        content = await asyncio.to_thread(file_obj.read_text, encoding="utf-8")
 
         return {
             "file_path": file_path,

@@ -202,7 +202,7 @@ class GrepEngine:
                         return
 
             elif output_mode == "count" and kind == "summary":
-                for stat in data.get("stats", {}).get("matched_lines", []):
+                for _stat in data.get("stats", {}).get("matched_lines", []):
                     pass  # handled below
 
             elif output_mode == "count" and kind == "match":

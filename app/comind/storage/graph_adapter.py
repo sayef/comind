@@ -70,7 +70,6 @@ class GraphAdapter:
         """Execute a simple graph query"""
         # Simple text search fallback
         results = []
-        query_lower = query.lower()
 
         # Use DuckDB text search
         search_results = await self.backend.text_search(query, limit=50)

@@ -51,8 +51,8 @@ class DuckDBTextSearchEngine:
             results = await self.db_backend.text_search(query, limit=limit)
             # Convert to (symbol_id, score) tuples
             return [(symbol.id, score) for symbol, score in results]
-        except Exception as e:
-            logger.error(f"DuckDB text search failed: {e}")
+        except Exception:
+            logger.exception("DuckDB text search failed")
             return []
 
 
@@ -85,8 +85,8 @@ class DuckDBSemanticSearchEngine:
 
             self.embedder = TextEmbedding(model_name=self.embedding_model)
             logger.debug(f"Initialized FastEmbed model: {self.embedding_model}")
-        except Exception as e:
-            logger.error(f"Failed to initialize FastEmbed: {e}")
+        except Exception:
+            logger.exception("Failed to initialize FastEmbed")
             self.embedder = None
 
     async def add_symbol(self, symbol: Symbol, content: str = ""):
@@ -104,8 +104,8 @@ class DuckDBSemanticSearchEngine:
                 await self.db_backend.add_embedding(
                     symbol_id=symbol.id, embedding=embedding, model=self.embedding_model
                 )
-        except Exception as e:
-            logger.error(f"Failed to add embedding for {symbol.id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to add embedding for {symbol.id}")
 
     async def generate_embeddings_for_repo(
         self, repo_id: str, batch_size: int = 64, include_enriched: bool = False
@@ -131,10 +131,10 @@ class DuckDBSemanticSearchEngine:
         if include_enriched:
             result = self.db_backend.conn.execute(
                 """
-                SELECT 
-                    s.id, 
-                    s.name, 
-                    s.signature, 
+                SELECT
+                    s.id,
+                    s.name,
+                    s.signature,
                     s.docstring,
                     s.description,
                     s.associated_queries

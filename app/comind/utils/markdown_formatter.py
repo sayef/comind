@@ -124,9 +124,9 @@ class MarkdownFormatter:
                     )
                     is_truncated = isinstance(code_snippet, dict) and line_end > snippet_end
                     label = (
-                        f"**Code** *(lines {line_start}–{line_end})*:"
+                        f"**Code** *(lines {line_start}-{line_end})*:"
                         if not is_truncated
-                        else f"**Code** *(showing lines {line_start}–{snippet_end} of {line_end})*:"
+                        else f"**Code** *(showing lines {line_start}-{snippet_end} of {line_end})*:"
                     )
                     lines.append(label)
                     lines.append("```python")
@@ -144,9 +144,9 @@ class MarkdownFormatter:
                 callers = graph_context.get("callers", [])
                 callees = graph_context.get("callees", [])
 
-                def _ref_lines(c: dict) -> list[str]:
+                def _ref_lines(c: dict, _repo_id: str) -> list[str]:
                     name = c.get("name", "unknown")
-                    file = MarkdownFormatter._format_file_path(c.get("file", ""), repo_id)
+                    file = MarkdownFormatter._format_file_path(c.get("file", ""), _repo_id)
                     line = c.get("line")
                     call_line = c.get("call_line")
                     call_text = (c.get("call_text") or "").strip()
@@ -163,14 +163,14 @@ class MarkdownFormatter:
                     suffix = f", showing {len(callers)}" if callers_total > len(callers) else ""
                     lines.append(f"**Called by ({callers_total}{suffix}):**")
                     for c in callers:
-                        lines.extend(_ref_lines(c))
+                        lines.extend(_ref_lines(c, repo_id))
                     lines.append("")
 
                 if callees:
                     suffix = f", showing {len(callees)}" if callees_total > len(callees) else ""
                     lines.append(f"**Calls ({callees_total}{suffix}):**")
                     for c in callees:
-                        lines.extend(_ref_lines(c))
+                        lines.extend(_ref_lines(c, repo_id))
                     lines.append("")
 
             # ── about (LLM description > docstring) ─────────────────────────
@@ -180,8 +180,9 @@ class MarkdownFormatter:
                     lines.append("**About:**")
                     lines.append("")
                     # Prefix every line with > so multi-paragraph text stays in blockquote
-                    for bl in about.strip().splitlines():
-                        lines.append(f"> {bl}" if bl.strip() else ">")
+                    lines.extend(
+                        f"> {bl}" if bl.strip() else ">" for bl in about.strip().splitlines()
+                    )
                     lines.append("")
 
             # ── separator ────────────────────────────────────────────────────

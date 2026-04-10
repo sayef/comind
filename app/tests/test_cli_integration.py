@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from comind.core.graph import Symbol, SymbolType
+from comind.core.graph import Relationship, RelationType, Symbol, SymbolType
 from comind.indexing.incremental_indexer import IncrementalIndexer
 from comind.storage.duckdb_backend import DuckDBBackend
 from comind.storage.graph_adapter import GraphAdapter
@@ -42,7 +42,7 @@ def process_data():
         (repo_dir / "utils.py").write_text("""
 class Helper:
     '''Helper class'''
-    
+
     def help(self):
         '''Provide help'''
         return "help"
@@ -69,7 +69,7 @@ class TestCLIIntegration:
 
         # Verify tables exist using DuckDB information schema
         tables = backend.conn.execute("""
-            SELECT table_name FROM information_schema.tables 
+            SELECT table_name FROM information_schema.tables
             WHERE table_schema = 'main'
         """).fetchall()
 
@@ -100,7 +100,7 @@ class TestCLIIntegration:
         assert all(status == "new" for status in changed_files.values())
 
         # Simulate indexing by updating metadata
-        for file_path in changed_files.keys():
+        for file_path in changed_files:
             full_path = repo_path / file_path
             file_hash = incremental._compute_file_hash(full_path)
             await backend.update_file_metadata(
@@ -294,8 +294,6 @@ def process_data():
         await graph.add_symbol(callee)
 
         # Add relationship
-        from comind.core.graph import Relationship, RelationType
-
         rel = Relationship(source_id=caller.id, target_id=callee.id, type=RelationType.CALLS)
         await graph.add_relationship(rel)
 

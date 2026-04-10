@@ -7,6 +7,7 @@ what's necessary. Integrates with DuckDB backend for efficient updates.
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from comind.core.graph import Symbol
 from comind.logging_config import get_logger
@@ -22,7 +23,7 @@ class IncrementalIndexer:
         self.backend = backend
 
     async def detect_changes(
-        self, repo_id: str, repo_path: str, file_extensions: list[str] = [".py"]
+        self, repo_id: str, repo_path: str, file_extensions: list[str] | None = None
     ) -> dict[str, str]:
         """Detect which files have changed since last index
 
@@ -34,6 +35,9 @@ class IncrementalIndexer:
         Returns:
             Dict mapping file_path -> status ('new', 'modified', 'deleted')
         """
+        if file_extensions is None:
+            file_extensions = [".py"]
+
         logger.debug(f"Detecting changes in {repo_path}")
 
         # Scan current files and compute hashes
@@ -78,7 +82,7 @@ class IncrementalIndexer:
         try:
             if file_path.stat().st_size > 10 * 1024 * 1024:
                 return False
-        except:
+        except Exception:
             return False
 
         return True
@@ -147,8 +151,8 @@ class IncrementalIndexer:
 
                     logger.debug(f"Indexed {file_path}: {len(symbols)} symbols")
 
-                except Exception as e:
-                    logger.error(f"Failed to index {file_path}: {e}")
+                except Exception:
+                    logger.exception(f"Failed to index {file_path}")
 
         return added, modified, deleted
 
@@ -189,11 +193,11 @@ class IncrementalIndexer:
         Returns:
             List of symbols needing generation
         """
-        needs_generation = []
-
-        for symbol in symbols:
-            if await self.should_regenerate_llm_content(symbol, cache_type):
-                needs_generation.append(symbol)
+        needs_generation = [
+            symbol
+            for symbol in symbols
+            if await self.should_regenerate_llm_content(symbol, cache_type)
+        ]
 
         logger.info(
             f"LLM generation needed for {len(needs_generation)}/{len(symbols)} symbols "
@@ -235,7 +239,7 @@ class IncrementalIndexer:
             metadata=metadata,
         )
 
-    async def get_incremental_stats(self, repo_id: str) -> dict[str, any]:
+    async def get_incremental_stats(self, repo_id: str) -> dict[str, Any]:
         """Get statistics about incremental indexing
 
         Args:
@@ -250,7 +254,7 @@ class IncrementalIndexer:
         # Get cache stats
         cache_stats = self.backend.conn.execute(
             """
-            SELECT 
+            SELECT
                 cache_type,
                 COUNT(*) as entries,
                 SUM(access_count) as total_accesses,
@@ -272,7 +276,7 @@ class IncrementalIndexer:
         # Get file metadata stats
         file_stats = self.backend.conn.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) as total_files,
                 SUM(CASE WHEN needs_reindex THEN 1 ELSE 0 END) as needs_reindex,
                 AVG(symbol_count) as avg_symbols_per_file
@@ -294,8 +298,8 @@ class IncrementalIndexer:
 
 
 async def smart_reindex(
-    repo_id: str, repo_path: str, backend: DuckDBBackend, indexer_func, force: bool = False
-) -> dict[str, any]:
+    repo_id: str, repo_path: str, backend: DuckDBBackend, _indexer_func, force: bool = False
+) -> dict[str, Any]:
     """Smart re-indexing with change detection
 
     Args:
@@ -331,7 +335,10 @@ async def smart_reindex(
 
     # Process changes
     added, modified, deleted = await incremental.process_changes(
-        repo_id=repo_id, repo_path=repo_path, changed_files=changed_files, indexer_func=indexer_func
+        repo_id=repo_id,
+        repo_path=repo_path,
+        changed_files=changed_files,
+        indexer_func=_indexer_func,
     )
 
     return {

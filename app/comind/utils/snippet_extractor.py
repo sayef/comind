@@ -5,6 +5,7 @@ Extracts code snippets with context and structural information
 for use in query results and documentation.
 """
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,9 @@ class CodeSnippetExtractor:
         # Otherwise, assume it's relative to current directory
         return path
 
-    async def extract_snippet(self, symbol: Symbol, context_lines: int = None) -> dict[str, Any]:
+    async def extract_snippet(
+        self, symbol: Symbol, context_lines: int | None = None
+    ) -> dict[str, Any]:
         """Extract code snippet for a symbol with context"""
         if context_lines is None:
             context_lines = self.max_context_lines
@@ -57,8 +60,8 @@ class CodeSnippetExtractor:
         file_path = self._resolve_path(symbol.file_path)
 
         try:
-            with open(file_path, encoding="utf-8") as f:
-                lines = f.readlines()
+            content = await asyncio.to_thread(Path(file_path).read_text, encoding="utf-8")
+            lines = content.splitlines(keepends=True)
         except (FileNotFoundError, OSError):
             return {
                 "error": f"File not found: {symbol.file_path}",
@@ -139,8 +142,8 @@ class CodeSnippetExtractor:
         file_path = self._resolve_path(symbol.file_path)
 
         try:
-            with open(file_path, encoding="utf-8") as f:
-                lines = f.readlines()
+            content = await asyncio.to_thread(Path(file_path).read_text, encoding="utf-8")
+            lines = content.splitlines(keepends=True)
         except (FileNotFoundError, OSError):
             return {
                 "error": f"File not found: {symbol.file_path}",
@@ -174,9 +177,8 @@ class CodeSnippetExtractor:
         file_path = self._resolve_path(symbol.file_path)
 
         try:
-            with open(file_path, encoding="utf-8") as f:
-                content = f.read()
-                lines = content.split("\n")
+            content = Path(file_path).read_text(encoding="utf-8")
+            lines = content.split("\n")
         except (FileNotFoundError, OSError):
             return []
 
@@ -192,7 +194,7 @@ class CodeSnippetExtractor:
 
         return examples
 
-    def _analyze_function_structure_ts(self, node, symbol: Symbol) -> dict[str, Any]:
+    def _analyze_function_structure_ts(self, _node, symbol: Symbol) -> dict[str, Any]:
         """Analyze function structure using tree-sitter"""
         # Simplified structure - just return basic info
         return {
@@ -202,7 +204,7 @@ class CodeSnippetExtractor:
             "type": "function",
         }
 
-    def _analyze_class_structure_ts(self, node, symbol: Symbol) -> dict[str, Any]:
+    def _analyze_class_structure_ts(self, _node, symbol: Symbol) -> dict[str, Any]:
         """Analyze class structure using tree-sitter"""
         # Simplified structure - just return basic info
         return {
@@ -212,7 +214,7 @@ class CodeSnippetExtractor:
             "type": "class",
         }
 
-    def _analyze_module_structure_ts(self, node) -> dict[str, Any]:
+    def _analyze_module_structure_ts(self, _node) -> dict[str, Any]:
         """Analyze module structure using tree-sitter"""
         # Simplified structure - just return basic info
         return {"type": "module", "has_content": True}

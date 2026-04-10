@@ -6,6 +6,7 @@ This runs after the graph is built so we have caller/callee information.
 """
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ class QueryAssociationIndexer:
         concurrency: int = 5,
         skip_types: list[str] = None,
         batch_size: int = 20,
-        progress_callback: callable = None,
+        progress_callback: Callable = None,
     ) -> dict[str, Any]:
         """
         Generate query associations for all symbols in a repository using batch processing.
@@ -108,6 +109,12 @@ class QueryAssociationIndexer:
             if snippet:
                 code_snippets[symbol.id] = snippet.get("code", "")
 
+        # Split into batches first
+        batches = [
+            symbols_to_process[i : i + batch_size]
+            for i in range(0, len(symbols_to_process), batch_size)
+        ]
+
         # Process in batches with concurrency
         processed = 0
         failed = 0
@@ -167,18 +174,12 @@ class QueryAssociationIndexer:
                             f"Query generation: {processed}/{len(symbols_to_process)} symbols ({pct_complete}%), {total_queries} queries generated"
                         )
 
-                except Exception as e:
-                    logger.error(f"Batch {batch_idx + 1} processing failed: {e}")
+                except Exception:
+                    logger.exception(f"Batch {batch_idx + 1} processing failed")
                     failed += len(batch_symbols)
                     batches_completed += 1
                     if progress_callback:
                         progress_callback(batches_completed, len(batches))
-
-        # Split into batches and process concurrently
-        batches = [
-            symbols_to_process[i : i + batch_size]
-            for i in range(0, len(symbols_to_process), batch_size)
-        ]
 
         logger.info(f"Processing {len(batches)} batches with concurrency={concurrency}")
 
@@ -212,5 +213,4 @@ class QueryAssociationIndexer:
     async def _get_repo_symbols(self, repo_id: str) -> list[Symbol]:
         """Get all symbols for a repository"""
         # Get all symbols from the graph using the DuckDB backend
-        all_symbols = await self.graph.get_all_symbols(repo_id=repo_id)
-        return all_symbols
+        return await self.graph.get_all_symbols(repo_id=repo_id)
