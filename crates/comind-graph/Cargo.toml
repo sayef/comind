@@ -1,0 +1,12 @@
+[package]
+name = "comind-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "In-memory petgraph traversal: ripple (blast radius), thread (exec trace), zoom, PageRank context packs."
+
+[dependencies]
+comind-core.workspace = true
+petgraph = "0.8.3"

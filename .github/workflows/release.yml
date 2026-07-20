@@ -1,0 +1,74 @@
+# CoMind release — build binaries per target and publish to GitHub Releases on a version tag.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Produces `comind-<target>.tar.gz` + `.sha256` assets that install.sh / Homebrew point at.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            container: rust:1.97-bookworm
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            container: rust:1.97-bookworm
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prereqs (Linux)
+        if: runner.os == 'Linux'
+        run: apt-get update && apt-get install -y protobuf-compiler cmake perl
+
+      - name: Prereqs (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf cmake
+
+      - name: Build
+        run: cargo build --release -p comind-cli
+
+      - name: Package
+        run: |
+          tar -C target/release -czf "comind-${{ matrix.target }}.tar.gz" comind
+          shasum -a 256 "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256" \
+            2>/dev/null || sha256sum "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comind-${{ matrix.target }}
+          path: comind-${{ matrix.target }}.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          generate_release_notes: true

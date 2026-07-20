@@ -1,0 +1,102 @@
+# CoMind org index — builds the shared, versioned code-intelligence artifact on S3.
+#
+# Model: one central indexing job (this workflow) checks out the team's repos, builds the
+# cross-repo graph + embeddings + LLM enrichment, and writes a new atomically-versioned Lance
+# dataset to S3. Every developer's `comind serve` / `search` reads that same fresh artifact.
+#
+# Triggers: manual, nightly, and repository_dispatch (member repos fire this on push to main).
+name: comind-index
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *" # 02:00 UTC nightly (CET/CEST off-hours)
+  repository_dispatch:
+    types: [comind-reindex] # member repos: curl the dispatch API on push to main
+
+concurrency:
+  group: comind-index
+  cancel-in-progress: true # a newer push supersedes an in-flight index
+
+permissions:
+  contents: read
+  id-token: write # OIDC → AWS, no long-lived keys
+
+env:
+  # Where the org graph lives. `_graph` subdir is created by `comind link`.
+  COMIND_S3_URI: s3://bucket-temporary-test/lancedb/org
+  AWS_REGION: eu-central-1
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout comind (the engine)
+        uses: actions/checkout@v4
+        with:
+          path: comind
+
+      # Check out each member repo with full history so incremental indexing can diff commits.
+      # Add one block per repo; a matrix works too if the set is dynamic.
+      - name: Checkout shared-lib
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/shared-lib
+          path: repos/shared-lib
+          fetch-depth: 0
+          token: ${{ secrets.COMIND_REPO_TOKEN }}
+      - name: Checkout odin
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/odin
+          path: repos/odin
+          fetch-depth: 0
+          token: ${{ secrets.COMIND_REPO_TOKEN }}
+      # … repeat for skill-graph, vineyard, skill-detector, etc.
+
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Rust toolchain (pinned via rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            comind/target
+          key: comind-${{ runner.os }}-${{ hashFiles('comind/Cargo.lock') }}
+
+      - name: Build comind (release, single binary)
+        working-directory: comind
+        run: cargo build --release -p comind-cli
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.COMIND_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build & publish the org index
+        working-directory: comind
+        env:
+          # Enrichment is opt-in and sends code signatures to OpenAI — omit to skip.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COMIND_LLM_MODEL: gpt-4o-mini
+        run: |
+          ./target/release/comind link \
+            ../repos/shared-lib \
+            ../repos/odin \
+            ../repos/skill-graph \
+            ../repos/vineyard \
+            ../repos/skill-detector \
+            --to "$COMIND_S3_URI" \
+            --embed \
+            --enrich --enrich-top 200
+
+      - name: Summary
+        run: |
+          echo "Org index published to $COMIND_S3_URI/_graph (new Lance version = atomic latest pointer)."
+          echo "Consumers: comind serve --from $COMIND_S3_URI/_graph"

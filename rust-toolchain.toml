@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned for this project only (does not change your global default).
+# The LanceDB + AWS SDK stack requires a recent compiler.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

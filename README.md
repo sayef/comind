@@ -1,215 +1,120 @@
 # CoMind
 
-**Graph-powered code intelligence engine with semantic search, execution flow analysis, and LLM-enhanced documentation.**
+**Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.**
 
-CoMind indexes your codebase into a knowledge graph, enabling powerful semantic search, impact analysis, and automated documentation generation through an MCP (Model Context Protocol) server.
+CoMind indexes a whole team's repositories into one versioned knowledge graph on object storage,
+then serves it to coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search,
+it answers *structural, cross-repo* questions deterministically: **who breaks if I change this?**,
+**what's the minimal context to change X safely?**, **where across the org is this used?**
 
-## Features
+Written in Rust. One static binary. No server to run, no per-developer re-indexing.
 
-- 🔍 **Hybrid Search**: BM25 + semantic embeddings for accurate code search
-- 🕸️ **Knowledge Graph**: DuckDB-powered graph with symbols, relationships, and execution flows
-- 🤖 **LLM Integration**: Automated wiki generation and query associations
-- 📊 **Impact Analysis**: Blast radius analysis for safe refactoring
-- 🔄 **Execution Tracing**: Detect and search multi-step execution flows
-- 🎯 **MCP Server**: Direct AI agent integration via Model Context Protocol
-- ⚡ **Fast Indexing**: Incremental updates with batch processing
+## Why it's different
 
-## Installation
+- **Deterministic graph, not fuzzy RAG.** Calls/imports/inheritance come from the AST (tree-sitter),
+  not from an LLM guessing — exact, reproducible, free to build.
+- **Cross-repo by design.** Global symbol identity (SCIP scheme) links a definition in `shared-lib`
+  to its users in every other repo. `ripple` gives org-wide blast radius.
+- **Always fresh, shared once.** Push to master → CI builds a new atomically-versioned index on S3;
+  every agent reads the same fresh artifact. Incremental: only changed files/symbols are recomputed.
+- **Token-minimal answers.** `context_pack` returns the smallest correct read-set (personalized
+  PageRank over the dependency graph) within a token budget — not a grep dump.
+- **Graph-aware hybrid search.** Local static embeddings (Model2Vec) + lexical matching + a
+  dependency-**centrality** signal no pure search tool has.
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/comind.git
-cd comind/app
+## Install
 
-# Install with uv (recommended)
-uv sync
-
-# Or with pip
-pip install -e .
-```
-
-## Quick Start
-
-### 1. Index a Repository
+Prebuilt binaries (macOS arm64/x64, Linux x64/arm64) are published to
+[GitHub Releases](https://github.com/sayef/comind/releases) by the
+[`release`](.github/workflows/release.yml) workflow on each `vX.Y.Z` tag.
 
 ```bash
-# Basic indexing
-comind analyze --name my-repo /path/to/repo
-
-# With LLM-powered features (requires API key)
-export OPENAI_API_KEY=your-key-here
-comind analyze --name my-repo /path/to/repo --gen-wiki --gen-queries
+# One-line installer (set GITHUB_TOKEN while the repo is private)
+curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
 ```
 
-### 2. Use the MCP Server
+Or build from source:
 
-Add to your MCP client configuration (e.g., Claude Desktop):
+```bash
+# Requires: Rust (pinned via rust-toolchain.toml), protoc, cmake  (`brew install protobuf cmake`)
+git clone https://github.com/sayef/comind && cd comind
+cargo build --release -p comind-cli      # → target/release/comind
+```
+
+Coming once the repo is public: `cargo install comind-cli` (crates.io) and a Homebrew tap.
+
+## Quick start
+
+```bash
+# 1. Build the org index from several repos → local dir or S3, with embeddings + LLM enrichment
+comind link ../shared-lib ../odin ../skill-graph --to s3://my-bucket/comind/org --embed --enrich
+
+# 2. Explore / search from the prebuilt index (instant, no re-parse)
+comind explore NamedOwner --from s3://my-bucket/comind/org/_graph      # zoom + ripple + context-pack
+comind search  "how do we connect to postgres" --from s3://my-bucket/comind/org/_graph
+
+# 3. Serve it to an agent over MCP
+comind serve --from s3://my-bucket/comind/org/_graph
+```
+
+Add to your MCP client (e.g. Claude Code):
 
 ```json
 {
   "mcpServers": {
     "comind": {
-      "command": "comind",
-      "args": ["mcp"]
+      "command": "/path/to/comind",
+      "args": ["serve", "--from", "s3://my-bucket/comind/org/_graph"]
     }
   }
 }
 ```
 
-### 3. Query via MCP Tools
+MCP tools: `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`, `guide`.
 
-```python
-# Available MCP tools:
-- repos()           # List indexed repositories
-- find(query, repo) # Semantic search
-- flows(query, repo)# Search execution flows
-- zoom(symbol, repo)# 360° symbol context
-- ripple(symbol)    # Impact analysis
-- thread(entry)     # Execution trace
-- guide(repo)       # Coding style guide
-```
+## Commands
 
-### 4. API Server (Optional)
+| Command | Purpose |
+|---|---|
+| `comind index <repo> --to <uri> [--incremental]` | Index one repo (git-incremental) |
+| `comind link <repos…> --to <uri> [--embed] [--enrich] [--incremental]` | Build the cross-repo org index |
+| `comind changed <repo> --since <sha>` | Show files changed since a commit (git diff) |
+| `comind explore <focus> --from <uri>` | Zoom, blast radius, context pack for a symbol |
+| `comind search <query…> --from <uri>` | Graph-aware hybrid code search |
+| `comind serve --from <uri>` | MCP server over stdio |
 
-```bash
-# Start the REST API server
-comind serve
+## CI (push-to-master → fresh org index)
 
-# Or with uvicorn directly
-uvicorn comind.api.server:create_app --host 0.0.0.0 --port 8000
-
-# API documentation at http://localhost:8000/docs
-```
-
-API Usage:
-```bash
-# Index a repository
-curl -X POST "http://localhost:8000/repos/index" \
-  -H "Content-Type: application/json" \
-  -d '{"repo_path": "/path/to/repo", "recursive": true}'
-
-# Search code
-curl -X POST "http://localhost:8000/query/search" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "user authentication", "max_results": 10}'
-```
+See [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) and
+[`docs/CI.md`](docs/CI.md) (GitLab variant included). The CI job clones the repos and runs
+`comind link … --to s3://… --embed --enrich --incremental`; Lance's version manifest is the atomic
+"latest" pointer every consumer reads. **LLM enrichment is opt-in** (`--enrich`) and sends code
+signatures to the OpenAI API only when enabled.
 
 ## Architecture
 
+Rust workspace, one crate per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
+the competitive landscape, and the phase log.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Client Applications                      │
-│  (IDEs, Web UI, CLI tools, AI Agents via MCP)               │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-                            │ MCP Protocol / REST API
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│                   Query Enhancement Layer                    │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  Wiki-Enhanced Search Engine                         │   │
-│  │  • Hybrid search (BM25 + semantic embeddings)        │   │
-│  │  • Wiki content as context enrichment                │   │
-│  │  • Graph-aware result ranking (RRF)                  │   │
-│  │  • Execution flow detection                          │   │
-│  └──────────────────────────────────────────────────────┘   │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│                   Core Processing Layer                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Graph      │  │    Wiki      │  │   Code Snippet   │  │
-│  │   Query      │  │  Generator   │  │    Extractor     │  │
-│  │   Engine     │  │   (LLM)      │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│                      Storage Layer (DuckDB)                  │
-│  ┌────────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │ Knowledge Graph│  │ Vector Search│  │ Full-Text      │  │
-│  │  (DuckPGQ)     │  │  (VSS HNSW)  │  │ Search (FTS)   │  │
-│  └────────────────┘  └──────────────┘  └────────────────┘  │
-│                Single DuckDB file                            │
-└─────────────────────────────────────────────────────────────┘
+comind-core   SCIP identity, Symbol/Edge model
+comind-parse  tree-sitter → symbols + intra-file edges (Python, TypeScript; polyglot-ready)
+comind-git    git change detection (incremental)
+comind-resolve cross-repo import/call binding
+comind-index  LanceDB (S3) versioned store: graph, embeddings, enrichment, style guide
+comind-graph  in-memory petgraph: ripple / thread / zoom / context_pack
+comind-embed  Model2Vec static embeddings + code-aware ranking
+comind-llm    OpenAI summaries / query generation / style guide (opt-in)
+comind-mcp    rmcp MCP server (7 tools)
+comind-cli    the single `comind` binary
 ```
 
-### Technical Stack
+## Status
 
-### Storage
-- **DuckDB**: Single-file database with VSS (vector search), FTS (full-text), and graph support
-- **Embeddings**: BAAI/bge-small-en-v1.5 for semantic search
-- **Incremental**: Smart caching and change detection
-
-### Indexing Pipeline
-1. **Parse** → Extract symbols and relationships
-2. **Graph** → Build knowledge graph in DuckDB
-3. **Embeddings** → Generate semantic vectors
-4. **Wiki** → LLM-generated documentation (optional)
-5. **Queries** → Natural language associations (optional)
-6. **Flows** → Detect execution patterns
-
-### Search Strategy
-- **Hybrid**: Combines BM25, semantic, and graph-based search
-- **Reciprocal Rank Fusion**: Merges results from multiple strategies
-- **Context-aware**: Includes callers, callees, and execution flows
-
-## Configuration
-
-Edit `app/config.yml` or use environment variables:
-
-```yaml
-storage:
-  data_dir: ~/.comind/data
-
-search:
-  embedding_model: BAAI/bge-small-en-v1.5
-  
-wiki:
-  llm_provider: openai
-  llm_model: gpt-4o-mini
-```
-
-Environment variables:
-- `OPENAI_API_KEY` - For wiki and query generation
-- `COMIND_DATA_DIR` - Override data directory
-- `COMIND_LOG_LEVEL` - Set logging level
-
-## Development
-
-```bash
-# Install dev dependencies
-uv sync --all-extras
-
-# Run tests
-pytest
-
-# Format code
-ruff format .
-
-# Lint
-ruff check .
-```
-
-## Performance
-
-- **Batch Processing**: 30-60x faster query generation (20 symbols/batch)
-- **Concurrent Reads**: Read-only MCP server allows queries during indexing
-- **Smart Caching**: Incremental updates skip unchanged files
-- **HNSW Indexes**: Fast vector similarity search
+Core complete (P0–P7): parse → resolve → index → graph → embed → enrich → search → serve, with
+git-incremental indexing at both repo and org level, and CI. Roadmap: real BM25+RRF fusion, a Lance
+ANN index for very large corpora, and `cargo install` / brew / curl packaging.
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md for guidelines.
-
-## Acknowledgments
-
-Built with:
-- [DuckDB](https://duckdb.org/) - Embedded analytics database
-- [FastEmbed](https://github.com/qdrant/fastembed) - Fast embedding generation
-- [BM25S](https://github.com/xhluca/bm25s) - BM25 implementation
-- [MCP](https://modelcontextprotocol.io/) - Model Context Protocol
+MIT.

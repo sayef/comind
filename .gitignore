@@ -1,116 +1,43 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# Rust
+/target
+**/*.rs.bk
+*.pdb
 
-# Virtual environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.venv/
-app/.venv/
+# Cargo.lock IS committed (this workspace produces a binary).
 
-# PyCharm
+# Vendored crate patches (used transiently for dependency workarounds)
+/vendor
+
+# Editors
 .idea/
-
-# VS Code
 .vscode/
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
+# Claude / AI assistant
+.claude/
 
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Ruff
-.ruff_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# CoMind specific - Data and indexes
-/Users/msi/.comind/
+# CoMind local data / indexes
 .comind/
 *.duckdb
 *.duckdb.wal
 
-# CoMind specific - Generated files
-app/htmlcov/
-*.pkl
-*.pickle
-
-# Logs
+# Logs & scratch
 *.log
 logs/
-
-# OS specific
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Temporary files
 *.tmp
 *.temp
 *.swp
-*.swo
 *~
 
-# Claude/AI assistant files
-.claude/
-
-# Documentation builds
-docs/_build/
-site/
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# API keys and secrets (extra safety)
+# Environment & secrets
+.env
+.env.local
+.env.*.local
 *secret*
-*key*.json
 credentials.json
+
+# OS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db

@@ -1,0 +1,74 @@
+# CoMind cross-platform smoke test.
+#
+# Build once on an OLD glibc (portable), then run the prebuilt binary on clean distro images
+# via `docker run` — the real "does it run on a fresh box" test (no Rust/protoc installed there).
+# macOS is built + tested natively (containers can't cover it).
+name: test-matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ---- Linux: build a portable glibc binary, then exec it on several distros --------------
+  build-linux:
+    runs-on: ubuntu-latest
+    container: rust:1.97-bookworm # build on Debian 12; for max portability switch to an older base
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y protobuf-compiler cmake
+      - run: cargo build --release -p comind-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comind-linux
+          path: target/release/comind
+
+  smoke-linux:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu:20.04
+          - ubuntu:22.04
+          - debian:12
+          - rockylinux:9
+        include:
+          - image: alpine:3.20
+            musl: true # glibc binary on musl — expected to fail until we ship a musl build
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: comind-linux }
+      - run: chmod +x comind
+      - name: Smoke test on ${{ matrix.image }}
+        continue-on-error: ${{ matrix.musl == true }}
+        run: |
+          docker run --rm -v "$PWD":/w -w /w "${{ matrix.image }}" sh -c '
+            set -e
+            mkdir -p /tmp/s && printf "class A:\n  def run(self):\n    pass\n" > /tmp/s/x.py
+            ./comind --help
+            ./comind index /tmp/s            # exercises tree-sitter + binary load, no network
+          '
+
+  # ---- macOS: build + smoke natively (arm64 on macos-14, x64 on macos-13) -----------------
+  build-test-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install protobuf cmake
+      - run: cargo build --release -p comind-cli
+      - name: Smoke test
+        run: |
+          mkdir -p /tmp/s && printf 'class A:\n  def run(self):\n    pass\n' > /tmp/s/x.py
+          ./target/release/comind --help
+          ./target/release/comind index /tmp/s
+
+  # Windows is intentionally omitted for now: aws-lc-sys (BoringSSL) + vendored libgit2 on MSVC
+  # need extra setup (nasm, protoc, cmake). Add a windows-latest job once those are proven.

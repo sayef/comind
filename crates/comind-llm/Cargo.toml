@@ -1,0 +1,17 @@
+[package]
+name = "comind-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+# `chat-completion` enables the Client + chat API (default already provides `rustls`).
+async-openai = { version = "0.41.1", features = ["chat-completion"] }
+comind-core.workspace = true
+futures = "0.3.33"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros"] }
