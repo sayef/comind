@@ -174,7 +174,10 @@ struct PackParam {
 
 #[tool_router(server_handler)]
 impl ComindServer {
-    #[tool(name = "repos", description = "List indexed repositories and their symbol counts")]
+    #[tool(
+        name = "repos",
+        description = "List indexed repositories and their symbol counts"
+    )]
     fn repos(&self, _p: Parameters<NoArgs>) -> Json<ReposDto> {
         Json(ReposDto {
             repos: self
@@ -186,7 +189,10 @@ impl ComindServer {
         })
     }
 
-    #[tool(name = "find", description = "Find code symbols by name or path substring")]
+    #[tool(
+        name = "find",
+        description = "Find code symbols by name or path substring"
+    )]
     fn find(&self, Parameters(p): Parameters<FindParam>) -> Json<FindDto> {
         let limit = p.limit.unwrap_or(20) as usize;
         Json(FindDto {
@@ -260,7 +266,10 @@ impl ComindServer {
         })
     }
 
-    #[tool(name = "guide", description = "The repo's inferred coding style guide (naming, typing, structure)")]
+    #[tool(
+        name = "guide",
+        description = "The repo's inferred coding style guide (naming, typing, structure)"
+    )]
     fn guide(&self, _p: Parameters<NoArgs>) -> Json<GuideDto> {
         Json(GuideDto {
             found: self.style_guide.is_some(),
@@ -268,11 +277,19 @@ impl ComindServer {
         })
     }
 
-    #[tool(name = "thread", description = "Forward call trace from an entry-point symbol")]
+    #[tool(
+        name = "thread",
+        description = "Forward call trace from an entry-point symbol"
+    )]
     fn thread(&self, Parameters(p): Parameters<DepthParam>) -> Json<ThreadDto> {
         let depth = p.depth.unwrap_or(4) as usize;
         let trace = match self.graph.lookup(&p.focus) {
-            Some(idx) => self.graph.thread(idx, depth).into_iter().map(hop_dto).collect(),
+            Some(idx) => self
+                .graph
+                .thread(idx, depth)
+                .into_iter()
+                .map(hop_dto)
+                .collect(),
             None => vec![],
         };
         Json(ThreadDto { trace })

@@ -60,7 +60,12 @@ impl LlmClient {
                     .into(),
             ])
             .build()?;
-        let resp = self.client.chat().create(req).await.context("openai chat")?;
+        let resp = self
+            .client
+            .chat()
+            .create(req)
+            .await
+            .context("openai chat")?;
         Ok(resp
             .choices
             .into_iter()
@@ -72,7 +77,12 @@ impl LlmClient {
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.
-    pub async fn enrich_symbol(&self, name: &str, signature: &str, context: &str) -> Result<Enrichment> {
+    pub async fn enrich_symbol(
+        &self,
+        name: &str,
+        signature: &str,
+        context: &str,
+    ) -> Result<Enrichment> {
         let system = "You document code for a search index. Reply in exactly this format:\n\
              SUMMARY: <one concise sentence describing what this does>\n\
              QUERIES: <3 natural-language questions a developer might ask that this code answers, separated by ` | `>\n\
@@ -124,7 +134,12 @@ fn parse_enrichment(raw: &str) -> Enrichment {
     }
     if summary.is_empty() {
         // Model didn't follow format — fall back to the first non-empty line.
-        summary = raw.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string();
+        summary = raw
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_string();
     }
     Enrichment { summary, queries }
 }

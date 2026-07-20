@@ -191,7 +191,8 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
                 signature: Some(first_line(node, ctx.source)),
                 docstring: None,
             });
-            out.edges.push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
+            out.edges
+                .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
 
             let enclosing = if is_callable(&kind) {
                 sym_id.clone()
@@ -225,8 +226,12 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
         if let Some(callee) = callee_name(node, ctx.lang, ctx.source) {
             // Provisional target: name only, unresolved scope. Rebound in comind-resolve.
             let target = id(ctx.repo_name, &format!("?/{}()", callee));
-            out.edges
-                .push(edge(&scope.enclosing_callable, &target, EdgeKind::Calls, 0.4));
+            out.edges.push(edge(
+                &scope.enclosing_callable,
+                &target,
+                EdgeKind::Calls,
+                0.4,
+            ));
         }
     }
 
@@ -261,7 +266,10 @@ fn is_call(lang: &Language, node_kind: &str) -> bool {
     matches!(
         (lang, node_kind),
         (Language::Python, "call")
-            | (Language::TypeScript | Language::JavaScript, "call_expression")
+            | (
+                Language::TypeScript | Language::JavaScript,
+                "call_expression"
+            )
     )
 }
 

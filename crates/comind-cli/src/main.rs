@@ -139,7 +139,10 @@ fn cmd_explore(args: &[String]) -> ExitCode {
     for h in &hits {
         *by_repo.entry(h.node.repo.clone()).or_default() += 1;
     }
-    println!("\nripple (blast radius, ≤4 hops): {} dependents", hits.len());
+    println!(
+        "\nripple (blast radius, ≤4 hops): {} dependents",
+        hits.len()
+    );
     for (repo, n) in &by_repo {
         println!("  {repo:<16} {n}");
     }
@@ -163,13 +166,13 @@ fn print_group(label: &str, nodes: &[comind_graph::Node], limit: usize) {
     if nodes.is_empty() {
         return;
     }
-    let names: Vec<String> = nodes
-        .iter()
-        .take(limit)
-        .map(|n| n.name.clone())
-        .collect();
+    let names: Vec<String> = nodes.iter().take(limit).map(|n| n.name.clone()).collect();
     let more = nodes.len().saturating_sub(limit);
-    let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
+    let suffix = if more > 0 {
+        format!(" (+{more})")
+    } else {
+        String::new()
+    };
     println!("  {label}: {}{suffix}", names.join(", "));
 }
 
@@ -216,13 +219,14 @@ fn cmd_search(args: &[String]) -> ExitCode {
     };
 
     // LLM enrichment (summaries + generated queries), if present — folded into ranking + shown.
-    let enrich: HashMap<String, (String, Vec<String>)> = comind_index::read_enrichment_blocking(uri)
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(id, s, q)| (id.render(), (s, q)))
-        .collect();
+    let enrich: HashMap<String, (String, Vec<String>)> =
+        comind_index::read_enrichment_blocking(uri)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, s, q)| (id.render(), (s, q)))
+            .collect();
 
     // Native LanceDB hybrid retrieval: BM25 full-text + vector, fused with RRF. We then apply
     // code-aware boosts and our dependency-graph centrality signal on top.
@@ -393,7 +397,10 @@ fn cmd_serve(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     eprintln!("comind serve: loading graph from {uri} ...");
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("comind serve: runtime: {e}");
@@ -443,7 +450,10 @@ fn cmd_link(args: &[String]) -> ExitCode {
                 i += 1;
             }
             "--enrich-top" => {
-                enrich_top = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(enrich_top);
+                enrich_top = args
+                    .get(i + 1)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(enrich_top);
                 enrich = true;
                 i += 2;
             }
@@ -469,7 +479,11 @@ fn cmd_link(args: &[String]) -> ExitCode {
         let name = repo_name(path);
         match comind_parse::parse_repo(Path::new(path), &name) {
             Ok(o) => {
-                println!("  {name:<16} {:>6} symbols, {:>6} edges", o.symbols.len(), o.edges.len());
+                println!(
+                    "  {name:<16} {:>6} symbols, {:>6} edges",
+                    o.symbols.len(),
+                    o.edges.len()
+                );
                 symbols.extend(o.symbols);
                 edges.extend(o.edges);
             }
@@ -511,13 +525,19 @@ fn cmd_link(args: &[String]) -> ExitCode {
         } else {
             descriptor.clone()
         };
-        println!("  {short:<48} {def_repo:<12} {:>4}  {refs:>5}", importers.len());
+        println!(
+            "  {short:<48} {def_repo:<12} {:>4}  {refs:>5}",
+            importers.len()
+        );
     }
 
     // ripple demo on the single most-depended-on symbol.
     if let Some((descriptor, (def_repo, importers, refs))) = ranked.first() {
         println!("\nripple({descriptor})  [defined in {def_repo}]");
-        println!("  changing this would impact {} repos ({refs} references):", importers.len());
+        println!(
+            "  changing this would impact {} repos ({refs} references):",
+            importers.len()
+        );
         for repo in importers {
             println!("    - {repo}");
         }
@@ -550,7 +570,9 @@ fn cmd_link(args: &[String]) -> ExitCode {
         let current_heads: Vec<(String, String)> = repos
             .iter()
             .filter_map(|p| {
-                comind_git::head_commit(Path::new(p)).ok().map(|h| (repo_name(p), h))
+                comind_git::head_commit(Path::new(p))
+                    .ok()
+                    .map(|h| (repo_name(p), h))
             })
             .collect();
         let stale_ids: HashSet<String> = if incremental {
@@ -559,7 +581,11 @@ fn cmd_link(args: &[String]) -> ExitCode {
             symbols.iter().map(|s| s.id.render()).collect() // full recompute
         };
         if incremental {
-            eprintln!("(incremental: {} of {} symbols stale)", stale_ids.len(), symbols.len());
+            eprintln!(
+                "(incremental: {} of {} symbols stale)",
+                stale_ids.len(),
+                symbols.len()
+            );
         }
 
         if embed {
@@ -569,9 +595,14 @@ fn cmd_link(args: &[String]) -> ExitCode {
         }
 
         if enrich {
-            if let ExitCode::FAILURE =
-                run_enrich(&dst, &symbols, &resolved.edges, enrich_top, &stale_ids, incremental)
-            {
+            if let ExitCode::FAILURE = run_enrich(
+                &dst,
+                &symbols,
+                &resolved.edges,
+                enrich_top,
+                &stale_ids,
+                incremental,
+            ) {
                 return ExitCode::FAILURE;
             }
         }
@@ -594,7 +625,12 @@ fn compute_stale_ids(repos: &[&str], dst: &str, symbols: &[Symbol]) -> HashSet<S
         let set = match (prior.get(&name), comind_git::head_commit(Path::new(p))) {
             (Some(base), Ok(_)) => comind_git::changed_files(Path::new(p), base)
                 .ok()
-                .map(|cs| cs.added.into_iter().chain(cs.modified).collect::<HashSet<_>>()),
+                .map(|cs| {
+                    cs.added
+                        .into_iter()
+                        .chain(cs.modified)
+                        .collect::<HashSet<_>>()
+                }),
             _ => None, // no prior commit, or not a git repo → everything stale
         };
         changed.insert(name, set);
@@ -611,7 +647,12 @@ fn compute_stale_ids(repos: &[&str], dst: &str, symbols: &[Symbol]) -> HashSet<S
 
 /// Embed symbols, reusing prior vectors for non-stale symbols (incremental) and computing only
 /// stale/new ones. Persists the merged embeddings.
-fn run_embed(dst: &str, symbols: &[Symbol], stale_ids: &HashSet<String>, incremental: bool) -> ExitCode {
+fn run_embed(
+    dst: &str,
+    symbols: &[Symbol],
+    stale_ids: &HashSet<String>,
+    incremental: bool,
+) -> ExitCode {
     let embedder = match comind_embed::Embedder::load_default() {
         Ok(e) => e,
         Err(e) => {
@@ -651,7 +692,10 @@ fn run_embed(dst: &str, symbols: &[Symbol], stale_ids: &HashSet<String>, increme
         }
         to_embed.push(s);
     }
-    let texts: Vec<String> = to_embed.iter().map(|s| comind_embed::symbol_text(s)).collect();
+    let texts: Vec<String> = to_embed
+        .iter()
+        .map(|s| comind_embed::symbol_text(s))
+        .collect();
     for (s, v) in to_embed.iter().zip(embedder.embed(&texts)) {
         rows.push((s.id.clone(), comind_embed::symbol_text(s), v));
     }
@@ -687,7 +731,10 @@ fn run_enrich(
             return ExitCode::FAILURE;
         }
     };
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("comind link: runtime: {e}");
@@ -742,13 +789,23 @@ fn run_enrich(
 
     let items: Vec<(String, String, String)> = to_call
         .iter()
-        .map(|s| (s.name.clone(), s.signature.clone().unwrap_or_default(), s.file_path.clone()))
+        .map(|s| {
+            (
+                s.name.clone(),
+                s.signature.clone().unwrap_or_default(),
+                s.file_path.clone(),
+            )
+        })
         .collect();
     if !items.is_empty() {
         eprintln!(
             "NOTE: --enrich sends code (names/signatures) to the OpenAI API — opt-in egress."
         );
-        eprintln!("enriching {} symbols via {} ...", items.len(), comind_llm::DEFAULT_MODEL);
+        eprintln!(
+            "enriching {} symbols via {} ...",
+            items.len(),
+            comind_llm::DEFAULT_MODEL
+        );
     }
     let results = rt.block_on(client.enrich_batch(&items));
     for (s, r) in to_call.iter().zip(results) {
@@ -778,11 +835,18 @@ fn run_enrich(
         }
     }
     if !items.is_empty() {
-        let samples: Vec<String> = items.iter().take(20).map(|(_, sig, _)| sig.clone()).collect();
+        let samples: Vec<String> = items
+            .iter()
+            .take(20)
+            .map(|(_, sig, _)| sig.clone())
+            .collect();
         match rt.block_on(client.style_guide(&samples)) {
             Ok(guide) => {
                 let _ = comind_index::write_style_guide_blocking(dst, &guide);
-                println!("\nstyle guide (persisted; preview):\n{}", truncate_lines(&guide, 8));
+                println!(
+                    "\nstyle guide (persisted; preview):\n{}",
+                    truncate_lines(&guide, 8)
+                );
             }
             Err(e) => eprintln!("comind link: style guide failed (non-fatal): {e:#}"),
         }
@@ -861,7 +925,11 @@ fn cmd_index(args: &[String]) -> ExitCode {
     for s in &out.symbols {
         *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
     }
-    let calls = out.edges.iter().filter(|e| e.kind == EdgeKind::Calls).count();
+    let calls = out
+        .edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .count();
     let contains = out
         .edges
         .iter()
@@ -873,7 +941,10 @@ fn cmd_index(args: &[String]) -> ExitCode {
     for (k, n) in &by_kind {
         println!("  {k:<10} {n}");
     }
-    println!("edges: {} (contains={contains}, calls={calls})", out.edges.len());
+    println!(
+        "edges: {} (contains={contains}, calls={calls})",
+        out.edges.len()
+    );
 
     println!("\nsample callables:");
     for s in out
@@ -953,8 +1024,10 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let newout = comind_parse::parse_files(root, repo_name, &to_parse);
 
     // Map each symbol id to its file so we can drop edges owned by changed files.
-    let file_of: HashMap<String, String> =
-        prior_syms.iter().map(|s| (s.id.render(), s.file_path.clone())).collect();
+    let file_of: HashMap<String, String> = prior_syms
+        .iter()
+        .map(|s| (s.id.render(), s.file_path.clone()))
+        .collect();
     let before = prior_syms.len();
 
     let mut symbols: Vec<Symbol> = prior_syms
@@ -963,7 +1036,11 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         .collect();
     let mut edges: Vec<Edge> = prior_edges
         .into_iter()
-        .filter(|e| file_of.get(&e.src.render()).is_none_or(|f| !dropped.contains(f)))
+        .filter(|e| {
+            file_of
+                .get(&e.src.render())
+                .is_none_or(|f| !dropped.contains(f))
+        })
         .collect();
     symbols.extend(newout.symbols);
     edges.extend(newout.edges);

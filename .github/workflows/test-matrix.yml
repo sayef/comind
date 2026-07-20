@@ -5,17 +5,18 @@
 # macOS is built + tested natively (containers can't cover it).
 name: test-matrix
 
+# Expensive (full release build + many distros/macOS). Nightly + manual only — NOT every push.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC nightly
 
 jobs:
   # ---- Linux: build a portable glibc binary, then exec it on several distros --------------
   build-linux:
     runs-on: ubuntu-latest
-    container: rust:1.97-bookworm # build on Debian 12; for max portability switch to an older base
+    # Debian 11 (glibc 2.31) → binary runs on Ubuntu 20.04+, Rocky 9, Debian 11/12, etc.
+    container: rust:1.97-bullseye
     steps:
       - uses: actions/checkout@v4
       - run: apt-get update && apt-get install -y protobuf-compiler cmake

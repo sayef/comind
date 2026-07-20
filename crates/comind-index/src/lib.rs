@@ -13,8 +13,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use comind_core::{Edge, Symbol};
 use lancedb::arrow::arrow_array::{
-    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
-    UInt32Array,
+    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray, UInt32Array,
 };
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use lancedb::table::AddDataMode;
@@ -244,14 +243,20 @@ fn id_from_rendered(s: &str) -> GlobalSymbolId {
     }
 }
 
-fn str_col<'a>(batch: &'a lancedb::arrow::arrow_array::RecordBatch, name: &str) -> Result<&'a StringArray> {
+fn str_col<'a>(
+    batch: &'a lancedb::arrow::arrow_array::RecordBatch,
+    name: &str,
+) -> Result<&'a StringArray> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         .with_context(|| format!("column `{name}` missing or not Utf8"))
 }
 
-fn u32_col<'a>(batch: &'a lancedb::arrow::arrow_array::RecordBatch, name: &str) -> Result<&'a UInt32Array> {
+fn u32_col<'a>(
+    batch: &'a lancedb::arrow::arrow_array::RecordBatch,
+    name: &str,
+) -> Result<&'a UInt32Array> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<UInt32Array>())
@@ -265,7 +270,13 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 
     // symbols
     let mut symbols = Vec::new();
-    let mut st = db.open_table("symbols").execute().await?.query().execute().await?;
+    let mut st = db
+        .open_table("symbols")
+        .execute()
+        .await?
+        .query()
+        .execute()
+        .await?;
     while let Some(b) = st.try_next().await? {
         let (scheme, pm, pkg, ver, desc) = (
             str_col(&b, "scheme")?,
@@ -304,8 +315,14 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
                 repo: RepoId(repo.value(i).to_string()),
                 file_path: file.value(i).to_string(),
                 range: Range {
-                    start: Position { line: ls.value(i), column: cs.value(i) },
-                    end: Position { line: le.value(i), column: ce.value(i) },
+                    start: Position {
+                        line: ls.value(i),
+                        column: cs.value(i),
+                    },
+                    end: Position {
+                        line: le.value(i),
+                        column: ce.value(i),
+                    },
                 },
                 signature: (!sig.is_null(i)).then(|| sig.value(i).to_string()),
                 docstring: (!doc.is_null(i)).then(|| doc.value(i).to_string()),
@@ -315,7 +332,13 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 
     // edges
     let mut edges = Vec::new();
-    let mut st = db.open_table("edges").execute().await?.query().execute().await?;
+    let mut st = db
+        .open_table("edges")
+        .execute()
+        .await?
+        .query()
+        .execute()
+        .await?;
     while let Some(b) = st.try_next().await? {
         let src = str_col(&b, "src_id")?;
         let dst = str_col(&b, "dst_id")?;
@@ -516,10 +539,12 @@ pub async fn write_repo_commits(uri: &str, commits: &[(String, String)]) -> Resu
     let batch = RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(StringArray::from_iter_values(commits.iter().map(|(r, _)| r.clone())))
-                as ArrayRef,
-            Arc::new(StringArray::from_iter_values(commits.iter().map(|(_, c)| c.clone())))
-                as ArrayRef,
+            Arc::new(StringArray::from_iter_values(
+                commits.iter().map(|(r, _)| r.clone()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from_iter_values(
+                commits.iter().map(|(_, c)| c.clone()),
+            )) as ArrayRef,
         ],
     )
     .context("build repo_commits batch")?;
@@ -590,13 +615,21 @@ pub async fn write_search_table(
     let dim = first.len();
     let ids = StringArray::from_iter_values(rows.iter().map(|(id, _, _)| id.render()));
     let texts = StringArray::from_iter_values(rows.iter().map(|(_, t, _)| t.clone()));
-    let flat: Vec<f32> = rows.iter().flat_map(|(_, _, v)| v.iter().copied()).collect();
+    let flat: Vec<f32> = rows
+        .iter()
+        .flat_map(|(_, _, v)| v.iter().copied())
+        .collect();
     let item = Arc::new(Field::new("item", DataType::Float32, true));
-    let vectors = FixedSizeListArray::try_new(item, dim as i32, Arc::new(Float32Array::from(flat)), None)
-        .context("build vector column")?;
+    let vectors =
+        FixedSizeListArray::try_new(item, dim as i32, Arc::new(Float32Array::from(flat)), None)
+            .context("build vector column")?;
     let batch = RecordBatch::try_new(
         search_schema(dim),
-        vec![Arc::new(ids) as ArrayRef, Arc::new(texts) as ArrayRef, Arc::new(vectors) as ArrayRef],
+        vec![
+            Arc::new(ids) as ArrayRef,
+            Arc::new(texts) as ArrayRef,
+            Arc::new(vectors) as ArrayRef,
+        ],
     )
     .context("build search batch")?;
 
@@ -675,7 +708,9 @@ pub async fn hybrid_search(
             .column_by_name("_relevance_score")
             .and_then(|c| c.as_any().downcast_ref::<Float32Array>());
         for i in 0..b.num_rows() {
-            let score = scores.map(|s| s.value(i)).unwrap_or(1.0 / (rank as f32 + 1.0));
+            let score = scores
+                .map(|s| s.value(i))
+                .unwrap_or(1.0 / (rank as f32 + 1.0));
             out.push((ids.value(i).to_string(), score));
             rank += 1;
         }
@@ -684,13 +719,21 @@ pub async fn hybrid_search(
 }
 
 /// Blocking wrappers.
-pub fn write_search_table_blocking(uri: &str, rows: &[(GlobalSymbolId, String, Vec<f32>)]) -> Result<u64> {
+pub fn write_search_table_blocking(
+    uri: &str,
+    rows: &[(GlobalSymbolId, String, Vec<f32>)],
+) -> Result<u64> {
     runtime()?.block_on(write_search_table(uri, rows))
 }
 pub fn read_search_vectors_blocking(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, Vec<f32>)>>> {
     runtime()?.block_on(read_search_vectors(uri))
 }
-pub fn hybrid_search_blocking(uri: &str, text: &str, vector: Vec<f32>, k: usize) -> Result<Vec<(String, f32)>> {
+pub fn hybrid_search_blocking(
+    uri: &str,
+    text: &str,
+    vector: Vec<f32>,
+    k: usize,
+) -> Result<Vec<(String, f32)>> {
     runtime()?.block_on(hybrid_search(uri, text, vector, k))
 }
 
@@ -716,7 +759,8 @@ pub async fn write_enrichment(
     let ids = StringArray::from_iter_values(rows.iter().map(|(id, _, _)| id.render()));
     let summaries = StringArray::from_iter_values(rows.iter().map(|(_, s, _)| s.clone()));
     let queries = StringArray::from_iter_values(
-        rows.iter().map(|(_, _, q)| serde_json::to_string(q).unwrap_or_else(|_| "[]".into())),
+        rows.iter()
+            .map(|(_, _, q)| serde_json::to_string(q).unwrap_or_else(|_| "[]".into())),
     );
     let batch = RecordBatch::try_new(
         enrichment_schema(),
@@ -747,7 +791,11 @@ pub async fn read_enrichment(
         let queries = str_col(&b, "queries")?;
         for i in 0..b.num_rows() {
             let q: Vec<String> = serde_json::from_str(queries.value(i)).unwrap_or_default();
-            out.push((id_from_rendered(ids.value(i)), summaries.value(i).to_string(), q));
+            out.push((
+                id_from_rendered(ids.value(i)),
+                summaries.value(i).to_string(),
+                q,
+            ));
         }
     }
     Ok(Some(out))
@@ -770,9 +818,16 @@ pub fn read_enrichment_blocking(
 
 /// Persist the inferred repo style guide (single-row `style_guide` table).
 pub async fn write_style_guide(uri: &str, content: &str) -> Result<()> {
-    let schema = Arc::new(Schema::new(vec![Field::new("content", DataType::Utf8, false)]));
-    let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec![content])) as ArrayRef])
-        .context("build style_guide batch")?;
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "content",
+        DataType::Utf8,
+        false,
+    )]));
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![Arc::new(StringArray::from(vec![content])) as ArrayRef],
+    )
+    .context("build style_guide batch")?;
     let db = lancedb::connect(uri).execute().await?;
     write_versioned(&db, "style_guide", batch).await?;
     Ok(())

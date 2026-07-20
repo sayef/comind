@@ -91,7 +91,12 @@ impl CodeGraph {
             }
         }
 
-        Self { g, by_id, by_name, dangling_edges }
+        Self {
+            g,
+            by_id,
+            by_name,
+            dangling_edges,
+        }
     }
 
     pub fn node_count(&self) -> usize {
@@ -186,7 +191,12 @@ impl CodeGraph {
     /// (callers of callers, importers), multi-hop, cross-repo. Structural `Contains` is
     /// ignored — a containing module is not a dependency.
     pub fn ripple(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(focus, max_depth, Incoming, &[EdgeKind::Calls, EdgeKind::Imports])
+        self.bfs(
+            focus,
+            max_depth,
+            Incoming,
+            &[EdgeKind::Calls, EdgeKind::Imports],
+        )
     }
 
     /// *What does `focus` do downstream?* Forward call trace.
@@ -212,7 +222,11 @@ impl CodeGraph {
                 if !kinds.contains(e.weight()) {
                     continue;
                 }
-                let next = if dir == Incoming { e.source() } else { e.target() };
+                let next = if dir == Incoming {
+                    e.source()
+                } else {
+                    e.target()
+                };
                 if seen.insert(next) {
                     out.push(Hop {
                         node: self.node_of(next),

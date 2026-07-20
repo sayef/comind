@@ -67,7 +67,10 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge]) -> Resolved {
     let mut by_core: HashMap<&str, Vec<&Symbol>> = HashMap::new();
     let mut by_name: HashMap<&str, Vec<&Symbol>> = HashMap::new();
     for s in symbols {
-        by_core.entry(core_of(&s.id.descriptor)).or_default().push(s);
+        by_core
+            .entry(core_of(&s.id.descriptor))
+            .or_default()
+            .push(s);
         by_name.entry(s.name.as_str()).or_default().push(s);
     }
 

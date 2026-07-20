@@ -1,0 +1,29 @@
+# Fast checks on every push/PR: format + tests on a single Linux target, heavily cached.
+# The expensive cross-platform build lives in test-matrix.yml (nightly) — not here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prereqs
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Test
+        run: cargo test --workspace
