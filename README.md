@@ -93,6 +93,32 @@ signatures to the OpenAI API only when enabled.
 
 ## Architecture
 
+Build the index once in CI; every consumer reads the same versioned artifact.
+
+```mermaid
+flowchart LR
+    subgraph SRC["Sources (git)"]
+        R1["pkg-common"]
+        R2["service-a / service-b / …"]
+    end
+    subgraph IDX["Index — CI, incremental"]
+        P["comind-parse<br/>tree-sitter"]
+        RS["comind-resolve<br/>cross-repo SCIP"]
+        G["comind-git<br/>changed files only"]
+    end
+    subgraph ART["Versioned LanceDB artifact on S3"]
+        GR["graph<br/>symbols · edges"]
+        SE["search<br/>vectors · BM25"]
+        EN["enrichment<br/>summaries · queries · style"]
+    end
+    subgraph USE["Consume — instant"]
+        MCP["comind serve<br/>MCP · 7 tools"]
+        CLI["comind search / explore"]
+    end
+    SRC --> IDX --> ART --> USE
+    AGENT(["coding agent"]) -. ripple / context_pack .-> MCP
+```
+
 Rust workspace, one crate per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
 the competitive landscape, and the phase log.
 
