@@ -1,4 +1,4 @@
-//! CoMind MCP server — the code graph as tools a coding agent calls live.
+//! Comind MCP server — the code graph as tools a coding agent calls live.
 //!
 //! Loads the resolved org graph from LanceDB once at startup (local mmap or S3), holds it in
 //! memory, and serves deterministic navigation over stdio:
@@ -152,7 +152,7 @@ struct FindParam {
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct FocusParam {
-    /// A symbol name or SCIP descriptor (e.g. `cobrainer/const/NamedOwner`).
+    /// A symbol name or SCIP descriptor (e.g. `acme/const/Settings`).
     focus: String,
 }
 

@@ -1,4 +1,4 @@
-# CoMind org index — builds the shared, versioned code-intelligence artifact on S3.
+# Comind org index — builds the shared, versioned code-intelligence artifact on S3.
 #
 # Model: one central indexing job (this workflow) checks out the team's repos, builds the
 # cross-repo graph + embeddings + LLM enrichment, and writes a new atomically-versioned Lance
@@ -24,8 +24,8 @@ permissions:
 
 env:
   # Where the org graph lives. `_graph` subdir is created by `comind link`.
-  COMIND_S3_URI: s3://bucket-temporary-test/lancedb/org
-  AWS_REGION: eu-central-1
+  COMIND_S3_URI: s3://YOUR-BUCKET/lancedb/org
+  AWS_REGION: us-east-1
 
 jobs:
   index:
@@ -38,21 +38,21 @@ jobs:
 
       # Check out each member repo with full history so incremental indexing can diff commits.
       # Add one block per repo; a matrix works too if the set is dynamic.
-      - name: Checkout shared-lib
+      - name: Checkout pkg-common
         uses: actions/checkout@v4
         with:
-          repository: your-org/shared-lib
-          path: repos/shared-lib
+          repository: your-org/pkg-common
+          path: repos/pkg-common
           fetch-depth: 0
           token: ${{ secrets.COMIND_REPO_TOKEN }}
-      - name: Checkout odin
+      - name: Checkout service-a
         uses: actions/checkout@v4
         with:
-          repository: your-org/odin
-          path: repos/odin
+          repository: your-org/service-a
+          path: repos/service-a
           fetch-depth: 0
           token: ${{ secrets.COMIND_REPO_TOKEN }}
-      # … repeat for skill-graph, vineyard, skill-detector, etc.
+      # … repeat for service-b, service-c, service-d, etc.
 
       - name: Install build prerequisites
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -87,11 +87,11 @@ jobs:
           COMIND_LLM_MODEL: gpt-4o-mini
         run: |
           ./target/release/comind link \
-            ../repos/shared-lib \
-            ../repos/odin \
-            ../repos/skill-graph \
-            ../repos/vineyard \
-            ../repos/skill-detector \
+            ../repos/pkg-common \
+            ../repos/service-a \
+            ../repos/service-b \
+            ../repos/service-c \
+            ../repos/service-d \
             --to "$COMIND_S3_URI" \
             --embed \
             --enrich --enrich-top 200

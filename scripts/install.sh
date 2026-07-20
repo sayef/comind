@@ -1,5 +1,5 @@
 #!/bin/sh
-# CoMind installer. Downloads the right prebuilt binary from GitHub Releases.
+# Comind installer. Downloads the right prebuilt binary from GitHub Releases.
 #
 #   curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
 #

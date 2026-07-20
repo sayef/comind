@@ -146,27 +146,27 @@ mod tests {
 
     #[test]
     fn splits_identifiers() {
-        let t = split_identifier("AsyncPostgresQueryExecutor");
+        let t = split_identifier("AsyncTaskRunner");
         assert!(t.contains(&"async".to_string()));
-        assert!(t.contains(&"postgres".to_string()));
-        assert!(t.contains(&"executor".to_string()));
+        assert!(t.contains(&"task".to_string()));
+        assert!(t.contains(&"runner".to_string()));
         let s = split_identifier("get_user_id");
         assert!(s.contains(&"user".to_string()) && s.contains(&"get_user_id".to_string()));
     }
 
     #[test]
     fn detects_symbol_queries() {
-        assert!(is_symbol_query("AsyncPostgresQueryExecutor"));
-        assert!(is_symbol_query("cobrainer.const.NamedOwner"));
+        assert!(is_symbol_query("AsyncTaskRunner"));
+        assert!(is_symbol_query("acme.const.Settings"));
         assert!(is_symbol_query("get_config"));
         assert!(!is_symbol_query("how do we connect to the database"));
     }
 
     #[test]
     fn lexical_and_penalty() {
-        let kw = query_keywords("postgres executor");
-        assert!(lexical_score(&kw, "AsyncPostgresQueryExecutor", "cobrainer/database/executors") > 0.9);
+        let kw = query_keywords("task runner");
+        assert!(lexical_score(&kw, "AsyncTaskRunner", "acme/database/runners") > 0.9);
         assert_eq!(path_penalty("app/tests/test_api.py"), 0.3);
-        assert_eq!(path_penalty("cobrainer/db.py"), 1.0);
+        assert_eq!(path_penalty("acme/db.py"), 1.0);
     }
 }

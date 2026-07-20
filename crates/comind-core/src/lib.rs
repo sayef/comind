@@ -1,4 +1,4 @@
-//! CoMind core domain model.
+//! Comind core domain model.
 //!
 //! Storage-agnostic types shared by every crate: global symbol identity (SCIP scheme),
 //! symbols, edges, languages, and source ranges. No heavy dependencies — this crate is
@@ -80,18 +80,18 @@ pub struct Commit(pub String);
 /// and unique **across repos** — the primitive that makes cross-repo `ripple` possible.
 ///
 /// Rendered form: `<scheme> <package_manager> <package> <version> <descriptor>`
-/// e.g. `scip-python pip cobrainer 1.4.0 cobrainer/foo/bar().`
+/// e.g. `scip-python pip acme 1.4.0 acme/foo/bar().`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GlobalSymbolId {
     /// Indexer scheme, e.g. `scip-python`, `scip-typescript`, `comind-treesitter`.
     pub scheme: String,
     /// Package manager, e.g. `pip`, `npm`, `cargo`, `.` when local/unmanaged.
     pub package_manager: String,
-    /// Package name, e.g. `cobrainer`.
+    /// Package name, e.g. `acme`.
     pub package: String,
     /// Package version, `.` when unknown.
     pub version: String,
-    /// SCIP descriptor path, e.g. `cobrainer/foo/bar().`.
+    /// SCIP descriptor path, e.g. `acme/foo/bar().`.
     pub descriptor: String,
 }
 
@@ -162,11 +162,11 @@ mod tests {
         let id = GlobalSymbolId {
             scheme: "scip-python".into(),
             package_manager: "pip".into(),
-            package: "cobrainer".into(),
+            package: "acme".into(),
             version: "1.4.0".into(),
-            descriptor: "cobrainer/foo/bar().".into(),
+            descriptor: "acme/foo/bar().".into(),
         };
-        assert_eq!(id.render(), "scip-python pip cobrainer 1.4.0 cobrainer/foo/bar().");
+        assert_eq!(id.render(), "scip-python pip acme 1.4.0 acme/foo/bar().");
         assert!(id.is_package_managed());
 
         let local = GlobalSymbolId {

@@ -1,4 +1,4 @@
-//! CoMind parse — tree-sitter extraction of symbols + intra-file edges.
+//! Comind parse — tree-sitter extraction of symbols + intra-file edges.
 //!
 //! Phase 1 scope: definitions (functions, methods, classes, interfaces), the `Contains`
 //! hierarchy, and provisional `Calls` edges (callee bound by name, confidence < 1.0 —
@@ -166,7 +166,7 @@ struct Ctx<'a> {
 
 #[derive(Clone)]
 struct Scope {
-    /// Descriptor path without the kind suffix, e.g. `cobrainer/foo/MyClass`.
+    /// Descriptor path without the kind suffix, e.g. `acme/foo/MyClass`.
     core: String,
     /// Id of the symbol that owns this scope (the `Contains` parent).
     id: GlobalSymbolId,
@@ -265,7 +265,7 @@ fn is_call(lang: &Language, node_kind: &str) -> bool {
     )
 }
 
-/// Extract import targets as descriptor "cores" (e.g. `cobrainer/const/NamedOwner`).
+/// Extract import targets as descriptor "cores" (e.g. `acme/const/Settings`).
 /// `None` when `node` is not an import statement. Relative imports are skipped (they
 /// resolve within the same package, not cross-repo).
 fn import_targets(node: Node, lang: &Language, src: &[u8]) -> Option<Vec<String>> {

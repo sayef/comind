@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "CoMind core domain model: SCIP-based global symbol identity, symbols, edges, languages."
+description = "Comind core domain model: SCIP-based global symbol identity, symbols, edges, languages."
 
 [dependencies]
 serde = { workspace = true }

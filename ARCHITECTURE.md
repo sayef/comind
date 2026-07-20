@@ -1,4 +1,4 @@
-# CoMind — Rust Architecture
+# Comind — Rust Architecture
 
 > Polyglot, cross-repo code-intelligence engine. CLI + MCP server, single static binary.
 > Read-heavy / write-rare: the index is a **versioned artifact in S3**, not a live shared DB.
@@ -65,14 +65,14 @@ Global symbol ID follows the **SCIP** scheme so identity is stable and unique ac
 
 ```
 <scheme> <package-manager> <package-name> <version> <descriptor>
-e.g.  scip-python  pip  cobrainer  1.4.0  `cobrainer/foo`/bar().
+e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 ```
 
 - Each repo indexes locally → emits symbols + intra-repo edges + unresolved references.
 - The **link-resolver** binds cross-repo references by SCIP id: an unresolved reference in
-  `odin` (`from cobrainer.foo import bar`) binds to the *definition* symbol in
-  `shared-lib`, producing a **cross-repo edge** (`cross_repo = true`).
-- `ripple(shared-lib::X)` then answers *"who across the org breaks if I change this?"*
+  `service-a` (`from acme.foo import bar`) binds to the *definition* symbol in
+  `pkg-common`, producing a **cross-repo edge** (`cross_repo = true`).
+- `ripple(pkg-common::X)` then answers *"who across the org breaks if I change this?"*
   — the query no per-repo tool gives you.
 
 **Resolver strategy — tree-sitter-first, SCIP-optional:**
@@ -105,14 +105,14 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
 
 - **P0 — Foundation:** workspace, `comind-core` types (SCIP ids, Symbol/Edge), CI skeleton. ← *done*
 - **P1 — Parse:** tree-sitter symbol/edge extraction, rayon-parallel. ← *done for Python + TypeScript*
-  (`comind index <repo>` prints graph stats). Validated on `shared-lib` (2843 symbols,
-  11361 edges, 0.33s debug) and `odin`. **Known limitation:** Python methods are currently
+  (`comind index <repo>` prints graph stats). Validated on `pkg-common` (2843 symbols,
+  11361 edges, 0.33s debug) and `service-a`. **Known limitation:** Python methods are currently
   tagged `Function` (nested descriptor is correct, e.g. `.../ServiceCredentials/get_password().`);
   refine kind by class ancestry as a small follow-up. Provisional `Calls` edges (conf 0.4) await P3 resolution.
 - **P2 — Index:** Lance writers, S3 layout, versioned "latest" pointer, incremental change detection.
   ← *round-trip done*. `comind index <repo> --to <uri>` writes `symbols.lance` + `edges.lance`
-  and reads them back. Validated on **real S3** (`s3://bucket-temporary-test/lancedb/shared-lib`,
-  profile `skills-dev`) — 2843 symbols / 11361 edges; Lance `_versions/*.manifest` confirmed in
+  and reads them back. Validated on **real S3** (`s3://YOUR-BUCKET/lancedb/pkg-common`,
+  profile `your-profile`) — 2843 symbols / 11361 edges; Lance `_versions/*.manifest` confirmed in
   the bucket (the substrate for the "latest" pointer). Still TODO: incremental change detection,
   the optional embeddings table.
   **Latest pointer — done:** writes use Lance overwrite (new version, prior versions retained),
@@ -127,8 +127,8 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
 - **P3 — Resolve:** intra-repo call binding + cross-repo link-resolver → federated edges.
   ← *done (import-based cross-repo)*. `comind-parse` now extracts imports; `comind-resolve`
   binds them to real definitions by SCIP descriptor-core. `comind link <repo>...` proved it on
-  5 real repos: **757 cross-repo edges**; `ripple(cobrainer/logging)` → impacts odin,
-  skill-detector, skill-graph, vineyard (120 refs). **Caveat:** generic descriptor cores (e.g.
+  5 real repos: **757 cross-repo edges**; `ripple(acme/logging)` → impacts service-a,
+  service-d, service-b, service-c (120 refs). **Caveat:** generic descriptor cores (e.g.
   `tests/utils`) can collide across repos and bind to the first match — refine by preferring
   package-qualified/import-path matches, and resolve calls cross-repo via imports (currently
   same-repo only). SCIP-index ingestion is the precision upgrade path.
@@ -138,7 +138,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   `zoom` (container/members/callers/callees/importers), and `context_pack` (personalized
   PageRank over *dependency* edges only, files excluded, greedily packed to a token budget).
   `comind explore <focus> <repo>...` drives all three. Verified on 5 repos (8224 symbols):
-  `ripple(NamedOwner)` → 74 dependents across odin/skill-detector/skill-graph; context pack =
+  `ripple(Settings)` → 74 dependents across service-a/service-d/service-b; context pack =
   definition read-set to ~1489/1500 tokens with `file:line`. TODO: load from the persisted
   Lance graph instead of re-parsing (needed for `serve`), FTS/vector as optional retrieval modes.
 - **P5 — Serve:** rmcp MCP server + CLI, single binary; parity with Python MCP verbs.
@@ -146,7 +146,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   into core types (fast consumer path — no re-parse; verified from S3). `comind-mcp` (rmcp 2.2)
   serves 6 tools over stdio: `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`. CLI:
   `comind serve --from <uri>` and `comind explore <focus> --from <uri>`. Smoke-tested with a real
-  JSON-RPC handshake: tools/list advertises all 6; `ripple(NamedOwner)` → 74 dependents grouped
+  JSON-RPC handshake: tools/list advertises all 6; `ripple(Settings)` → 74 dependents grouped
   by repo. Note: MCP tool outputs must be object-rooted (list results wrapped in a DTO).
 - **P6 — Enrich:** local embeddings + hybrid search + LLM enrichment — **done**.
   ← *embed + search done*. `comind-embed` uses **Model2Vec** (`model2vec-rs`, pure-Rust, CPU,
@@ -177,7 +177,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   **Enrichment surfaced (done):** `read_enrichment` loads summaries+queries; `search` folds the
   summary into lexical matching, boosts recall when the user query overlaps a symbol's LLM-generated
   queries, and prints the summary; the MCP `zoom`/`find`/`context_pack` results carry `summary`.
-  Verified live (search + MCP `zoom` both return the `jsonable_encoder` summary).
+  Verified live (search + MCP `zoom` both return the `to_jsonable` summary).
   **CI (done):** [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) +
   [`docs/CI.md`](docs/CI.md) (GitLab variant, member-repo push triggers, OIDC/S3, opt-in enrich).
   TODO: persist the style guide to its own table.

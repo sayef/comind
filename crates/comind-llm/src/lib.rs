@@ -1,4 +1,4 @@
-//! CoMind LLM enrichment — per-symbol summaries, symbol-aware query generation, and a
+//! Comind LLM enrichment — per-symbol summaries, symbol-aware query generation, and a
 //! repo style guide, via OpenAI.
 //!
 //! **Opt-in / data egress:** these functions send code (signatures, snippets) to the OpenAI
@@ -149,9 +149,9 @@ mod tests {
         let c = LlmClient::from_env().expect("OPENAI_API_KEY");
         let e = c
             .enrich_symbol(
-                "AsyncPostgresQueryExecutor",
-                "class AsyncPostgresQueryExecutor(BasePostgresQueryExecutor)",
-                "cobrainer/database/executors.py",
+                "AsyncTaskRunner",
+                "class AsyncTaskRunner(BaseTaskRunner)",
+                "acme/database/executors.py",
             )
             .await
             .expect("enrich");

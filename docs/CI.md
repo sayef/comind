@@ -1,4 +1,4 @@
-# CoMind CI — building the shared org index
+# Comind CI — building the shared org index
 
 **Model.** One central *indexing* pipeline checks out the team's repos, runs
 `comind link … --to <s3> --embed --enrich`, and writes a new **atomically-versioned** Lance
@@ -47,8 +47,8 @@ comind-reindex:
 index:
   image: rust:1.97
   variables:
-    COMIND_S3_URI: s3://bucket-temporary-test/lancedb/org
-    AWS_REGION: eu-central-1
+    COMIND_S3_URI: s3://YOUR-BUCKET/lancedb/org
+    AWS_REGION: us-east-1
     COMIND_LLM_MODEL: gpt-4o-mini
   rules:
     - if: '$CI_PIPELINE_SOURCE == "trigger"'
@@ -59,13 +59,13 @@ index:
   before_script:
     - apt-get update && apt-get install -y protobuf-compiler
     # Clone member repos with full history (a deploy token / CI job token with read scope).
-    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/shared-lib.git" repos/shared-lib
-    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/odin.git" repos/odin
-    # … skill-graph, vineyard, skill-detector
+    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/pkg-common.git" repos/pkg-common
+    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/service-a.git" repos/service-a
+    # … service-b, service-c, service-d
   script:
     - cargo build --release -p comind-cli
     - ./target/release/comind link
-        repos/shared-lib repos/odin repos/skill-graph repos/vineyard repos/skill-detector
+        repos/pkg-common repos/service-a repos/service-b repos/service-c repos/service-d
         --to "$COMIND_S3_URI" --embed --enrich --enrich-top 200
 ```
 

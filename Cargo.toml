@@ -19,7 +19,7 @@ edition = "2021"
 rust-version = "1.94"
 license = "MIT"
 repository = "https://github.com/sayef/comind"
-authors = ["CoMind"]
+authors = ["Comind"]
 
 [workspace.dependencies]
 comind-core = { path = "crates/comind-core" }

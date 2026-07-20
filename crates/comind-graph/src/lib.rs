@@ -1,4 +1,4 @@
-//! CoMind graph — the query layer a coding agent actually consumes.
+//! Comind graph — the query layer a coding agent actually consumes.
 //!
 //! Loads the resolved symbol/edge graph into an in-memory `petgraph` (built once, queried in
 //! microseconds) and answers the questions grep can't:

@@ -1,4 +1,4 @@
-//! CoMind embed — local static embeddings for semantic code search.
+//! Comind embed — local static embeddings for semantic code search.
 //!
 //! Uses **Model2Vec** (`model2vec-rs`) static embeddings: pure-Rust, CPU-only, no ONNX
 //! runtime, tiny + fast (~ms/query) — the approach semble validated for agentic code
@@ -54,7 +54,7 @@ pub fn symbol_text(s: &Symbol) -> String {
     if let Some(sig) = &s.signature {
         parts.push(sig.clone());
     }
-    // descriptor path as words, e.g. "cobrainer/database/config/PgConfig" -> readable tokens
+    // descriptor path as words, e.g. "acme/database/config/DbConfig" -> readable tokens
     parts.push(s.id.descriptor.replace(['/', '_', '.'], " "));
     if let Some(doc) = &s.docstring {
         parts.push(doc.clone());

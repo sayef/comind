@@ -1,4 +1,4 @@
-# CoMind cross-platform smoke test.
+# Comind cross-platform smoke test.
 #
 # Build once on an OLD glibc (portable), then run the prebuilt binary on clean distro images
 # via `docker run` — the real "does it run on a fresh box" test (no Rust/protoc installed there).

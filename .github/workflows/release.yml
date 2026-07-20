@@ -1,4 +1,4 @@
-# CoMind release — build binaries per target and publish to GitHub Releases on a version tag.
+# Comind release — build binaries per target and publish to GitHub Releases on a version tag.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #

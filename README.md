@@ -1,8 +1,8 @@
-# CoMind
+# Comind
 
 **Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.**
 
-CoMind indexes a whole team's repositories into one versioned knowledge graph on object storage,
+Comind indexes a whole team's repositories into one versioned knowledge graph on object storage,
 then serves it to coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search,
 it answers *structural, cross-repo* questions deterministically: **who breaks if I change this?**,
 **what's the minimal context to change X safely?**, **where across the org is this used?**
@@ -13,7 +13,7 @@ Written in Rust. One static binary. No server to run, no per-developer re-indexi
 
 - **Deterministic graph, not fuzzy RAG.** Calls/imports/inheritance come from the AST (tree-sitter),
   not from an LLM guessing — exact, reproducible, free to build.
-- **Cross-repo by design.** Global symbol identity (SCIP scheme) links a definition in `shared-lib`
+- **Cross-repo by design.** Global symbol identity (SCIP scheme) links a definition in `pkg-common`
   to its users in every other repo. `ripple` gives org-wide blast radius.
 - **Always fresh, shared once.** Push to master → CI builds a new atomically-versioned index on S3;
   every agent reads the same fresh artifact. Incremental: only changed files/symbols are recomputed.
@@ -47,10 +47,10 @@ Coming once the repo is public: `cargo install comind-cli` (crates.io) and a Hom
 
 ```bash
 # 1. Build the org index from several repos → local dir or S3, with embeddings + LLM enrichment
-comind link ../shared-lib ../odin ../skill-graph --to s3://my-bucket/comind/org --embed --enrich
+comind link ../pkg-common ../service-a ../service-b --to s3://my-bucket/comind/org --embed --enrich
 
 # 2. Explore / search from the prebuilt index (instant, no re-parse)
-comind explore NamedOwner --from s3://my-bucket/comind/org/_graph      # zoom + ripple + context-pack
+comind explore Settings --from s3://my-bucket/comind/org/_graph      # zoom + ripple + context-pack
 comind search  "how do we connect to postgres" --from s3://my-bucket/comind/org/_graph
 
 # 3. Serve it to an agent over MCP

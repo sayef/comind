@@ -1,12 +1,12 @@
-//! CoMind resolve — bind provisional references to real definitions, across repos.
+//! Comind resolve — bind provisional references to real definitions, across repos.
 //!
 //! `comind-parse` emits two kinds of unresolved edge:
 //!   * `Imports` to an *external* target (package `?`, descriptor = the import path core),
 //!   * `Calls` to a provisional target (descriptor `?/<name>()`).
 //!
 //! This crate rebinds them against the union of definitions from the whole corpus:
-//!   * an import `from cobrainer.const import NamedOwner` in `odin` binds to the definition
-//!     `cobrainer/const/NamedOwner#` in `shared-lib` → a **cross-repo edge**. This is the
+//!   * an import `from acme.const import Settings` in `service-a` binds to the definition
+//!     `acme/const/Settings#` in `pkg-common` → a **cross-repo edge**. This is the
 //!     signal `ripple` traverses for org-wide blast radius.
 //!   * a call `foo()` binds to a same-repo definition of `foo` when unambiguous.
 //!
@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use comind_core::{Edge, EdgeKind, GlobalSymbolId, Symbol};
 
 /// Strip the SCIP kind suffix so a definition's descriptor matches its import-path form.
-/// `cobrainer/const/NamedOwner#` -> `cobrainer/const/NamedOwner`;
-/// `cobrainer/utils/run().`      -> `cobrainer/utils/run`.
+/// `acme/const/Settings#` -> `acme/const/Settings`;
+/// `acme/utils/run().`      -> `acme/utils/run`.
 fn core_of(descriptor: &str) -> &str {
     if let Some(s) = descriptor.strip_suffix("().") {
         s
@@ -183,7 +183,7 @@ mod tests {
                 package_manager: ".".into(),
                 package: src_pkg.into(),
                 version: ".".into(),
-                descriptor: "odin/thing".into(),
+                descriptor: "service-a/thing".into(),
             },
             dst: GlobalSymbolId {
                 scheme: "comind-treesitter".into(),
@@ -201,26 +201,26 @@ mod tests {
     #[test]
     fn import_binds_cross_repo() {
         let symbols = vec![sym(
-            "shared-lib",
-            "cobrainer/const/NamedOwner#",
-            "NamedOwner",
+            "pkg-common",
+            "acme/const/Settings#",
+            "Settings",
             SymbolKind::Class,
         )];
-        let edges = vec![ext_import("odin", "cobrainer/const/NamedOwner")];
+        let edges = vec![ext_import("service-a", "acme/const/Settings")];
 
         let r = resolve(&symbols, &edges);
         assert_eq!(r.stats.resolved_imports, 1);
         assert_eq!(r.stats.cross_repo_edges, 1);
         let e = &r.edges[0];
         assert!(e.cross_repo);
-        assert_eq!(e.dst.package, "shared-lib");
-        assert_eq!(e.dst.descriptor, "cobrainer/const/NamedOwner#");
+        assert_eq!(e.dst.package, "pkg-common");
+        assert_eq!(e.dst.descriptor, "acme/const/Settings#");
     }
 
     #[test]
     fn unknown_import_is_counted_not_bound() {
-        let symbols = vec![sym("shared-lib", "cobrainer/const/X#", "X", SymbolKind::Class)];
-        let edges = vec![ext_import("odin", "numpy/array")];
+        let symbols = vec![sym("pkg-common", "acme/const/X#", "X", SymbolKind::Class)];
+        let edges = vec![ext_import("service-a", "numpy/array")];
         let r = resolve(&symbols, &edges);
         assert_eq!(r.stats.resolved_imports, 0);
         assert_eq!(r.stats.unresolved_imports, 1);

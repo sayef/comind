@@ -1,4 +1,4 @@
-//! CoMind index — persist the symbol/edge graph to LanceDB (local dir or S3), versioned.
+//! Comind index — persist the symbol/edge graph to LanceDB (local dir or S3), versioned.
 //!
 //! Phase 2 scope: write `symbols` and `edges` tables and read their row counts back,
 //! proving the round-trip against real object storage. Incremental change detection and
