@@ -1,43 +1,41 @@
-# Comind org index — builds the shared, versioned code-intelligence artifact on S3.
+# Comind org index — clones the team's repos, builds the cross-repo graph + embeddings
+# (+ optional LLM enrichment), and writes a versioned LanceDB dataset to a LOCAL path, which
+# is uploaded as a downloadable GitHub Actions artifact. No S3 / AWS required.
 #
-# Model: one central indexing job (this workflow) checks out the team's repos, builds the
-# cross-repo graph + embeddings + LLM enrichment, and writes a new atomically-versioned Lance
-# dataset to S3. Every developer's `comind serve` / `search` reads that same fresh artifact.
-#
-# Triggers: manual, nightly, and repository_dispatch (member repos fire this on push to main).
+# ── To enable ────────────────────────────────────────────────────────────────────────────
+#   1. Edit the "Checkout … to index" steps below to your real repos.
+#   2. Add secret  COMIND_REPO_TOKEN   (fine-grained PAT, Contents: read on those repos).
+#      (Public repos: you can delete the `token:` lines entirely.)
+#   3. (optional) Add secret  OPENAI_API_KEY  to turn on --enrich.
+#   4. Set repository variable  COMIND_INDEX_ENABLED = true   (Settings → Variables) so the
+#      nightly schedule starts running. Until then it no-ops instead of failing.
+# ──────────────────────────────────────────────────────────────────────────────────────────
 name: comind-index
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *" # 02:00 UTC nightly (CET/CEST off-hours)
-  repository_dispatch:
-    types: [comind-reindex] # member repos: curl the dispatch API on push to main
+    - cron: "0 2 * * *" # 02:00 UTC nightly
+  workflow_dispatch: # manual run (always executes, ignores the enable-variable)
 
 concurrency:
   group: comind-index
-  cancel-in-progress: true # a newer push supersedes an in-flight index
-
-permissions:
-  contents: read
-  id-token: write # OIDC → AWS, no long-lived keys
-
-env:
-  # Where the org graph lives. `_graph` subdir is created by `comind link`.
-  COMIND_S3_URI: s3://YOUR-BUCKET/lancedb/org
-  AWS_REGION: us-east-1
+  cancel-in-progress: true
 
 jobs:
   index:
+    # Scheduled runs only once you opt in; manual dispatch always runs.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.COMIND_INDEX_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      INDEX_DIR: ${{ runner.temp }}/comind-index/org
     steps:
       - name: Checkout comind (the engine)
         uses: actions/checkout@v4
         with:
           path: comind
 
-      # Check out each member repo with full history so incremental indexing can diff commits.
-      # Add one block per repo; a matrix works too if the set is dynamic.
+      # ── Repos to index (full history so --incremental can diff commits) ──────────────────
+      # Private repos need `token:`; for public repos delete the token line.
       - name: Checkout pkg-common
         uses: actions/checkout@v4
         with:
@@ -52,51 +50,45 @@ jobs:
           path: repos/service-a
           fetch-depth: 0
           token: ${{ secrets.COMIND_REPO_TOKEN }}
-      # … repeat for service-b, service-c, service-d, etc.
+      # … add one block per repo …
 
-      - name: Install build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - name: Rust toolchain (pinned via rust-toolchain.toml)
-        run: rustup show
+      - name: Prereqs
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
 
       - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: comind
+
+      - name: Restore previous index (enables incremental)
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            comind/target
-          key: comind-${{ runner.os }}-${{ hashFiles('comind/Cargo.lock') }}
+          path: ${{ env.INDEX_DIR }}
+          key: comind-index-${{ github.run_id }}
+          restore-keys: comind-index-
 
-      - name: Build comind (release, single binary)
+      - name: Build comind
         working-directory: comind
         run: cargo build --release -p comind-cli
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.COMIND_AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Build & publish the org index
-        working-directory: comind
+      - name: Build the index (local LanceDB path — no S3)
         env:
-          # Enrichment is opt-in and sends code signatures to OpenAI — omit to skip.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          COMIND_LLM_MODEL: gpt-4o-mini
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # optional; enables --enrich when set
         run: |
-          ./target/release/comind link \
-            ../repos/pkg-common \
-            ../repos/service-a \
-            ../repos/service-b \
-            ../repos/service-c \
-            ../repos/service-d \
-            --to "$COMIND_S3_URI" \
-            --embed \
-            --enrich --enrich-top 200
+          BIN=comind/target/release/comind
+          ENRICH=""
+          [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich --enrich-top 200"
+          "$BIN" link repos/pkg-common repos/service-a \
+            --to "$INDEX_DIR" --embed --incremental $ENRICH
 
-      - name: Summary
-        run: |
-          echo "Org index published to $COMIND_S3_URI/_graph (new Lance version = atomic latest pointer)."
-          echo "Consumers: comind serve --from $COMIND_S3_URI/_graph"
+      - name: Upload index artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: comind-index
+          path: ${{ env.INDEX_DIR }}/_graph
+          retention-days: 7
+          if-no-files-found: error
+
+# Consume it: `gh run download -R <owner>/comind -n comind-index` then
+#   comind serve  --from ./_graph      (MCP)
+#   comind search "…" --from ./_graph
