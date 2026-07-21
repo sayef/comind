@@ -1,21 +1,21 @@
-# Comind org index — clones the team's repos, builds the cross-repo graph + embeddings
-# (+ optional LLM enrichment), and writes a versioned LanceDB dataset to a LOCAL path, which
-# is uploaded as a downloadable GitHub Actions artifact. No S3 / AWS required.
+# Comind org index — clones the repos you list, builds the cross-repo graph + embeddings
+# (+ optional LLM enrichment), writes a versioned LanceDB dataset to a LOCAL path, and uploads
+# it as a downloadable artifact. No S3 / AWS. No repo names committed here — they live in a
+# repository variable, so this file stays generic and public-safe.
 #
 # ── To enable ────────────────────────────────────────────────────────────────────────────
-#   1. Edit the "Checkout … to index" steps below to your real repos.
-#   2. Add secret  COMIND_REPO_TOKEN   (fine-grained PAT, Contents: read on those repos).
-#      (Public repos: you can delete the `token:` lines entirely.)
-#   3. (optional) Add secret  OPENAI_API_KEY  to turn on --enrich.
-#   4. Set repository variable  COMIND_INDEX_ENABLED = true   (Settings → Variables) so the
-#      nightly schedule starts running. Until then it no-ops instead of failing.
+#   • Variable  COMIND_INDEX_ENABLED = true          (lets the nightly schedule run)
+#   • Variable  COMIND_REPOS = "owner/pkg  owner/svc" (space/newline list of repos to index)
+#   • Secret    COMIND_REPO_TOKEN                     (fine-grained PAT, Contents: read)
+#                                                     — omit for public repos
+#   • Secret    OPENAI_API_KEY  (optional)            — turns on --enrich
 # ──────────────────────────────────────────────────────────────────────────────────────────
 name: comind-index
 
 on:
   schedule:
     - cron: "0 2 * * *" # 02:00 UTC nightly
-  workflow_dispatch: # manual run (always executes, ignores the enable-variable)
+  workflow_dispatch:
 
 concurrency:
   group: comind-index
@@ -23,7 +23,6 @@ concurrency:
 
 jobs:
   index:
-    # Scheduled runs only once you opt in; manual dispatch always runs.
     if: ${{ github.event_name == 'workflow_dispatch' || vars.COMIND_INDEX_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -34,23 +33,26 @@ jobs:
         with:
           path: comind
 
-      # ── Repos to index (full history so --incremental can diff commits) ──────────────────
-      # Private repos need `token:`; for public repos delete the token line.
-      - name: Checkout pkg-common
-        uses: actions/checkout@v4
-        with:
-          repository: your-org/pkg-common
-          path: repos/pkg-common
-          fetch-depth: 0
-          token: ${{ secrets.COMIND_REPO_TOKEN }}
-      - name: Checkout service-a
-        uses: actions/checkout@v4
-        with:
-          repository: your-org/service-a
-          path: repos/service-a
-          fetch-depth: 0
-          token: ${{ secrets.COMIND_REPO_TOKEN }}
-      # … add one block per repo …
+      - name: Clone the repos to index
+        env:
+          GH_TOKEN: ${{ secrets.COMIND_REPO_TOKEN }}
+          REPOS: ${{ vars.COMIND_REPOS }}
+        run: |
+          if [ -z "$REPOS" ]; then
+            echo "::error::Set repository variable COMIND_REPOS to a space/newline list of owner/repo."
+            exit 1
+          fi
+          mkdir -p repos
+          for slug in $REPOS; do
+            name="${slug##*/}"
+            if [ -n "$GH_TOKEN" ]; then
+              url="https://x-access-token:${GH_TOKEN}@github.com/${slug}.git"
+            else
+              url="https://github.com/${slug}.git"
+            fi
+            echo "cloning $slug"
+            git clone --quiet "$url" "repos/${name}"   # full history → --incremental can diff
+          done
 
       - name: Prereqs
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
@@ -78,8 +80,7 @@ jobs:
           BIN=comind/target/release/comind
           ENRICH=""
           [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich --enrich-top 200"
-          "$BIN" link repos/pkg-common repos/service-a \
-            --to "$INDEX_DIR" --embed --incremental $ENRICH
+          "$BIN" link repos/*/ --to "$INDEX_DIR" --embed --incremental $ENRICH
 
       - name: Upload index artifact
         uses: actions/upload-artifact@v4
