@@ -37,7 +37,7 @@ jobs:
           REPOS: ${{ vars.COMIND_REPOS }}
         run: |
           if [ -z "$REPOS" ]; then
-            echo "::error::Set repository variable COMIND_REPOS to a space/newline list of owner/repo."
+            echo "::error::COMIND_REPOS is empty. Add it under Settings → Secrets and variables → Actions → the VARIABLES tab (not Secrets), name COMIND_REPOS, value e.g. 'owner/repo-a owner/repo-b'."
             exit 1
           fi
           mkdir -p repos
