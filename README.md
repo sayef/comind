@@ -39,6 +39,9 @@ Or build from source:
 # Requires: Rust (pinned via rust-toolchain.toml), protoc, cmake  (`brew install protobuf cmake`)
 git clone https://github.com/sayef/comind && cd comind
 cargo build --release      # → target/release/comind
+
+# See the deterministic engine (parse → resolve → graph → ripple) on any repo, no network/S3:
+cargo run --example index_and_search -- ../some-repo
 ```
 
 Coming once the repo is public: `cargo install comind` (crates.io) and a Homebrew tap.
