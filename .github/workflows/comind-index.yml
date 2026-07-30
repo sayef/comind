@@ -14,7 +14,7 @@ name: comind-index
 
 on:
   schedule:
-    - cron: "0 2 * * *" # 02:00 UTC nightly
+    - cron: "0 2 1 * *" # 02:00 UTC on the 1st of each month (nightly is wasteful while private)
   workflow_dispatch:
 
 concurrency:
