@@ -10,6 +10,7 @@
 //!   * `zoom`         — 360° view of a symbol (callers, callees, importers, members)
 //!   * `ripple`       — org-wide blast radius (who breaks if I change this)
 //!   * `thread`       — forward call trace from an entry point
+//!   * `flow`         — pre-generated walkthrough of a flow + its live call trace
 //!   * `context_pack` — the minimal token-budgeted read-set to change a symbol safely
 //!   * `guide`        — the repo's inferred style guide
 //!
@@ -38,6 +39,8 @@ pub struct ComindServer {
     graph: Arc<CodeGraph>,
     enrichment: Arc<Enrichment>,
     style_guide: Arc<Option<String>>,
+    /// Pre-generated flow walkthroughs by entry-point id: `(narration, flow_questions)`.
+    flows: Arc<HashMap<String, (String, Vec<String>)>>,
     /// Symbols by rendered id — used by `search` to look up candidate metadata.
     symbols: Arc<HashMap<String, Symbol>>,
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
@@ -128,6 +131,16 @@ struct FindDto {
 #[derive(Serialize, schemars::JsonSchema)]
 struct ThreadDto {
     focus: String,
+    trace: Vec<HopDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct FlowDto {
+    focus: String,
+    found: bool,
+    /// Pre-generated LLM walkthrough (present only if the index was built with `--flows`).
+    narration: Option<String>,
+    queries: Vec<String>,
     trace: Vec<HopDto>,
 }
 
@@ -477,6 +490,46 @@ impl ComindServer {
     }
 
     #[tool(
+        name = "flow",
+        description = "Explain how a flow works: a pre-generated LLM walkthrough of an entry point (when the index was built with --flows) plus its live forward call trace."
+    )]
+    fn flow(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
+        let depth = p.depth.unwrap_or(4) as usize;
+        let dto = match self.graph.lookup(&p.focus) {
+            None => FlowDto {
+                focus: p.focus.clone(),
+                found: false,
+                narration: None,
+                queries: vec![],
+                trace: vec![],
+            },
+            Some(idx) => {
+                let fid = self.graph.zoom(idx).focus.map(|n| n.id);
+                let (narration, queries) = fid
+                    .as_ref()
+                    .and_then(|id| self.flows.get(id))
+                    .map(|(n, q)| (Some(n.clone()), q.clone()))
+                    .unwrap_or((None, vec![]));
+                let trace = self
+                    .graph
+                    .thread(idx, depth)
+                    .into_iter()
+                    .map(hop_dto)
+                    .collect();
+                FlowDto {
+                    focus: p.focus.clone(),
+                    found: true,
+                    narration,
+                    queries,
+                    trace,
+                }
+            }
+        };
+        let md = md_flow(&dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
         name = "context_pack",
         description = "The minimal token-budgeted set of symbols to read in order to change the focus symbol safely"
     )]
@@ -671,6 +724,30 @@ fn md_thread(d: &ThreadDto) -> String {
     o
 }
 
+fn md_flow(d: &FlowDto) -> String {
+    if !d.found {
+        return format!("## Flow: `{}`\n\n_no symbol matched_\n", d.focus);
+    }
+    let mut o = format!("## Flow: `{}`\n\n", d.focus);
+    match &d.narration {
+        Some(n) => {
+            let _ = writeln!(o, "{n}\n");
+        }
+        None => {
+            let _ = writeln!(
+                o,
+                "_no pre-generated narration (build the index with `--flows` to add one) — raw call trace below._\n"
+            );
+        }
+    }
+    if !d.queries.is_empty() {
+        let _ = writeln!(o, "**Ask:** {}\n", d.queries.join(" · "));
+    }
+    let _ = writeln!(o, "**Call trace** ({} steps)", d.trace.len());
+    md_hop_lines(&mut o, &d.trace);
+    o
+}
+
 fn md_pack(d: &PackDto) -> String {
     if !d.found {
         return format!("## Context pack: `{}`\n\n_no symbol matched_\n", d.focus);
@@ -726,6 +803,15 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
 
     let style_guide = crate::index::read_style_guide(uri).await.ok().flatten();
 
+    let flows: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(uri)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, narr, q)| (id.render(), (narr, q)))
+        .collect();
+
     // The embedder powers `search`; graph tools work without it, so a load failure is non-fatal.
     let embedder = match crate::embed::Embedder::load_default() {
         Ok(e) => Some(e),
@@ -739,6 +825,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         graph,
         enrichment: Arc::new(enrichment),
         style_guide: Arc::new(style_guide),
+        flows: Arc::new(flows),
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),

@@ -12,7 +12,7 @@ use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
 fn usage() {
     println!(
-        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> --from <uri>\n  comind serve --from <uri> [--format md|json]\n\n  -h, --help       show this help\n  -V, --version    show version",
+        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--flows] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> --from <uri>\n  comind flow <focus> --from <uri>\n  comind serve --from <uri> [--format md|json]\n\n  -h, --help       show this help\n  -V, --version    show version",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -25,6 +25,7 @@ fn main() -> ExitCode {
         Some("explore") => cmd_explore(&args[2..]),
         Some("search") => cmd_search(&args[2..]),
         Some("changed") => cmd_changed(&args[2..]),
+        Some("flow") => cmd_flow(&args[2..]),
         Some("serve") => cmd_serve(&args[2..]),
         Some("-h" | "--help" | "help") | None => {
             usage();
@@ -410,6 +411,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
     let mut embed = false;
     let mut enrich = false;
     let mut enrich_top: usize = 40;
+    let mut flows_top: usize = 0; // 0 = don't pre-generate flow narrations
     let mut incremental = false;
     let mut i = 0;
     while i < args.len() {
@@ -425,6 +427,16 @@ fn cmd_link(args: &[String]) -> ExitCode {
             "--enrich" => {
                 enrich = true;
                 i += 1;
+            }
+            "--flows" => {
+                if flows_top == 0 {
+                    flows_top = 8;
+                }
+                i += 1;
+            }
+            "--flows-top" => {
+                flows_top = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(8);
+                i += 2;
             }
             "--enrich-top" => {
                 enrich_top = args
@@ -584,10 +596,174 @@ fn cmd_link(args: &[String]) -> ExitCode {
             }
         }
 
+        if flows_top > 0 {
+            if let ExitCode::FAILURE = run_flows(&dst, &symbols, &resolved.edges, flows_top) {
+                return ExitCode::FAILURE;
+            }
+        }
+
         // Record current per-repo commits so the next --incremental run can diff.
         let _ = comind::index::write_repo_commits_blocking(&dst, &current_heads);
     }
 
+    ExitCode::SUCCESS
+}
+
+/// Pre-generate flow walkthroughs (opt-in `--flows[-top N]`): pick the top entry points by how
+/// much they orchestrate (forward call-trace size), trace each with `thread`, narrate via the
+/// LLM, and persist to the `flows` table. Sends call traces to the OpenAI API.
+fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitCode {
+    let client = match comind::llm::LlmClient::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("comind link: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("comind link: runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(symbols, edges);
+
+    // Entry points = functions/methods ranked by forward call-trace size (biggest flows first).
+    let mut candidates: Vec<(&Symbol, usize)> = symbols
+        .iter()
+        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
+        // Skip test/example/legacy files — narrate production flows, where it's most useful.
+        .filter(|s| comind::embed::rank::path_penalty(&s.file_path) > 0.3)
+        .filter_map(|s| {
+            let idx = g.lookup(&s.id.render())?;
+            let reach = g.thread(idx, 4).len();
+            (reach > 0).then_some((s, reach))
+        })
+        .collect();
+    candidates.sort_by_key(|(_, r)| Reverse(*r));
+    candidates.truncate(top);
+
+    if candidates.is_empty() {
+        println!("flows: no multi-step flows found to narrate");
+        return ExitCode::SUCCESS;
+    }
+    eprintln!(
+        "narrating {} flows via {} (sends call traces to the OpenAI API) ...",
+        candidates.len(),
+        comind::llm::DEFAULT_MODEL
+    );
+
+    let mut rows: Vec<(comind::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
+    for (s, _) in &candidates {
+        let Some(idx) = g.lookup(&s.id.render()) else {
+            continue;
+        };
+        let trace: String = g
+            .thread(idx, 4)
+            .iter()
+            .map(|h| {
+                format!(
+                    "d{} {:?} {} {}",
+                    h.depth, h.via, h.node.name, h.node.location
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sig = s.signature.clone().unwrap_or_default();
+        match rt.block_on(client.narrate_flow(&s.name, &sig, &trace)) {
+            Ok((narration, queries)) => rows.push((s.id.clone(), narration, queries)),
+            Err(e) => eprintln!(
+                "comind link: flow narration for {} failed (non-fatal): {e:#}",
+                s.name
+            ),
+        }
+    }
+
+    match comind::index::write_flows_blocking(dst, &rows) {
+        Ok(v) => println!("flows v{v}: {} narrated", rows.len()),
+        Err(e) => {
+            eprintln!("comind link: write flows failed: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Some((_, narr, _)) = rows.first() {
+        println!("  e.g. {}", truncate(narr, 120));
+    }
+    ExitCode::SUCCESS
+}
+
+/// `comind flow <focus> --from <uri>` — the pre-generated flow walkthrough for an entry point (if
+/// the index was built with `--flows`), followed by its live forward call trace.
+fn cmd_flow(args: &[String]) -> ExitCode {
+    let Some((focus, rest)) = args.split_first() else {
+        eprintln!("comind flow: usage: comind flow <focus> --from <uri>");
+        return ExitCode::FAILURE;
+    };
+    let mut from: Option<&str> = None;
+    let mut i = 0;
+    while i < rest.len() {
+        if rest[i] == "--from" {
+            from = rest.get(i + 1).map(String::as_str);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    let Some(uri) = from else {
+        eprintln!("comind flow: --from <uri> is required");
+        return ExitCode::FAILURE;
+    };
+    let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
+        Ok(x) => x,
+        Err(e) => {
+            eprintln!("comind flow: load from {uri} failed: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let Some(idx) = g.lookup(focus) else {
+        eprintln!("comind flow: no symbol matching `{focus}`");
+        return ExitCode::FAILURE;
+    };
+    let fid = g.zoom(idx).focus.map(|n| n.id);
+
+    // Pre-generated narration, if present.
+    if let Some(fid) = &fid {
+        let stored = comind::index::read_flows_blocking(uri)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|(id, _, _)| &id.render() == fid);
+        match stored {
+            Some((_, narr, queries)) => {
+                println!("{narr}\n");
+                if !queries.is_empty() {
+                    println!("Ask: {}\n", queries.join(" · "));
+                }
+            }
+            None => eprintln!(
+                "(no pre-generated narration for `{focus}` — showing the raw trace; run `link --flows` to narrate)\n"
+            ),
+        }
+    }
+
+    // Live forward call trace.
+    let hops = g.thread(idx, 4);
+    println!("flow trace from `{focus}` ({} steps):", hops.len());
+    for h in &hops {
+        println!(
+            "  d{} {:<8} {:<28} {}",
+            h.depth,
+            format!("{:?}", h.via),
+            truncate(&h.node.name, 28),
+            h.node.location
+        );
+    }
     ExitCode::SUCCESS
 }
 

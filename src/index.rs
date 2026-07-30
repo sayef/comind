@@ -816,6 +816,71 @@ pub fn read_enrichment_blocking(
     runtime()?.block_on(read_enrichment(uri))
 }
 
+fn flows_schema() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("symbol_id", DataType::Utf8, false),
+        Field::new("narration", DataType::Utf8, false),
+        Field::new("queries", DataType::Utf8, false), // JSON array of strings
+    ]))
+}
+
+/// Persist pre-generated flow walkthroughs: `(entry_id, narration_markdown, flow_questions)`.
+pub async fn write_flows(uri: &str, rows: &[(GlobalSymbolId, String, Vec<String>)]) -> Result<u64> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let ids = StringArray::from_iter_values(rows.iter().map(|(id, _, _)| id.render()));
+    let narr = StringArray::from_iter_values(rows.iter().map(|(_, n, _)| n.clone()));
+    let queries = StringArray::from_iter_values(
+        rows.iter()
+            .map(|(_, _, q)| serde_json::to_string(q).unwrap_or_else(|_| "[]".into())),
+    );
+    let batch = RecordBatch::try_new(
+        flows_schema(),
+        vec![
+            Arc::new(ids) as ArrayRef,
+            Arc::new(narr) as ArrayRef,
+            Arc::new(queries) as ArrayRef,
+        ],
+    )
+    .context("build flows batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "flows", batch).await
+}
+
+/// Load persisted flows as `(entry_id, narration, queries)`. `Ok(None)` if absent.
+pub async fn read_flows(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("flows").execute().await else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    let mut st = tbl.query().execute().await?;
+    while let Some(b) = st.try_next().await? {
+        let ids = str_col(&b, "symbol_id")?;
+        let narr = str_col(&b, "narration")?;
+        let queries = str_col(&b, "queries")?;
+        for i in 0..b.num_rows() {
+            let q: Vec<String> = serde_json::from_str(queries.value(i)).unwrap_or_default();
+            out.push((id_from_rendered(ids.value(i)), narr.value(i).to_string(), q));
+        }
+    }
+    Ok(Some(out))
+}
+
+/// Blocking wrappers.
+pub fn write_flows_blocking(
+    uri: &str,
+    rows: &[(GlobalSymbolId, String, Vec<String>)],
+) -> Result<u64> {
+    runtime()?.block_on(write_flows(uri, rows))
+}
+pub fn read_flows_blocking(
+    uri: &str,
+) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+    runtime()?.block_on(read_flows(uri))
+}
+
 /// Persist the inferred repo style guide (single-row `style_guide` table).
 pub async fn write_style_guide(uri: &str, content: &str) -> Result<()> {
     let schema = Arc::new(Schema::new(vec![Field::new(

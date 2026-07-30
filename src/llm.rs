@@ -114,6 +114,49 @@ impl LlmClient {
         let user = format!("Samples:\n{joined}");
         self.complete(system, &user, 500).await
     }
+
+    /// Narrate an execution flow: given an entry point and its ordered call trace, produce a
+    /// concise markdown walkthrough plus a few flow-oriented questions the flow answers.
+    pub async fn narrate_flow(
+        &self,
+        entry: &str,
+        signature: &str,
+        trace: &str,
+    ) -> Result<(String, Vec<String>)> {
+        let system = "You explain how a code flow works to a developer new to the codebase. \
+             Given an entry point and its call trace (each line: depth, relation, symbol, \
+             location), reply in exactly this format:\n\
+             NARRATION: <2-5 sentence walkthrough of what happens step by step; reference the \
+             actual symbol names>\n\
+             QUERIES: <3 questions a developer might ask about this flow, separated by ` | `>\n\
+             No preamble, no code fences.";
+        let user = format!("Entry point: {entry}\nSignature: {signature}\nCall trace:\n{trace}");
+        let raw = self.complete(system, &user, 320).await?;
+        Ok(parse_flow(&raw))
+    }
+}
+
+/// Parse the `NARRATION:` / `QUERIES:` reply format, tolerantly (narration may span lines).
+fn parse_flow(raw: &str) -> (String, Vec<String>) {
+    let (narr_part, q_part) = raw.split_once("QUERIES:").unwrap_or((raw, ""));
+    let narration = narr_part
+        .trim()
+        .trim_start_matches("NARRATION:")
+        .trim()
+        .to_string();
+    let queries = q_part
+        .split('|')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    (
+        if narration.is_empty() {
+            raw.trim().to_string()
+        } else {
+            narration
+        },
+        queries,
+    )
 }
 
 /// Parse the `SUMMARY:` / `QUERIES:` reply format, tolerantly.
