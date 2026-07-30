@@ -30,6 +30,32 @@ impl ParseOutput {
         self.symbols.extend(other.symbols);
         self.edges.extend(other.edges);
     }
+
+    /// Collapse definitions that share a SCIP id — e.g. Python `@overload` stubs plus the real
+    /// implementation all render to the same descriptor — keeping the **last** (the
+    /// implementation, which carries the real body/range). Also drops duplicate edges. This
+    /// keeps the flat `symbols`/`search` tables 1:1 with the graph's node set.
+    fn dedup(&mut self) {
+        use std::collections::{HashMap, HashSet};
+
+        let mut last_idx: HashMap<String, usize> = HashMap::new();
+        for (i, s) in self.symbols.iter().enumerate() {
+            last_idx.insert(s.id.render(), i);
+        }
+        if last_idx.len() != self.symbols.len() {
+            let keep: HashSet<usize> = last_idx.into_values().collect();
+            let mut i = 0;
+            self.symbols.retain(|_| {
+                let k = keep.contains(&i);
+                i += 1;
+                k
+            });
+        }
+
+        let mut seen: HashSet<(String, String, String)> = HashSet::new();
+        self.edges
+            .retain(|e| seen.insert((e.src.render(), e.dst.render(), format!("{:?}", e.kind))));
+    }
 }
 
 /// Detect language from file extension. Returns `None` for files we don't parse.
@@ -67,20 +93,21 @@ pub fn parse_repo(root: &Path, repo_name: &str) -> Result<ParseOutput> {
         .filter(|p| detect(p).is_some())
         .collect();
 
-    let out = files
+    let mut out = files
         .par_iter()
         .filter_map(|p| parse_file(p, repo_name, root).ok().flatten())
         .reduce(ParseOutput::default, |mut acc, o| {
             acc.merge(o);
             acc
         });
+    out.dedup();
     Ok(out)
 }
 
 /// Parse a specific set of repo-relative files (for incremental indexing). Unsupported or
 /// missing files are skipped. Paths are relative to `root`.
 pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseOutput {
-    rel_paths
+    let mut out = rel_paths
         .par_iter()
         .filter_map(|rel| {
             let full = root.join(rel);
@@ -93,7 +120,9 @@ pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseO
         .reduce(ParseOutput::default, |mut acc, o| {
             acc.merge(o);
             acc
-        })
+        });
+    out.dedup();
+    out
 }
 
 /// Parse a single file. `Ok(None)` means "unsupported language", not an error.
