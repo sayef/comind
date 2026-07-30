@@ -5,6 +5,7 @@
 //!
 //!   * `search`       — natural-language / hybrid code search (semantic + lexical + centrality)
 //!   * `repos`        — indexed repositories + symbol counts
+//!   * `suggest`      — pre-generated questions you can ask (query catalog)
 //!   * `find`         — locate symbols by name/path substring
 //!   * `zoom`         — 360° view of a symbol (callers, callees, importers, members)
 //!   * `ripple`       — org-wide blast radius (who breaks if I change this)
@@ -49,7 +50,7 @@ pub struct ComindServer {
 impl ComindServer {
     /// Build a result node, attaching its LLM summary when available.
     fn node_dto(&self, n: GNode) -> NodeDto {
-        let summary = self.enrichment.get(&n.id).map(|(s, _)| s.clone());
+        let enr = self.enrichment.get(&n.id);
         NodeDto {
             id: n.id,
             name: n.name,
@@ -57,7 +58,8 @@ impl ComindServer {
             repo: n.repo,
             location: n.location,
             signature: n.signature,
-            summary,
+            summary: enr.map(|(s, _)| s.clone()),
+            queries: enr.map(|(_, q)| q.clone()).unwrap_or_default(),
         }
     }
 
@@ -92,6 +94,9 @@ struct NodeDto {
     signature: Option<String>,
     /// One-line LLM summary, when the index was enriched.
     summary: Option<String>,
+    /// Natural-language questions this symbol answers (pre-generated during `--enrich`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    queries: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -187,6 +192,19 @@ struct SearchDto {
     results: Vec<SearchHitDto>,
 }
 
+#[derive(Serialize, schemars::JsonSchema)]
+struct SuggestItem {
+    query: String,
+    symbol: String,
+    location: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct SuggestDto {
+    total: usize,
+    suggestions: Vec<SuggestItem>,
+}
+
 // ---- tool parameters --------------------------------------------------------------------
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -197,6 +215,14 @@ struct SearchParam {
     /// A natural-language question ("how do we create a migration?") or a symbol name.
     query: String,
     /// Max results (default 12).
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct SuggestParam {
+    /// Optional keyword to filter suggestions (matches the question or the symbol name).
+    about: Option<String>,
+    /// Max suggestions (default 40).
     limit: Option<u32>,
 }
 
@@ -281,6 +307,49 @@ impl ComindServer {
                 .collect(),
         };
         let md = md_repos(&dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "suggest",
+        description = "Suggested questions you can ask about this codebase (pre-generated during --enrich). Optionally filter by a keyword to discover what flows/topics exist."
+    )]
+    fn suggest(&self, Parameters(p): Parameters<SuggestParam>) -> CallToolResult {
+        let limit = p.limit.unwrap_or(40) as usize;
+        let about = p.about.as_deref().map(str::to_lowercase);
+        let mut items: Vec<SuggestItem> = Vec::new();
+        for (id, (_, queries)) in self.enrichment.iter() {
+            let (symbol, location) = self
+                .symbols
+                .get(id)
+                .map(|s| {
+                    (
+                        s.name.clone(),
+                        format!("{}:{}", s.file_path, s.range.start.line),
+                    )
+                })
+                .unwrap_or_else(|| (id.clone(), String::new()));
+            for q in queries {
+                if let Some(a) = &about {
+                    if !q.to_lowercase().contains(a) && !symbol.to_lowercase().contains(a) {
+                        continue;
+                    }
+                }
+                items.push(SuggestItem {
+                    query: q.clone(),
+                    symbol: symbol.clone(),
+                    location: location.clone(),
+                });
+            }
+        }
+        items.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.query.cmp(&b.query)));
+        let total = items.len();
+        items.truncate(limit);
+        let dto = SuggestDto {
+            total,
+            suggestions: items,
+        };
+        let md = md_suggest(&dto);
         self.reply(&dto, md)
     }
 
@@ -501,6 +570,22 @@ fn md_repos(d: &ReposDto) -> String {
     o
 }
 
+fn md_suggest(d: &SuggestDto) -> String {
+    let mut o = format!("## Suggested questions ({} shown)\n\n", d.suggestions.len());
+    if d.suggestions.is_empty() {
+        return o + "_none — index was built without `--enrich`, or no match_\n";
+    }
+    let mut cur = "";
+    for it in &d.suggestions {
+        if it.symbol != cur {
+            let _ = write!(o, "\n**{}** `{}`\n", it.symbol, it.location);
+            cur = &it.symbol;
+        }
+        let _ = writeln!(o, "- {}", it.query);
+    }
+    o
+}
+
 fn md_find(query: &str, d: &FindDto) -> String {
     let mut o = format!("## `find` \"{query}\" — {} result(s)\n\n", d.results.len());
     if d.results.is_empty() {
@@ -524,6 +609,9 @@ fn md_zoom(focus: &str, d: &ZoomDto) -> String {
         }
         if let Some(s) = &f.summary {
             let _ = writeln!(o, "\n{s}");
+        }
+        if !f.queries.is_empty() {
+            let _ = writeln!(o, "\n**Ask:** {}", f.queries.join(" · "));
         }
     } else {
         let _ = writeln!(o, "## zoom `{focus}`");
