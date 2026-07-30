@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: apt-get update && apt-get install -y protobuf-compiler cmake
-      - run: cargo build --release -p comind-cli
+      - run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:
           name: comind-linux
@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: brew install protobuf cmake
-      - run: cargo build --release -p comind-cli
+      - run: cargo build --release
       - name: Smoke test
         run: |
           mkdir -p /tmp/s && printf 'class A:\n  def run(self):\n    pass\n' > /tmp/s/x.py

@@ -8,10 +8,10 @@
 
 use std::path::{Path, MAIN_SEPARATOR};
 
-use anyhow::{Context, Result};
-use comind_core::{
+use crate::model::{
     Edge, EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, Symbol, SymbolKind,
 };
+use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 use tree_sitter::{Node, Parser};

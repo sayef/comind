@@ -47,7 +47,7 @@ jobs:
         run: brew install protobuf cmake
 
       - name: Build
-        run: cargo build --release -p comind-cli
+        run: cargo build --release
 
       - name: Package
         run: |

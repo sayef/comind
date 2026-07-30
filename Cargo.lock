@@ -1313,111 +1313,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "comind-cli"
-version = "0.1.0"
-dependencies = [
- "comind-core",
- "comind-embed",
- "comind-git",
- "comind-graph",
- "comind-index",
- "comind-llm",
- "comind-mcp",
- "comind-parse",
- "comind-resolve",
- "tokio",
-]
-
-[[package]]
-name = "comind-core"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "comind-embed"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "comind-core",
- "model2vec-rs",
-]
-
-[[package]]
-name = "comind-git"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "git2",
-]
-
-[[package]]
-name = "comind-graph"
-version = "0.1.0"
-dependencies = [
- "comind-core",
- "petgraph",
-]
-
-[[package]]
-name = "comind-index"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "comind-core",
- "futures",
- "lance-index",
- "lancedb",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "comind-llm"
+name = "comind"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-openai",
- "comind-core",
  "futures",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "comind-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "comind-core",
- "comind-graph",
- "comind-index",
+ "git2",
+ "ignore",
+ "lance-index",
+ "lancedb",
+ "model2vec-rs",
+ "petgraph",
+ "rayon",
  "rmcp",
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "comind-parse"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "comind-core",
- "ignore",
- "rayon",
  "tree-sitter",
  "tree-sitter-python",
  "tree-sitter-typescript",
-]
-
-[[package]]
-name = "comind-resolve"
-version = "0.1.0"
-dependencies = [
- "comind-core",
 ]
 
 [[package]]

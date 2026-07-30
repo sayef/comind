@@ -84,26 +84,30 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 - **Note:** GitHub's `stack-graphs` (which I initially proposed) was **archived Sept 2025**.
   It remains usable as an optional resolver but is unmaintained — SCIP is the safe backbone.
 
-## Crate map (`cargo` workspace)
+## Module map (single crate)
 
 ```
-crates/
-  comind-core     domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
-  comind-parse    tree-sitter: file → symbols + intra-file edges, per-language extractors.
-  comind-resolve  stack-graphs name resolution + cross-repo link-resolver (SCIP id minting).
-  comind-index    Lance/object_store writers + readers; versioning; incremental change detection.
-  comind-graph    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
-  comind-embed    fastembed/ONNX local embeddings; chunker.
-  comind-llm      wiki / style-guide / query-association generation via OpenAI/Anthropic (reqwest).
-  comind-mcp      rmcp server exposing find/flows/zoom/ripple/thread/guide.
-  comind-cli      clap binary: `comind index|serve|resolve|query`. The single distributable.
+src/
+  model.rs    domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
+  parse.rs    tree-sitter: file → symbols + intra-file edges, per-language extractors.
+  resolve.rs  cross-repo link-resolver (SCIP id binding).
+  index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
+  graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
+  embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
+  llm.rs      wiki / style-guide / query-association generation via OpenAI.
+  mcp.rs      rmcp server exposing find/zoom/ripple/thread/context_pack/guide.
+  git.rs      git2 change detection for incremental indexing.
+  main.rs     clap binary: `comind index|serve|resolve|query`. The single distributable.
 ```
+
+One crate, one module per stage; `main.rs` uses the library as `comind::<module>`. (Earlier phases
+below were built as a `cargo` workspace of `comind-*` crates and later consolidated into this single crate.)
 
 MCP verb semantics are ported 1:1 from the Python app — that design is proven; keep it.
 
 ## Phases
 
-- **P0 — Foundation:** workspace, `comind-core` types (SCIP ids, Symbol/Edge), CI skeleton. ← *done*
+- **P0 — Foundation:** workspace, `model` types (SCIP ids, Symbol/Edge), CI skeleton. ← *done*
 - **P1 — Parse:** tree-sitter symbol/edge extraction, rayon-parallel. ← *done for Python + TypeScript*
   (`comind index <repo>` prints graph stats). Validated on `pkg-common` (2843 symbols,
   11361 edges, 0.33s debug) and `service-a`. **Known limitation:** Python methods are currently
@@ -125,7 +129,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   use lancedb 0.23/lance 1.0.1, which trips the rustc ≥1.94 async-layout `recursion_limit`
   regression. Build Arrow types from `lancedb::arrow::*` re-exports, never a direct arrow dep.
 - **P3 — Resolve:** intra-repo call binding + cross-repo link-resolver → federated edges.
-  ← *done (import-based cross-repo)*. `comind-parse` now extracts imports; `comind-resolve`
+  ← *done (import-based cross-repo)*. `parse` now extracts imports; `resolve`
   binds them to real definitions by SCIP descriptor-core. `comind link <repo>...` proved it on
   5 real repos: **757 cross-repo edges**; `ripple(acme/logging)` → impacts service-a,
   service-d, service-b, service-c (120 refs). **Caveat:** generic descriptor cores (e.g.
@@ -133,7 +137,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   package-qualified/import-path matches, and resolve calls cross-repo via imports (currently
   same-repo only). SCIP-index ingestion is the precision upgrade path.
 - **P4 — Graph + Query:** petgraph traversal (ripple/thread/zoom) + ranked context packs.
-  ← *traversal + packs done*. `comind-graph::CodeGraph` builds an in-memory petgraph and serves
+  ← *traversal + packs done*. `graph::CodeGraph` builds an in-memory petgraph and serves
   `ripple` (reverse Calls/Imports reachability = blast radius), `thread` (forward call trace),
   `zoom` (container/members/callers/callees/importers), and `context_pack` (personalized
   PageRank over *dependency* edges only, files excluded, greedily packed to a token budget).
@@ -142,32 +146,32 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   definition read-set to ~1489/1500 tokens with `file:line`. TODO: load from the persisted
   Lance graph instead of re-parsing (needed for `serve`), FTS/vector as optional retrieval modes.
 - **P5 — Serve:** rmcp MCP server + CLI, single binary; parity with Python MCP verbs.
-  ← *done*. `comind-index::read_graph` loads the persisted org graph from Lance (local/S3) back
-  into core types (fast consumer path — no re-parse; verified from S3). `comind-mcp` (rmcp 2.2)
+  ← *done*. `index::read_graph` loads the persisted org graph from Lance (local/S3) back
+  into core types (fast consumer path — no re-parse; verified from S3). `mcp` (rmcp 2.2)
   serves 6 tools over stdio: `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`. CLI:
   `comind serve --from <uri>` and `comind explore <focus> --from <uri>`. Smoke-tested with a real
   JSON-RPC handshake: tools/list advertises all 6; `ripple(Settings)` → 74 dependents grouped
   by repo. Note: MCP tool outputs must be object-rooted (list results wrapped in a DTO).
 - **P6 — Enrich:** local embeddings + hybrid search + LLM enrichment — **done**.
-  ← *embed + search done*. `comind-embed` uses **Model2Vec** (`model2vec-rs`, pure-Rust, CPU,
+  ← *embed + search done*. `embed` uses **Model2Vec** (`model2vec-rs`, pure-Rust, CPU,
   no ONNX) — the approach validated by **semble**. `comind search <query> --from <uri>` does
   semantic search **reranked by graph centrality + definition-boost + test-file penalty**
   (semble's fusion ideas + our unique dependency-graph signal). Verified: "postgres database
   connection executor" → the two most-depended-on executor classes rank top.
-  Ranking (`comind-embed::rank`) re-implements semble's ideas (studied from its GitHub source,
+  Ranking (`embed::rank`) re-implements semble's ideas (studied from its GitHub source,
   not copied): adaptive fusion weight α (symbol query 0.3, NL 0.5), `is_symbol_query` detection,
   camelCase/snake_case identifier splitting → lexical-overlap signal, exact-name/definition boost,
   structured path penalties (test/examples/legacy ×0.3, `__init__`/barrels ×0.5, `.d.ts` ×0.7).
   **Our edge:** dependency-graph centrality (`dependents_count`) as an extra multiplier — impossible
   without the cross-repo graph. Demo: symbol query → exact class #1 (4.54 vs 1.18); NL query → the
   connection-relevant defs, tests penalized out.
-  **Embeddings persisted (done):** `comind-index::write/read_embeddings` stores a Lance
+  **Embeddings persisted (done):** `index::write/read_embeddings` stores a Lance
   `embeddings` table (`symbol_id`, `vector: FixedSizeList<Float32>[dim]` — the column a Lance
   vector index can be built on). `comind link --embed` writes vectors next to the graph;
   `comind search` loads them and only embeds the query → 0.62s (was ~10.8s) for 7471 vectors.
   TODO: real BM25 + RRF (k≈60) lexical retriever + file-saturation decay (×0.5/extra chunk);
   build a Lance ANN index on the vector column for >100k-symbol corpora.
-  **LLM enrichment (done):** `comind-llm` (OpenAI via async-openai, `gpt-4o-mini` default,
+  **LLM enrichment (done):** `llm` (OpenAI via async-openai, `gpt-4o-mini` default,
   bounded concurrency) generates per-symbol summaries + NL queries and infers a repo style guide.
   **Opt-in / data egress:** only runs with `comind link --enrich` (sends code signatures to
   OpenAI); never during plain indexing. Summaries+queries persisted to a Lance `enrichment` table
@@ -182,7 +186,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   [`docs/CI.md`](docs/CI.md) (GitLab variant, member-repo push triggers, OIDC/S3, opt-in enrich).
   TODO: persist the style guide to its own table.
 - **P7 — Incremental + OSS.**
-  **Incremental (done):** `comind-git` (git2, vendored libgit2 → still a single static binary)
+  **Incremental (done):** `git` (git2, vendored libgit2 → still a single static binary)
   detects changed files between the last-indexed commit and HEAD. `comind changed <repo> --since
   <sha>` reports add/modify/delete; `comind index <repo> --to <uri> --incremental [--since <sha>]`
   reparses only changed files, drops symbols/edges of modified+deleted files, merges, rewrites,
@@ -196,7 +200,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   and only recompute stale/new ones. Verified: full = 7471 embeds + 5 LLM calls; no-change
   incremental = 0 stale → 7471 reused/0 computed, 5 reused/0 API calls. So a push that touches one
   repo re-embeds/re-enriches only that repo's changed symbols. **CI done** (see above).
-  **Style guide + `guide` tool (done):** `comind-index::write/read_style_guide` persists the
+  **Style guide + `guide` tool (done):** `index::write/read_style_guide` persists the
   inferred guide (single-row table); the MCP server exposes it as a 7th tool `guide` → full
   verb-parity with the Python app (repos/find/zoom/ripple/thread/context_pack/guide) plus `search`.
   Verified live. README rewritten for the Rust project.

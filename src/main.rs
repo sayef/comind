@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::ExitCode;
 
-use comind_core::{Edge, EdgeKind, Symbol, SymbolKind};
+use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
 fn usage() {
     println!(
@@ -48,12 +48,12 @@ fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String>
     let mut edges: Vec<Edge> = Vec::new();
     for path in repos {
         let name = repo_name(path);
-        let o = comind_parse::parse_repo(Path::new(path), &name)
+        let o = comind::parse::parse_repo(Path::new(path), &name)
             .map_err(|e| format!("{name}: parse failed: {e:#}"))?;
         symbols.extend(o.symbols);
         edges.extend(o.edges);
     }
-    let resolved = comind_resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges);
     Ok((symbols, resolved.edges))
 }
 
@@ -83,7 +83,7 @@ fn cmd_explore(args: &[String]) -> ExitCode {
 
     // Fast path: load the prebuilt graph from LanceDB (no re-parse). Otherwise parse+resolve.
     let (symbols, edges) = match from {
-        Some(uri) => match comind_index::read_graph_blocking(uri) {
+        Some(uri) => match comind::index::read_graph_blocking(uri) {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("comind explore: load from {uri} failed: {e:#}");
@@ -104,7 +104,7 @@ fn cmd_explore(args: &[String]) -> ExitCode {
             }
         }
     };
-    let g = comind_graph::CodeGraph::build(&symbols, &edges);
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
     eprintln!(
         "(graph: {} symbols, {} edges, {} dangling)",
         g.node_count(),
@@ -162,7 +162,7 @@ fn cmd_explore(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn print_group(label: &str, nodes: &[comind_graph::Node], limit: usize) {
+fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
     if nodes.is_empty() {
         return;
     }
@@ -200,7 +200,7 @@ fn cmd_search(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let (symbols, edges) = match comind_index::read_graph_blocking(uri) {
+    let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("comind search: load from {uri} failed: {e:#}");
@@ -208,9 +208,9 @@ fn cmd_search(args: &[String]) -> ExitCode {
         }
     };
     let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
-    let g = comind_graph::CodeGraph::build(&symbols, &edges);
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
 
-    let embedder = match comind_embed::Embedder::load_default() {
+    let embedder = match comind::embed::Embedder::load_default() {
         Ok(e) => e,
         Err(e) => {
             eprintln!("comind search: embedding model: {e:#}");
@@ -220,7 +220,7 @@ fn cmd_search(args: &[String]) -> ExitCode {
 
     // LLM enrichment (summaries + generated queries), if present — folded into ranking + shown.
     let enrich: HashMap<String, (String, Vec<String>)> =
-        comind_index::read_enrichment_blocking(uri)
+        comind::index::read_enrichment_blocking(uri)
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -230,12 +230,12 @@ fn cmd_search(args: &[String]) -> ExitCode {
 
     // Native LanceDB hybrid retrieval: BM25 full-text + vector, fused with RRF. We then apply
     // code-aware boosts and our dependency-graph centrality signal on top.
-    use comind_embed::rank;
+    use comind::embed::rank;
     let keywords = rank::query_keywords(&query);
     let symbolish = rank::is_symbol_query(&query);
     let qvec = embedder.embed_query(&query);
 
-    let candidates = match comind_index::hybrid_search_blocking(uri, &query, qvec, 80) {
+    let candidates = match comind::index::hybrid_search_blocking(uri, &query, qvec, 80) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("comind search: hybrid search failed (did you run `link --embed`?): {e:#}");
@@ -302,7 +302,7 @@ fn query_match(keywords: &[String], generated: &[String]) -> f32 {
     generated
         .iter()
         .map(|q| {
-            let qk = comind_embed::rank::query_keywords(q);
+            let qk = comind::embed::rank::query_keywords(q);
             keywords.iter().filter(|k| qk.contains(*k)).count() as f32 / keywords.len() as f32
         })
         .fold(0.0, f32::max)
@@ -340,7 +340,7 @@ fn cmd_changed(args: &[String]) -> ExitCode {
     };
     let path = Path::new(repo);
 
-    let head = match comind_git::head_commit(path) {
+    let head = match comind::git::head_commit(path) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("comind changed: {e:#}");
@@ -352,7 +352,7 @@ fn cmd_changed(args: &[String]) -> ExitCode {
     let Some(base) = since else {
         return ExitCode::SUCCESS;
     };
-    match comind_git::changed_files(path, base) {
+    match comind::git::changed_files(path, base) {
         Ok(cs) => {
             println!(
                 "changed since {base}: {} files ({} added, {} modified, {} deleted)",
@@ -407,7 +407,7 @@ fn cmd_serve(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match rt.block_on(comind_mcp::serve_stdio(uri)) {
+    match rt.block_on(comind::mcp::serve_stdio(uri)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("comind serve: {e:#}");
@@ -477,7 +477,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
     println!("parsing {} repos:", repos.len());
     for path in &repos {
         let name = repo_name(path);
-        match comind_parse::parse_repo(Path::new(path), &name) {
+        match comind::parse::parse_repo(Path::new(path), &name) {
             Ok(o) => {
                 println!(
                     "  {name:<16} {:>6} symbols, {:>6} edges",
@@ -494,7 +494,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
         }
     }
 
-    let resolved = comind_resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges);
     let s = &resolved.stats;
     println!(
         "\nresolved: {} imports ({} cross-repo), {} calls; {} imports unresolved (third-party)",
@@ -548,7 +548,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
         // manifest is the atomic "latest" pointer every consumer reads (push-to-master model).
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
         println!("\npersisting resolved org graph to {dst} ...");
-        match comind_index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
+        match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
             Ok((sv, ev)) => {
                 println!("wrote org graph: symbols v{sv}, edges v{ev}  (latest pointer)")
             }
@@ -557,7 +557,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        match comind_index::count_rows_blocking(&dst) {
+        match comind::index::count_rows_blocking(&dst) {
             Ok((s, e)) => println!("read back: {s} symbols, {e} edges"),
             Err(e) => {
                 eprintln!("comind link: read-back failed: {e:#}");
@@ -570,7 +570,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
         let current_heads: Vec<(String, String)> = repos
             .iter()
             .filter_map(|p| {
-                comind_git::head_commit(Path::new(p))
+                comind::git::head_commit(Path::new(p))
                     .ok()
                     .map(|h| (repo_name(p), h))
             })
@@ -608,7 +608,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
         }
 
         // Record current per-repo commits so the next --incremental run can diff.
-        let _ = comind_index::write_repo_commits_blocking(&dst, &current_heads);
+        let _ = comind::index::write_repo_commits_blocking(&dst, &current_heads);
     }
 
     ExitCode::SUCCESS
@@ -617,13 +617,13 @@ fn cmd_link(args: &[String]) -> ExitCode {
 /// Rendered ids of symbols whose content may have changed since the last index: any symbol in a
 /// repo that is new (no recorded commit / not a git repo) or whose file changed since that commit.
 fn compute_stale_ids(repos: &[&str], dst: &str, symbols: &[Symbol]) -> HashSet<String> {
-    let prior = comind_index::read_repo_commits_blocking(dst).unwrap_or_default();
+    let prior = comind::index::read_repo_commits_blocking(dst).unwrap_or_default();
     // repo -> Some(changed files) or None (treat whole repo as stale)
     let mut changed: HashMap<String, Option<HashSet<String>>> = HashMap::new();
     for p in repos {
         let name = repo_name(p);
-        let set = match (prior.get(&name), comind_git::head_commit(Path::new(p))) {
-            (Some(base), Ok(_)) => comind_git::changed_files(Path::new(p), base)
+        let set = match (prior.get(&name), comind::git::head_commit(Path::new(p))) {
+            (Some(base), Ok(_)) => comind::git::changed_files(Path::new(p), base)
                 .ok()
                 .map(|cs| {
                     cs.added
@@ -653,7 +653,7 @@ fn run_embed(
     stale_ids: &HashSet<String>,
     incremental: bool,
 ) -> ExitCode {
-    let embedder = match comind_embed::Embedder::load_default() {
+    let embedder = match comind::embed::Embedder::load_default() {
         Ok(e) => e,
         Err(e) => {
             eprintln!("comind link: embedding model: {e:#}");
@@ -661,7 +661,7 @@ fn run_embed(
         }
     };
     let prior: HashMap<String, Vec<f32>> = if incremental {
-        comind_index::read_search_vectors_blocking(dst)
+        comind::index::read_search_vectors_blocking(dst)
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -677,7 +677,7 @@ fn run_embed(
         .filter(|s| !matches!(s.kind, SymbolKind::File))
         .collect();
     // (symbol, search text, vector) — text feeds the BM25 index, vector the semantic side.
-    let mut rows: Vec<(comind_core::GlobalSymbolId, String, Vec<f32>)> =
+    let mut rows: Vec<(comind::model::GlobalSymbolId, String, Vec<f32>)> =
         Vec::with_capacity(non_file.len());
     let mut reused = 0usize;
     let mut to_embed: Vec<&Symbol> = Vec::new();
@@ -685,7 +685,7 @@ fn run_embed(
         let rid = s.id.render();
         if !stale_ids.contains(&rid) {
             if let Some(v) = prior.get(&rid) {
-                rows.push((s.id.clone(), comind_embed::symbol_text(s), v.clone()));
+                rows.push((s.id.clone(), comind::embed::symbol_text(s), v.clone()));
                 reused += 1;
                 continue;
             }
@@ -694,12 +694,12 @@ fn run_embed(
     }
     let texts: Vec<String> = to_embed
         .iter()
-        .map(|s| comind_embed::symbol_text(s))
+        .map(|s| comind::embed::symbol_text(s))
         .collect();
     for (s, v) in to_embed.iter().zip(embedder.embed(&texts)) {
-        rows.push((s.id.clone(), comind_embed::symbol_text(s), v));
+        rows.push((s.id.clone(), comind::embed::symbol_text(s), v));
     }
-    match comind_index::write_search_table_blocking(dst, &rows) {
+    match comind::index::write_search_table_blocking(dst, &rows) {
         Ok(v) => println!(
             "search index v{v}: {} symbols ({reused} reused, {} embedded) + BM25 FTS index",
             rows.len(),
@@ -724,7 +724,7 @@ fn run_enrich(
     stale_ids: &HashSet<String>,
     incremental: bool,
 ) -> ExitCode {
-    let client = match comind_llm::LlmClient::from_env() {
+    let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("comind link: {e:#}");
@@ -741,7 +741,7 @@ fn run_enrich(
             return ExitCode::FAILURE;
         }
     };
-    let g = comind_graph::CodeGraph::build(symbols, edges);
+    let g = comind::graph::CodeGraph::build(symbols, edges);
 
     // Most-central definitions first — enrich where it matters most (bounded cost).
     let mut defs: Vec<&Symbol> = symbols
@@ -763,7 +763,7 @@ fn run_enrich(
 
     // Reuse prior enrichment for non-stale symbols; only hit the API for the rest.
     let prior: HashMap<String, (String, Vec<String>)> = if incremental {
-        comind_index::read_enrichment_blocking(dst)
+        comind::index::read_enrichment_blocking(dst)
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -774,7 +774,7 @@ fn run_enrich(
         HashMap::new()
     };
 
-    let mut rows: Vec<(comind_core::GlobalSymbolId, String, Vec<String>)> = Vec::new();
+    let mut rows: Vec<(comind::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
     let mut to_call: Vec<&Symbol> = Vec::new();
     for s in &defs {
         let rid = s.id.render();
@@ -804,7 +804,7 @@ fn run_enrich(
         eprintln!(
             "enriching {} symbols via {} ...",
             items.len(),
-            comind_llm::DEFAULT_MODEL
+            comind::llm::DEFAULT_MODEL
         );
     }
     let results = rt.block_on(client.enrich_batch(&items));
@@ -814,7 +814,7 @@ fn run_enrich(
         }
     }
 
-    match comind_index::write_enrichment_blocking(dst, &rows) {
+    match comind::index::write_enrichment_blocking(dst, &rows) {
         Ok(v) => println!(
             "enrichment v{v}: {} total ({} reused, {} generated)",
             rows.len(),
@@ -842,7 +842,7 @@ fn run_enrich(
             .collect();
         match rt.block_on(client.style_guide(&samples)) {
             Ok(guide) => {
-                let _ = comind_index::write_style_guide_blocking(dst, &guide);
+                let _ = comind::index::write_style_guide_blocking(dst, &guide);
                 println!(
                     "\nstyle guide (persisted; preview):\n{}",
                     truncate_lines(&guide, 8)
@@ -906,14 +906,14 @@ fn cmd_index(args: &[String]) -> ExitCode {
         };
         let base = since
             .map(str::to_string)
-            .or_else(|| comind_index::read_repo_meta_blocking(dst).ok().flatten());
+            .or_else(|| comind::index::read_repo_meta_blocking(dst).ok().flatten());
         match base {
             Some(base) => return incremental_index(root, &repo_name, dst, &base),
             None => eprintln!("(no recorded base commit — doing a full index)"),
         }
     }
 
-    let out = match comind_parse::parse_repo(root, &repo_name) {
+    let out = match comind::parse::parse_repo(root, &repo_name) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("comind index: {e:#}");
@@ -959,7 +959,7 @@ fn cmd_index(args: &[String]) -> ExitCode {
     if let Some(dst) = &dst {
         // Persist to LanceDB under a per-repo prefix, then read back to prove the round-trip.
         println!("\npersisting to {dst} ...");
-        match comind_index::write_graph_blocking(dst, &out.symbols, &out.edges) {
+        match comind::index::write_graph_blocking(dst, &out.symbols, &out.edges) {
             Ok((sv, ev)) => println!("wrote LanceDB versions: symbols v{sv}, edges v{ev}"),
             Err(e) => {
                 eprintln!("comind index: write failed: {e:#}");
@@ -967,8 +967,8 @@ fn cmd_index(args: &[String]) -> ExitCode {
             }
         }
         // Record the HEAD commit so later runs can index incrementally.
-        if let Ok(head) = comind_git::head_commit(root) {
-            let _ = comind_index::write_repo_meta_blocking(dst, &repo_name, &head);
+        if let Ok(head) = comind::git::head_commit(root) {
+            let _ = comind::index::write_repo_meta_blocking(dst, &repo_name, &head);
             println!("recorded commit {}", short(&head));
         }
     }
@@ -982,14 +982,14 @@ fn short(sha: &str) -> &str {
 /// Incremental index: reparse only files changed since `base`, drop symbols/edges of
 /// modified+deleted files, merge, and rewrite. Keeps the index fresh at near-diff cost.
 fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> ExitCode {
-    let head = match comind_git::head_commit(root) {
+    let head = match comind::git::head_commit(root) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("comind index: {e:#}");
             return ExitCode::FAILURE;
         }
     };
-    let cs = match comind_git::changed_files(root, base) {
+    let cs = match comind::git::changed_files(root, base) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("comind index: {e:#}");
@@ -1006,12 +1006,12 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         cs.deleted.len()
     );
     if cs.total() == 0 {
-        let _ = comind_index::write_repo_meta_blocking(dst, repo_name, &head);
+        let _ = comind::index::write_repo_meta_blocking(dst, repo_name, &head);
         println!("index already up to date");
         return ExitCode::SUCCESS;
     }
 
-    let (prior_syms, prior_edges) = match comind_index::read_graph_blocking(dst) {
+    let (prior_syms, prior_edges) = match comind::index::read_graph_blocking(dst) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("comind index: no prior index at {dst} ({e:#}); run a full index first");
@@ -1021,7 +1021,7 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
 
     let dropped: HashSet<String> = cs.to_drop().cloned().collect();
     let to_parse: Vec<String> = cs.to_parse().cloned().collect();
-    let newout = comind_parse::parse_files(root, repo_name, &to_parse);
+    let newout = comind::parse::parse_files(root, repo_name, &to_parse);
 
     // Map each symbol id to its file so we can drop edges owned by changed files.
     let file_of: HashMap<String, String> = prior_syms
@@ -1045,11 +1045,11 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     symbols.extend(newout.symbols);
     edges.extend(newout.edges);
 
-    if let Err(e) = comind_index::write_graph_blocking(dst, &symbols, &edges) {
+    if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges) {
         eprintln!("comind index: write failed: {e:#}");
         return ExitCode::FAILURE;
     }
-    let _ = comind_index::write_repo_meta_blocking(dst, repo_name, &head);
+    let _ = comind::index::write_repo_meta_blocking(dst, repo_name, &head);
     println!(
         "reparsed {} files → symbols {before}→{}, edges {}",
         to_parse.len(),

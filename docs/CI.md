@@ -63,7 +63,7 @@ index:
     - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/service-a.git" repos/service-a
     # … service-b, service-c, service-d
   script:
-    - cargo build --release -p comind-cli
+    - cargo build --release
     - ./target/release/comind link
         repos/pkg-common repos/service-a repos/service-b repos/service-c repos/service-d
         --to "$COMIND_S3_URI" --embed --enrich --enrich-top 200

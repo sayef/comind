@@ -69,7 +69,7 @@ jobs:
 
       - name: Build comind
         working-directory: comind
-        run: cargo build --release -p comind-cli
+        run: cargo build --release
 
       - name: Build the index (local LanceDB path — no S3)
         env:

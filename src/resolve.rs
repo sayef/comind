@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use comind_core::{Edge, EdgeKind, GlobalSymbolId, Symbol};
+use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol};
 
 /// Strip the SCIP kind suffix so a definition's descriptor matches its import-path form.
 /// `acme/const/Settings#` -> `acme/const/Settings`;
@@ -154,7 +154,7 @@ fn bind(src: &GlobalSymbolId, dst: &GlobalSymbolId, kind: EdgeKind, confidence: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use comind_core::{Language, Position, Range, RepoId, SymbolKind};
+    use crate::model::{Language, Position, Range, RepoId, SymbolKind};
 
     fn sym(pkg: &str, descriptor: &str, name: &str, kind: SymbolKind) -> Symbol {
         Symbol {

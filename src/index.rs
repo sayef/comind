@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
+use crate::model::{Edge, Symbol};
 use anyhow::{Context, Result};
-use comind_core::{Edge, Symbol};
 use lancedb::arrow::arrow_array::{
     ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray, UInt32Array,
 };
@@ -176,7 +176,7 @@ pub async fn latest_versions(uri: &str) -> Result<(u64, u64)> {
 
 // ---- reading the persisted graph back into core types ----------------------------------
 
-use comind_core::{EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
+use crate::model::{EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
 use futures::TryStreamExt;
 use lancedb::arrow::arrow_array::Array;
 use lancedb::query::ExecutableQuery;

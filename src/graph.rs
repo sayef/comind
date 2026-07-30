@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-use comind_core::{Edge, EdgeKind, Symbol};
+use crate::model::{Edge, EdgeKind, Symbol};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
@@ -140,7 +140,7 @@ impl CodeGraph {
         }
         candidates.sort_by_key(|&i| {
             let s = &self.g[i].sym;
-            let is_file = matches!(s.kind, comind_core::SymbolKind::File) as usize;
+            let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
             (is_file, s.id.descriptor.len())
         });
         candidates.first().copied()
@@ -181,7 +181,7 @@ impl CodeGraph {
             .collect();
         v.sort_by_key(|&i| {
             let s = &self.g[i].sym;
-            let is_file = matches!(s.kind, comind_core::SymbolKind::File) as usize;
+            let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
             (is_file, s.id.descriptor.len())
         });
         v.into_iter().take(limit).map(|i| self.node_of(i)).collect()
@@ -288,7 +288,7 @@ impl CodeGraph {
             if rank <= 0.0 {
                 break; // unreachable from focus
             }
-            if matches!(self.g[idx].sym.kind, comind_core::SymbolKind::File) {
+            if matches!(self.g[idx].sym.kind, crate::model::SymbolKind::File) {
                 continue;
             }
             let t = est_tokens(&self.g[idx].sym);
@@ -350,7 +350,7 @@ fn est_tokens(s: &Symbol) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use comind_core::{GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
+    use crate::model::{GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
 
     fn id(pkg: &str, desc: &str) -> GlobalSymbolId {
         GlobalSymbolId {

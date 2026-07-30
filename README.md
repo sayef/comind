@@ -38,10 +38,10 @@ Or build from source:
 ```bash
 # Requires: Rust (pinned via rust-toolchain.toml), protoc, cmake  (`brew install protobuf cmake`)
 git clone https://github.com/sayef/comind && cd comind
-cargo build --release -p comind-cli      # → target/release/comind
+cargo build --release      # → target/release/comind
 ```
 
-Coming once the repo is public: `cargo install comind-cli` (crates.io) and a Homebrew tap.
+Coming once the repo is public: `cargo install comind` (crates.io) and a Homebrew tap.
 
 ## Quick start
 
@@ -102,9 +102,9 @@ flowchart LR
         R2["service-a / service-b / …"]
     end
     subgraph IDX["Index — CI, incremental"]
-        P["comind-parse<br/>tree-sitter"]
-        RS["comind-resolve<br/>cross-repo SCIP"]
-        G["comind-git<br/>changed files only"]
+        P["parse<br/>tree-sitter"]
+        RS["resolve<br/>cross-repo SCIP"]
+        G["git<br/>changed files only"]
     end
     subgraph ART["Versioned LanceDB artifact on S3"]
         GR["graph<br/>symbols · edges"]
@@ -119,20 +119,20 @@ flowchart LR
     AGENT(["coding agent"]) -. ripple / context_pack .-> MCP
 ```
 
-Rust workspace, one crate per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
+Single crate, one module per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
 the competitive landscape, and the phase log.
 
 ```
-comind-core   SCIP identity, Symbol/Edge model
-comind-parse  tree-sitter → symbols + intra-file edges (Python, TypeScript; polyglot-ready)
-comind-git    git change detection (incremental)
-comind-resolve cross-repo import/call binding
-comind-index  LanceDB (S3) versioned store: graph, embeddings, enrichment, style guide
-comind-graph  in-memory petgraph: ripple / thread / zoom / context_pack
-comind-embed  Model2Vec static embeddings + code-aware ranking
-comind-llm    OpenAI summaries / query generation / style guide (opt-in)
-comind-mcp    rmcp MCP server (7 tools)
-comind-cli    the single `comind` binary
+src/model.rs   SCIP identity, Symbol/Edge model
+src/parse.rs   tree-sitter → symbols + intra-file edges (Python, TypeScript; polyglot-ready)
+src/git.rs     git change detection (incremental)
+src/resolve.rs cross-repo import/call binding
+src/index.rs   LanceDB (S3) versioned store: graph, embeddings, enrichment, style guide
+src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack
+src/embed.rs   Model2Vec static embeddings + code-aware ranking
+src/llm.rs     OpenAI summaries / query generation / style guide (opt-in)
+src/mcp.rs     rmcp MCP server (7 tools)
+src/main.rs    the `comind` binary (CLI)
 ```
 
 ## Status

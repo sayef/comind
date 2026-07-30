@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::graph::{CodeGraph, Node as GNode};
 use anyhow::Result;
-use comind_graph::{CodeGraph, Node as GNode};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{schemars, tool, tool_router, ServiceExt};
 use serde::{Deserialize, Serialize};
@@ -330,7 +330,7 @@ impl ComindServer {
     }
 }
 
-fn hop_dto(h: comind_graph::Hop) -> HopDto {
+fn hop_dto(h: crate::graph::Hop) -> HopDto {
     HopDto {
         name: h.node.name,
         kind: h.node.kind,
@@ -344,10 +344,10 @@ fn hop_dto(h: comind_graph::Hop) -> HopDto {
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
 /// client disconnects.
 pub async fn serve_stdio(uri: &str) -> Result<()> {
-    let (symbols, edges) = comind_index::read_graph(uri).await?;
+    let (symbols, edges) = crate::index::read_graph(uri).await?;
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
 
-    let enrichment: Enrichment = comind_index::read_enrichment(uri)
+    let enrichment: Enrichment = crate::index::read_enrichment(uri)
         .await
         .ok()
         .flatten()
@@ -356,7 +356,7 @@ pub async fn serve_stdio(uri: &str) -> Result<()> {
         .map(|(id, s, q)| (id.render(), (s, q)))
         .collect();
 
-    let style_guide = comind_index::read_style_guide(uri).await.ok().flatten();
+    let style_guide = crate::index::read_style_guide(uri).await.ok().flatten();
 
     let server = ComindServer {
         graph,

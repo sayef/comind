@@ -1,39 +1,41 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/comind-core",
-    "crates/comind-git",
-    "crates/comind-parse",
-    "crates/comind-resolve",
-    "crates/comind-index",
-    "crates/comind-graph",
-    "crates/comind-embed",
-    "crates/comind-llm",
-    "crates/comind-mcp",
-    "crates/comind-cli",
-]
-
-[workspace.package]
+[package]
+name = "comind"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
 license = "MIT"
 repository = "https://github.com/sayef/comind"
 authors = ["Comind"]
+description = "Deterministic, cross-repo code intelligence for coding agents — self-hosted, single binary."
 
-[workspace.dependencies]
-comind-core = { path = "crates/comind-core" }
-comind-parse = { path = "crates/comind-parse" }
-comind-resolve = { path = "crates/comind-resolve" }
-comind-index = { path = "crates/comind-index" }
-comind-graph = { path = "crates/comind-graph" }
-comind-embed = { path = "crates/comind-embed" }
-comind-llm = { path = "crates/comind-llm" }
-comind-mcp = { path = "crates/comind-mcp" }
-# Shared third-party (added to member crates as each phase lands)
+# Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
+[lib]
+name = "comind"
+path = "src/lib.rs"
+
+[[bin]]
+name = "comind"
+path = "src/main.rs"
+
+[dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std"] }
+futures = "0.3"
+rayon = "1"
+ignore = "=0.4.23"
+petgraph = "0.8.3"
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.23"
+tree-sitter-typescript = "0.23"
+model2vec-rs = "0.2.1"
+# Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
+lancedb = { version = "0.31.0", default-features = false, features = ["aws"] }
+lance-index = "=8.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
+async-openai = { version = "0.41.1", features = ["chat-completion"] } # opt-in enrichment
+rmcp = { version = "2.2.0", features = ["server", "transport-io"] } # MCP server
 
 [profile.release]
 lto = "thin"
@@ -41,10 +43,9 @@ codegen-units = 1
 strip = true
 
 # Keep target/ small on a tight disk: no debug-info for third-party deps
-# (our own crates keep line tables for usable backtraces).
+# (our own code keeps line tables for usable backtraces).
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
-
