@@ -83,8 +83,8 @@ MCP tools: `search`, `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`
 | `comind link <repos…> --to <uri> [--embed] [--enrich] [--incremental]` | Build the cross-repo org index |
 | `comind changed <repo> --since <sha>` | Show files changed since a commit (git diff) |
 | `comind explore <focus> --from <uri>` | Zoom, blast radius, context pack for a symbol |
-| `comind search <query…> --from <uri>` | Graph-aware hybrid code search |
-| `comind serve --from <uri>` | MCP server over stdio |
+| `comind search <query…> --from <uri> [--format md]` | Graph-aware hybrid code search |
+| `comind serve --from <uri> [--format md|json]` | MCP server over stdio |
 
 ## CI (push-to-master → fresh org index)
 

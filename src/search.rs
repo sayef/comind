@@ -44,6 +44,48 @@ pub async fn hybrid(
     Ok(hits)
 }
 
+/// Blocking variant for the CLI (spawns its own runtime under the hood).
+pub fn hybrid_blocking(
+    uri: &str,
+    by_id: &HashMap<String, Symbol>,
+    graph: &CodeGraph,
+    enrichment: &Enrichment,
+    embedder: &Embedder,
+    query: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<SearchHit>> {
+    let qvec = embedder.embed_query(query);
+    let candidates = crate::index::hybrid_search_blocking(uri, query, qvec, 80)?;
+    let mut hits = rank_candidates(candidates, by_id, graph, enrichment, query);
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+/// Render ranked hits as markdown for handoff to an agent (or `--format md` on the CLI).
+pub fn markdown(query: &str, hits: &[SearchHit]) -> String {
+    use std::fmt::Write as _;
+    let mut o = format!("## Search: \"{query}\" — {} result(s)\n\n", hits.len());
+    if hits.is_empty() {
+        return o + "_no results (was the index built with `--embed`?)_\n";
+    }
+    for (i, h) in hits.iter().enumerate() {
+        let _ = write!(
+            o,
+            "{}. **{}** _{}_ — `{}`  ·  {} deps",
+            i + 1,
+            h.name,
+            h.kind,
+            h.location,
+            h.deps
+        );
+        if let Some(s) = &h.summary {
+            let _ = write!(o, "\n   ↳ {s}");
+        }
+        o.push('\n');
+    }
+    o
+}
+
 /// Apply comind's code-aware + centrality boosts to native-retrieval candidates `(id, base)`.
 pub fn rank_candidates(
     candidates: Vec<(String, f32)>,

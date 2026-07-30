@@ -180,6 +180,7 @@ fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
 /// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
 fn cmd_search(args: &[String]) -> ExitCode {
     let mut from: Option<&str> = None;
+    let mut markdown = false;
     let mut query_parts: Vec<&str> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -187,6 +188,14 @@ fn cmd_search(args: &[String]) -> ExitCode {
             "--from" => {
                 from = args.get(i + 1).map(String::as_str);
                 i += 2;
+            }
+            "--format" => {
+                markdown = matches!(args.get(i + 1).map(String::as_str), Some("md" | "markdown"));
+                i += 2;
+            }
+            "--md" | "--markdown" => {
+                markdown = true;
+                i += 1;
             }
             w => {
                 query_parts.push(w);
@@ -196,7 +205,9 @@ fn cmd_search(args: &[String]) -> ExitCode {
     }
     let query = query_parts.join(" ");
     let (Some(uri), false) = (from, query.is_empty()) else {
-        eprintln!("comind search: usage: comind search <query...> --from <lancedb-uri>");
+        eprintln!(
+            "comind search: usage: comind search <query...> --from <lancedb-uri> [--format md]"
+        );
         return ExitCode::FAILURE;
     };
 
@@ -207,7 +218,8 @@ fn cmd_search(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
+    let by_id: HashMap<String, Symbol> =
+        symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
     let g = comind::graph::CodeGraph::build(&symbols, &edges);
 
     let embedder = match comind::embed::Embedder::load_default() {
@@ -228,84 +240,38 @@ fn cmd_search(args: &[String]) -> ExitCode {
             .map(|(id, s, q)| (id.render(), (s, q)))
             .collect();
 
-    // Native LanceDB hybrid retrieval: BM25 full-text + vector, fused with RRF. We then apply
-    // code-aware boosts and our dependency-graph centrality signal on top.
-    use comind::embed::rank;
-    let keywords = rank::query_keywords(&query);
-    let symbolish = rank::is_symbol_query(&query);
-    let qvec = embedder.embed_query(&query);
+    // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comind's code-aware boosts
+    // and dependency-graph centrality — shared with the `search` MCP tool.
+    let hits =
+        match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, &query, 12) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!(
+                    "comind search: hybrid search failed (did you run `link --embed`?): {e:#}"
+                );
+                return ExitCode::FAILURE;
+            }
+        };
 
-    let candidates = match comind::index::hybrid_search_blocking(uri, &query, qvec, 80) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("comind search: hybrid search failed (did you run `link --embed`?): {e:#}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let mut ranked: Vec<(f32, &Symbol, usize, Option<String>)> = candidates
-        .into_iter()
-        .filter_map(|(rid, base)| {
-            let sym = *by_id.get(&rid)?;
-            let deps = g.dependents_count(&rid);
-            let enr = enrich.get(&rid);
-
-            let is_def = matches!(
-                sym.kind,
-                SymbolKind::Function
-                    | SymbolKind::Method
-                    | SymbolKind::Class
-                    | SymbolKind::Interface
-                    | SymbolKind::Struct
-                    | SymbolKind::Enum
+    if markdown {
+        print!("{}", comind::search::markdown(&query, &hits));
+    } else {
+        println!("search: {query:?}\n");
+        for h in &hits {
+            println!(
+                "  {:>6.3}  {:<26} {:<9} deps={:<3} {}",
+                h.score,
+                truncate(&h.name, 26),
+                h.kind,
+                h.deps,
+                h.location
             );
-            let def_boost = if is_def { 1.2 } else { 1.0 };
-            // strong exact-name boost for symbol queries (semble's definition boost)
-            let exact_boost = if symbolish && sym.name.eq_ignore_ascii_case(query.trim()) {
-                2.5
-            } else {
-                1.0
-            };
-            let penalty = rank::path_penalty(&sym.file_path);
-            let graph_boost = 1.0 + 0.15 * (1.0 + deps as f32).ln();
-            // recall boost: LLM-generated queries that overlap the user's query
-            let query_boost = enr.map_or(1.0, |(_, qs)| 1.0 + 0.4 * query_match(&keywords, qs));
-
-            let score = base * def_boost * exact_boost * penalty * graph_boost * query_boost;
-            let summary = enr.map(|(s, _)| s.clone());
-            Some((score, sym, deps, summary))
-        })
-        .collect();
-    ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-    println!("search: {query:?}\n");
-    for (score, sym, deps, summary) in ranked.iter().take(12) {
-        println!(
-            "  {score:>6.3}  {:<26} {:<9} deps={deps:<3} {}:{}",
-            truncate(&sym.name, 26),
-            format!("{:?}", sym.kind),
-            sym.file_path,
-            sym.range.start.line
-        );
-        if let Some(s) = summary {
-            println!("          ↳ {s}");
+            if let Some(s) = &h.summary {
+                println!("          ↳ {s}");
+            }
         }
     }
     ExitCode::SUCCESS
-}
-
-/// Max overlap between the user's keywords and any one LLM-generated query (0..1).
-fn query_match(keywords: &[String], generated: &[String]) -> f32 {
-    if keywords.is_empty() {
-        return 0.0;
-    }
-    generated
-        .iter()
-        .map(|q| {
-            let qk = comind::embed::rank::query_keywords(q);
-            keywords.iter().filter(|k| qk.contains(*k)).count() as f32 / keywords.len() as f32
-        })
-        .fold(0.0, f32::max)
 }
 
 fn truncate(s: &str, n: usize) -> String {

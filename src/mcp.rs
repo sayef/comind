@@ -259,11 +259,11 @@ impl ComindServer {
         )
         .await
         .unwrap_or_default();
+        let md = crate::search::markdown(&p.query, &hits);
         let dto = SearchDto {
             query: p.query.clone(),
             results: hits.iter().map(hit_dto).collect(),
         };
-        let md = md_search(&dto);
         self.reply(&dto, md)
     }
 
@@ -616,33 +616,6 @@ fn md_guide(d: &GuideDto) -> String {
         Some(g) => format!("## Style guide\n\n{g}\n"),
         None => "## Style guide\n\n_none — index was built without `--enrich`_\n".into(),
     }
-}
-
-fn md_search(d: &SearchDto) -> String {
-    let mut o = format!(
-        "## Search: \"{}\" — {} result(s)\n\n",
-        d.query,
-        d.results.len()
-    );
-    if d.results.is_empty() {
-        return o + "_no results (was the index built with `--embed`?)_\n";
-    }
-    for (i, h) in d.results.iter().enumerate() {
-        let _ = write!(
-            o,
-            "{}. **{}** _{}_ — `{}`  ·  {} deps",
-            i + 1,
-            h.name,
-            h.kind,
-            h.location,
-            h.deps
-        );
-        if let Some(s) = &h.summary {
-            let _ = write!(o, "\n   ↳ {s}");
-        }
-        o.push('\n');
-    }
-    o
 }
 
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
