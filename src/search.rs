@@ -1,0 +1,118 @@
+//! Hybrid code search: native LanceDB retrieval (BM25 + vector via RRF) followed by comind's
+//! code-aware rerank — definition/exact-name boosts, structured path penalties, LLM-query
+//! recall boost, and a dependency-graph **centrality** signal no pure search tool has.
+//!
+//! Shared by the `comind search` CLI and the `search` MCP tool.
+
+use std::collections::HashMap;
+
+use crate::embed::{rank, Embedder};
+use crate::graph::CodeGraph;
+use crate::model::{Symbol, SymbolKind};
+
+/// Per-symbol LLM enrichment keyed by rendered symbol id: `(summary, generated_queries)`.
+pub type Enrichment = HashMap<String, (String, Vec<String>)>;
+
+/// One ranked search result.
+pub struct SearchHit {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub repo: String,
+    /// `path:line`.
+    pub location: String,
+    pub signature: Option<String>,
+    pub score: f32,
+    pub deps: usize,
+    pub summary: Option<String>,
+}
+
+/// Retrieve candidates for `query` from the index at `uri` and rank them. `limit` caps results.
+pub async fn hybrid(
+    uri: &str,
+    by_id: &HashMap<String, Symbol>,
+    graph: &CodeGraph,
+    enrichment: &Enrichment,
+    embedder: &Embedder,
+    query: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<SearchHit>> {
+    let qvec = embedder.embed_query(query);
+    let candidates = crate::index::hybrid_search(uri, query, qvec, 80).await?;
+    let mut hits = rank_candidates(candidates, by_id, graph, enrichment, query);
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+/// Apply comind's code-aware + centrality boosts to native-retrieval candidates `(id, base)`.
+pub fn rank_candidates(
+    candidates: Vec<(String, f32)>,
+    by_id: &HashMap<String, Symbol>,
+    graph: &CodeGraph,
+    enrichment: &Enrichment,
+    query: &str,
+) -> Vec<SearchHit> {
+    let keywords = rank::query_keywords(query);
+    let symbolish = rank::is_symbol_query(query);
+
+    let mut ranked: Vec<SearchHit> = candidates
+        .into_iter()
+        .filter_map(|(rid, base)| {
+            let sym = by_id.get(&rid)?;
+            let deps = graph.dependents_count(&rid);
+            let enr = enrichment.get(&rid);
+
+            let is_def = matches!(
+                sym.kind,
+                SymbolKind::Function
+                    | SymbolKind::Method
+                    | SymbolKind::Class
+                    | SymbolKind::Interface
+                    | SymbolKind::Struct
+                    | SymbolKind::Enum
+            );
+            let def_boost = if is_def { 1.2 } else { 1.0 };
+            let exact_boost = if symbolish && sym.name.eq_ignore_ascii_case(query.trim()) {
+                2.5
+            } else {
+                1.0
+            };
+            let penalty = rank::path_penalty(&sym.file_path);
+            let graph_boost = 1.0 + 0.15 * (1.0 + deps as f32).ln();
+            let query_boost = enr.map_or(1.0, |(_, qs)| 1.0 + 0.4 * query_match(&keywords, qs));
+
+            let score = base * def_boost * exact_boost * penalty * graph_boost * query_boost;
+            Some(SearchHit {
+                id: rid.clone(),
+                name: sym.name.clone(),
+                kind: format!("{:?}", sym.kind),
+                repo: sym.repo.0.clone(),
+                location: format!("{}:{}", sym.file_path, sym.range.start.line),
+                signature: sym.signature.clone(),
+                score,
+                deps,
+                summary: enr.map(|(s, _)| s.clone()),
+            })
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    ranked
+}
+
+/// Max overlap between the user's keywords and any one LLM-generated query (0..1).
+fn query_match(keywords: &[String], generated: &[String]) -> f32 {
+    if keywords.is_empty() {
+        return 0.0;
+    }
+    generated
+        .iter()
+        .map(|q| {
+            let qk = rank::query_keywords(q);
+            keywords.iter().filter(|k| qk.contains(*k)).count() as f32 / keywords.len() as f32
+        })
+        .fold(0.0, f32::max)
+}

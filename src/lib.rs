@@ -12,6 +12,7 @@ pub mod parse;
 pub mod resolve;
 
 pub mod index;
+pub mod search;
 
 pub mod embed;
 pub mod graph;

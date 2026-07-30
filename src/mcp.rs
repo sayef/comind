@@ -3,21 +3,29 @@
 //! Loads the resolved org graph from LanceDB once at startup (local mmap or S3), holds it in
 //! memory, and serves deterministic navigation over stdio:
 //!
+//!   * `search`       — natural-language / hybrid code search (semantic + lexical + centrality)
 //!   * `repos`        — indexed repositories + symbol counts
 //!   * `find`         — locate symbols by name/path substring
 //!   * `zoom`         — 360° view of a symbol (callers, callees, importers, members)
 //!   * `ripple`       — org-wide blast radius (who breaks if I change this)
 //!   * `thread`       — forward call trace from an entry point
 //!   * `context_pack` — the minimal token-budgeted read-set to change a symbol safely
+//!   * `guide`        — the repo's inferred style guide
 //!
-//! Every result carries an exact `file:line`, so the agent jumps straight to code.
+//! Results are handed back as **markdown by default** (readable for the agent); the same data is
+//! also attached as structured JSON. Pass `serve --format json` to make the text block raw JSON.
+//! Every result carries an exact `file:line`.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::Arc;
 
+use crate::embed::Embedder;
 use crate::graph::{CodeGraph, Node as GNode};
+use crate::model::Symbol;
 use anyhow::Result;
-use rmcp::handler::server::wrapper::{Json, Parameters};
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::{schemars, tool, tool_router, ServiceExt};
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +37,13 @@ pub struct ComindServer {
     graph: Arc<CodeGraph>,
     enrichment: Arc<Enrichment>,
     style_guide: Arc<Option<String>>,
+    /// Symbols by rendered id — used by `search` to look up candidate metadata.
+    symbols: Arc<HashMap<String, Symbol>>,
+    /// Query embedder for `search`; `None` if the model could not be loaded (offline).
+    embedder: Arc<Option<Embedder>>,
+    uri: Arc<String>,
+    /// Hand results back as markdown text (default). `false` → raw JSON text.
+    markdown: bool,
 }
 
 impl ComindServer {
@@ -44,6 +59,23 @@ impl ComindServer {
             signature: n.signature,
             summary,
         }
+    }
+
+    /// Wrap a tool DTO into a result: markdown text (default) or JSON text, plus the structured
+    /// JSON in every case so structured-content clients keep working.
+    fn reply<T: Serialize>(&self, dto: &T, md: String) -> CallToolResult {
+        let value = serde_json::to_value(dto).ok();
+        let text = if self.markdown {
+            md
+        } else {
+            value
+                .as_ref()
+                .and_then(|v| serde_json::to_string_pretty(v).ok())
+                .unwrap_or_default()
+        };
+        let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
+        r.structured_content = value;
+        r
     }
 }
 
@@ -78,7 +110,6 @@ struct RepoCount {
     symbols: usize,
 }
 
-// MCP requires tool output schemas to have an object root, so list results are wrapped.
 #[derive(Serialize, schemars::JsonSchema)]
 struct ReposDto {
     repos: Vec<RepoCount>,
@@ -91,6 +122,7 @@ struct FindDto {
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct ThreadDto {
+    focus: String,
     trace: Vec<HopDto>,
 }
 
@@ -137,10 +169,36 @@ struct PackDto {
     items: Vec<PackItem>,
 }
 
+#[derive(Serialize, schemars::JsonSchema)]
+struct SearchHitDto {
+    name: String,
+    kind: String,
+    repo: String,
+    location: String,
+    signature: Option<String>,
+    score: f32,
+    deps: usize,
+    summary: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct SearchDto {
+    query: String,
+    results: Vec<SearchHitDto>,
+}
+
 // ---- tool parameters --------------------------------------------------------------------
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct NoArgs {}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct SearchParam {
+    /// A natural-language question ("how do we create a migration?") or a symbol name.
+    query: String,
+    /// Max results (default 12).
+    limit: Option<u32>,
+}
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct FindParam {
@@ -175,43 +233,82 @@ struct PackParam {
 #[tool_router(server_handler)]
 impl ComindServer {
     #[tool(
+        name = "search",
+        description = "Natural-language + lexical hybrid code search, reranked by dependency-graph centrality. Ask a question ('how do we create a migration?') or pass a symbol name."
+    )]
+    async fn search(&self, Parameters(p): Parameters<SearchParam>) -> CallToolResult {
+        let limit = p.limit.unwrap_or(12) as usize;
+        let Some(embedder) = self.embedder.as_ref() else {
+            let dto = SearchDto {
+                query: p.query.clone(),
+                results: vec![],
+            };
+            return self.reply(
+                &dto,
+                "_search unavailable: the embedding model could not be loaded (offline?). Graph tools (find/zoom/ripple/thread/context_pack) still work._".into(),
+            );
+        };
+        let hits = crate::search::hybrid(
+            &self.uri,
+            &self.symbols,
+            &self.graph,
+            &self.enrichment,
+            embedder,
+            &p.query,
+            limit,
+        )
+        .await
+        .unwrap_or_default();
+        let dto = SearchDto {
+            query: p.query.clone(),
+            results: hits.iter().map(hit_dto).collect(),
+        };
+        let md = md_search(&dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
         name = "repos",
         description = "List indexed repositories and their symbol counts"
     )]
-    fn repos(&self, _p: Parameters<NoArgs>) -> Json<ReposDto> {
-        Json(ReposDto {
+    fn repos(&self, _p: Parameters<NoArgs>) -> CallToolResult {
+        let dto = ReposDto {
             repos: self
                 .graph
                 .repos()
                 .into_iter()
                 .map(|(repo, symbols)| RepoCount { repo, symbols })
                 .collect(),
-        })
+        };
+        let md = md_repos(&dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "find",
         description = "Find code symbols by name or path substring"
     )]
-    fn find(&self, Parameters(p): Parameters<FindParam>) -> Json<FindDto> {
+    fn find(&self, Parameters(p): Parameters<FindParam>) -> CallToolResult {
         let limit = p.limit.unwrap_or(20) as usize;
-        Json(FindDto {
+        let dto = FindDto {
             results: self
                 .graph
                 .find(&p.query, limit)
                 .into_iter()
                 .map(|n| self.node_dto(n))
                 .collect(),
-        })
+        };
+        let md = md_find(&p.query, &dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "zoom",
         description = "360° view of a symbol: definition, container, callers, callees, importers, members"
     )]
-    fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> Json<ZoomDto> {
-        let Some(idx) = self.graph.lookup(&p.focus) else {
-            return Json(ZoomDto {
+    fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
+        let dto = match self.graph.lookup(&p.focus) {
+            None => ZoomDto {
                 found: false,
                 focus: None,
                 container: None,
@@ -219,69 +316,79 @@ impl ComindServer {
                 callees: vec![],
                 importers: vec![],
                 members: vec![],
-            });
+            },
+            Some(idx) => {
+                let z = self.graph.zoom(idx);
+                ZoomDto {
+                    found: true,
+                    focus: z.focus.map(|n| self.node_dto(n)),
+                    container: z.container.map(|n| self.node_dto(n)),
+                    callers: z.callers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    callees: z.callees.into_iter().map(|n| self.node_dto(n)).collect(),
+                    importers: z.importers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    members: z.members.into_iter().map(|n| self.node_dto(n)).collect(),
+                }
+            }
         };
-        let z = self.graph.zoom(idx);
-        Json(ZoomDto {
-            found: true,
-            focus: z.focus.map(|n| self.node_dto(n)),
-            container: z.container.map(|n| self.node_dto(n)),
-            callers: z.callers.into_iter().map(|n| self.node_dto(n)).collect(),
-            callees: z.callees.into_iter().map(|n| self.node_dto(n)).collect(),
-            importers: z.importers.into_iter().map(|n| self.node_dto(n)).collect(),
-            members: z.members.into_iter().map(|n| self.node_dto(n)).collect(),
-        })
+        let md = md_zoom(&p.focus, &dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "ripple",
         description = "Blast radius: who transitively depends on this symbol (cross-repo), grouped by repo"
     )]
-    fn ripple(&self, Parameters(p): Parameters<DepthParam>) -> Json<RippleDto> {
+    fn ripple(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
         let depth = p.depth.unwrap_or(4) as usize;
-        let Some(idx) = self.graph.lookup(&p.focus) else {
-            return Json(RippleDto {
-                focus: p.focus,
+        let dto = match self.graph.lookup(&p.focus) {
+            None => RippleDto {
+                focus: p.focus.clone(),
                 found: false,
                 total_dependents: 0,
                 by_repo: vec![],
                 dependents: vec![],
-            });
+            },
+            Some(idx) => {
+                let hops = self.graph.ripple(idx, depth);
+                let mut by_repo: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
+                for h in &hops {
+                    *by_repo.entry(h.node.repo.clone()).or_default() += 1;
+                }
+                RippleDto {
+                    focus: p.focus.clone(),
+                    found: true,
+                    total_dependents: hops.len(),
+                    by_repo: by_repo
+                        .into_iter()
+                        .map(|(repo, symbols)| RepoCount { repo, symbols })
+                        .collect(),
+                    dependents: hops.into_iter().map(hop_dto).collect(),
+                }
+            }
         };
-        let hops = self.graph.ripple(idx, depth);
-        let mut by_repo: std::collections::BTreeMap<String, usize> =
-            std::collections::BTreeMap::new();
-        for h in &hops {
-            *by_repo.entry(h.node.repo.clone()).or_default() += 1;
-        }
-        Json(RippleDto {
-            focus: p.focus,
-            found: true,
-            total_dependents: hops.len(),
-            by_repo: by_repo
-                .into_iter()
-                .map(|(repo, symbols)| RepoCount { repo, symbols })
-                .collect(),
-            dependents: hops.into_iter().map(hop_dto).collect(),
-        })
+        let md = md_ripple(&dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "guide",
         description = "The repo's inferred coding style guide (naming, typing, structure)"
     )]
-    fn guide(&self, _p: Parameters<NoArgs>) -> Json<GuideDto> {
-        Json(GuideDto {
+    fn guide(&self, _p: Parameters<NoArgs>) -> CallToolResult {
+        let dto = GuideDto {
             found: self.style_guide.is_some(),
             guide: (*self.style_guide).clone(),
-        })
+        };
+        let md = md_guide(&dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "thread",
         description = "Forward call trace from an entry-point symbol"
     )]
-    fn thread(&self, Parameters(p): Parameters<DepthParam>) -> Json<ThreadDto> {
+    fn thread(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
         let depth = p.depth.unwrap_or(4) as usize;
         let trace = match self.graph.lookup(&p.focus) {
             Some(idx) => self
@@ -292,41 +399,50 @@ impl ComindServer {
                 .collect(),
             None => vec![],
         };
-        Json(ThreadDto { trace })
+        let dto = ThreadDto {
+            focus: p.focus.clone(),
+            trace,
+        };
+        let md = md_thread(&dto);
+        self.reply(&dto, md)
     }
 
     #[tool(
         name = "context_pack",
         description = "The minimal token-budgeted set of symbols to read in order to change the focus symbol safely"
     )]
-    fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> Json<PackDto> {
+    fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
         let budget = p.token_budget.unwrap_or(1500) as usize;
-        let Some(idx) = self.graph.lookup(&p.focus) else {
-            return Json(PackDto {
-                focus: p.focus,
+        let dto = match self.graph.lookup(&p.focus) {
+            None => PackDto {
+                focus: p.focus.clone(),
                 found: false,
                 est_total_tokens: 0,
                 token_budget: budget,
                 items: vec![],
-            });
+            },
+            Some(idx) => {
+                let pack = self.graph.context_pack(idx, budget);
+                let est_total_tokens = pack.iter().map(|(_, t)| t).sum();
+                PackDto {
+                    focus: p.focus.clone(),
+                    found: true,
+                    est_total_tokens,
+                    token_budget: budget,
+                    items: pack
+                        .into_iter()
+                        .map(|(n, t)| PackItem {
+                            summary: self.enrichment.get(&n.id).map(|(s, _)| s.clone()),
+                            name: n.name,
+                            location: n.location,
+                            est_tokens: t,
+                        })
+                        .collect(),
+                }
+            }
         };
-        let pack = self.graph.context_pack(idx, budget);
-        let est_total_tokens = pack.iter().map(|(_, t)| t).sum();
-        Json(PackDto {
-            focus: p.focus,
-            found: true,
-            est_total_tokens,
-            token_budget: budget,
-            items: pack
-                .into_iter()
-                .map(|(n, t)| PackItem {
-                    summary: self.enrichment.get(&n.id).map(|(s, _)| s.clone()),
-                    name: n.name,
-                    location: n.location,
-                    est_tokens: t,
-                })
-                .collect(),
-        })
+        let md = md_pack(&dto);
+        self.reply(&dto, md)
     }
 }
 
@@ -341,11 +457,202 @@ fn hop_dto(h: crate::graph::Hop) -> HopDto {
     }
 }
 
+fn hit_dto(h: &crate::search::SearchHit) -> SearchHitDto {
+    SearchHitDto {
+        name: h.name.clone(),
+        kind: h.kind.clone(),
+        repo: h.repo.clone(),
+        location: h.location.clone(),
+        signature: h.signature.clone(),
+        score: h.score,
+        deps: h.deps,
+        summary: h.summary.clone(),
+    }
+}
+
+// ---- markdown rendering (the agent-facing handover) -------------------------------------
+
+fn node_bullet(o: &mut String, n: &NodeDto) {
+    let _ = write!(o, "- **{}** _{}_ — `{}`", n.name, n.kind, n.location);
+    if let Some(s) = &n.summary {
+        let _ = write!(o, " — {s}");
+    }
+    o.push('\n');
+}
+
+fn node_section(o: &mut String, title: &str, nodes: &[NodeDto]) {
+    if nodes.is_empty() {
+        return;
+    }
+    let _ = write!(o, "\n**{title}** ({})\n", nodes.len());
+    for n in nodes {
+        node_bullet(o, n);
+    }
+}
+
+fn md_repos(d: &ReposDto) -> String {
+    let mut o = String::from("## Indexed repositories\n\n");
+    if d.repos.is_empty() {
+        return o + "_none_\n";
+    }
+    for r in &d.repos {
+        let _ = writeln!(o, "- **{}** — {} symbols", r.repo, r.symbols);
+    }
+    o
+}
+
+fn md_find(query: &str, d: &FindDto) -> String {
+    let mut o = format!("## `find` \"{query}\" — {} result(s)\n\n", d.results.len());
+    if d.results.is_empty() {
+        return o + "_no symbols matched_\n";
+    }
+    for n in &d.results {
+        node_bullet(&mut o, n);
+    }
+    o
+}
+
+fn md_zoom(focus: &str, d: &ZoomDto) -> String {
+    if !d.found {
+        return format!("## zoom `{focus}`\n\n_no symbol matched_\n");
+    }
+    let mut o = String::new();
+    if let Some(f) = &d.focus {
+        let _ = writeln!(o, "## {} _{}_\n`{}`", f.name, f.kind, f.location);
+        if let Some(sig) = &f.signature {
+            let _ = writeln!(o, "\n```\n{sig}\n```");
+        }
+        if let Some(s) = &f.summary {
+            let _ = writeln!(o, "\n{s}");
+        }
+    } else {
+        let _ = writeln!(o, "## zoom `{focus}`");
+    }
+    if let Some(c) = &d.container {
+        let _ = write!(o, "\n**Container**\n");
+        node_bullet(&mut o, c);
+    }
+    node_section(&mut o, "Members", &d.members);
+    node_section(&mut o, "Callers", &d.callers);
+    node_section(&mut o, "Callees", &d.callees);
+    node_section(&mut o, "Importers", &d.importers);
+    o
+}
+
+fn md_hop_lines(o: &mut String, hops: &[HopDto]) {
+    for h in hops {
+        let _ = writeln!(
+            o,
+            "- _d{}_ via **{}** — **{}** `{}`",
+            h.depth, h.via, h.name, h.location
+        );
+    }
+}
+
+fn md_ripple(d: &RippleDto) -> String {
+    if !d.found {
+        return format!("## Blast radius: `{}`\n\n_no symbol matched_\n", d.focus);
+    }
+    let mut o = format!(
+        "## Blast radius: `{}`\n\n**{} dependent(s)**",
+        d.focus, d.total_dependents
+    );
+    if !d.by_repo.is_empty() {
+        let by: Vec<String> = d
+            .by_repo
+            .iter()
+            .map(|r| format!("{} ({})", r.repo, r.symbols))
+            .collect();
+        let _ = write!(o, " across {}", by.join(", "));
+    }
+    o.push_str("\n\n");
+    md_hop_lines(&mut o, &d.dependents);
+    o
+}
+
+fn md_thread(d: &ThreadDto) -> String {
+    let mut o = format!(
+        "## Call trace from `{}` — {} step(s)\n\n",
+        d.focus,
+        d.trace.len()
+    );
+    if d.trace.is_empty() {
+        return o + "_no outgoing calls found_\n";
+    }
+    md_hop_lines(&mut o, &d.trace);
+    o
+}
+
+fn md_pack(d: &PackDto) -> String {
+    if !d.found {
+        return format!("## Context pack: `{}`\n\n_no symbol matched_\n", d.focus);
+    }
+    let mut o = format!(
+        "## Context to change `{}`\n\n_~{} of {} token budget · {} symbols_\n\n",
+        d.focus,
+        d.est_total_tokens,
+        d.token_budget,
+        d.items.len()
+    );
+    for (i, it) in d.items.iter().enumerate() {
+        let _ = write!(
+            o,
+            "{}. **{}** — `{}` _(~{} tok)_",
+            i + 1,
+            it.name,
+            it.location,
+            it.est_tokens
+        );
+        if let Some(s) = &it.summary {
+            let _ = write!(o, " — {s}");
+        }
+        o.push('\n');
+    }
+    o
+}
+
+fn md_guide(d: &GuideDto) -> String {
+    match &d.guide {
+        Some(g) => format!("## Style guide\n\n{g}\n"),
+        None => "## Style guide\n\n_none — index was built without `--enrich`_\n".into(),
+    }
+}
+
+fn md_search(d: &SearchDto) -> String {
+    let mut o = format!(
+        "## Search: \"{}\" — {} result(s)\n\n",
+        d.query,
+        d.results.len()
+    );
+    if d.results.is_empty() {
+        return o + "_no results (was the index built with `--embed`?)_\n";
+    }
+    for (i, h) in d.results.iter().enumerate() {
+        let _ = write!(
+            o,
+            "{}. **{}** _{}_ — `{}`  ·  {} deps",
+            i + 1,
+            h.name,
+            h.kind,
+            h.location,
+            h.deps
+        );
+        if let Some(s) = &h.summary {
+            let _ = write!(o, "\n   ↳ {s}");
+        }
+        o.push('\n');
+    }
+    o
+}
+
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
-/// client disconnects.
-pub async fn serve_stdio(uri: &str) -> Result<()> {
+/// client disconnects. `markdown` controls whether tool results are handed back as markdown
+/// text (default) or raw JSON.
+pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
+    let by_id: HashMap<String, Symbol> =
+        symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
 
     let enrichment: Enrichment = crate::index::read_enrichment(uri)
         .await
@@ -358,10 +665,23 @@ pub async fn serve_stdio(uri: &str) -> Result<()> {
 
     let style_guide = crate::index::read_style_guide(uri).await.ok().flatten();
 
+    // The embedder powers `search`; graph tools work without it, so a load failure is non-fatal.
+    let embedder = match crate::embed::Embedder::load_default() {
+        Ok(e) => Some(e),
+        Err(e) => {
+            eprintln!("comind serve: embedding model unavailable, `search` disabled: {e:#}");
+            None
+        }
+    };
+
     let server = ComindServer {
         graph,
         enrichment: Arc::new(enrichment),
         style_guide: Arc::new(style_guide),
+        symbols: Arc::new(by_id),
+        embedder: Arc::new(embedder),
+        uri: Arc::new(uri.to_string()),
+        markdown,
     };
     let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;

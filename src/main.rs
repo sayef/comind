@@ -12,7 +12,7 @@ use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
 fn usage() {
     println!(
-        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> --from <uri>\n  comind serve --from <uri>\n\n  -h, --help       show this help\n  -V, --version    show version",
+        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> --from <uri>\n  comind serve --from <uri> [--format md|json]\n\n  -h, --help       show this help\n  -V, --version    show version",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -383,13 +383,24 @@ fn cmd_changed(args: &[String]) -> ExitCode {
 /// protocol goes to stdout; diagnostics go to stderr so the stream stays clean.
 fn cmd_serve(args: &[String]) -> ExitCode {
     let mut from: Option<&str> = None;
+    let mut markdown = true; // default: hand results to the agent as markdown
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--from" {
-            from = args.get(i + 1).map(String::as_str);
-            i += 2;
-        } else {
-            i += 1;
+        match args[i].as_str() {
+            "--from" => {
+                from = args.get(i + 1).map(String::as_str);
+                i += 2;
+            }
+            "--format" => {
+                // `--format json` → raw JSON text; anything else (md/markdown) → markdown
+                markdown = args.get(i + 1).map(|v| v != "json").unwrap_or(true);
+                i += 2;
+            }
+            "--json" => {
+                markdown = false;
+                i += 1;
+            }
+            _ => i += 1,
         }
     }
     let Some(uri) = from else {
@@ -407,7 +418,7 @@ fn cmd_serve(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match rt.block_on(comind::mcp::serve_stdio(uri)) {
+    match rt.block_on(comind::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("comind serve: {e:#}");

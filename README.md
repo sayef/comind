@@ -73,7 +73,7 @@ Add to your MCP client (e.g. Claude Code):
 }
 ```
 
-MCP tools: `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`, `guide`.
+MCP tools: `search`, `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON also attached; `comind serve --from <uri> --format json` for raw JSON).
 
 ## Commands
 
