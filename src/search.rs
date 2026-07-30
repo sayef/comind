@@ -142,6 +142,10 @@ pub fn rank_candidates(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    // Collapse near-duplicates (a symbol surfaced by both BM25 and vector, or a duplicated
+    // search row): keep the highest-scored hit per unique symbol location.
+    let mut seen = std::collections::HashSet::new();
+    ranked.retain(|h| seen.insert((h.name.clone(), h.location.clone())));
     ranked
 }
 
