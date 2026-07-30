@@ -73,17 +73,18 @@ Add to your MCP client (e.g. Claude Code):
 }
 ```
 
-MCP tools: `search`, `repos`, `find`, `zoom`, `ripple`, `thread`, `context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON also attached; `comind serve --from <uri> --format json` for raw JSON).
+MCP tools: `search`, `suggest`, `repos`, `find`, `zoom`, `ripple`, `thread`, `flow`, `context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON also attached; `comind serve --from <uri> --format json` for raw JSON).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `comind index <repo> --to <uri> [--incremental]` | Index one repo (git-incremental) |
-| `comind link <repos…> --to <uri> [--embed] [--enrich] [--incremental]` | Build the cross-repo org index |
+| `comind link <repos…> --to <uri> [--embed] [--enrich] [--flows] [--incremental]` | Build the cross-repo org index |
 | `comind changed <repo> --since <sha>` | Show files changed since a commit (git diff) |
 | `comind explore <focus> --from <uri>` | Zoom, blast radius, context pack for a symbol |
 | `comind search <query…> --from <uri> [--format md]` | Graph-aware hybrid code search |
+| `comind flow <focus> --from <uri>` | Pre-generated flow walkthrough + live call trace |
 | `comind serve --from <uri> [--format md|json]` | MCP server over stdio |
 
 ## CI (push-to-master → fresh org index)
