@@ -5,12 +5,11 @@
 # macOS is built + tested natively (containers can't cover it).
 name: test-matrix
 
-# Expensive (full release build + many distros + macOS at 10x minutes). Monthly + manual only.
-# Bump to nightly once the repo is public (Actions are free & unlimited on public repos).
+# Expensive (full release build + many distros + macOS). Nightly + manual only — not per-push.
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 1 * *" # 03:00 UTC on the 1st of each month
+    - cron: "0 3 * * *" # 03:00 UTC nightly
 
 jobs:
   # ---- Linux: build a portable glibc binary, then exec it on several distros --------------

@@ -6,7 +6,7 @@
 # Env:
 #   COMIND_VERSION   tag to install (default: latest)
 #   COMIND_BIN_DIR   install dir (default: $HOME/.local/bin)
-#   GITHUB_TOKEN     required only while the repo is private
+#   GITHUB_TOKEN     optional (higher GitHub API rate limits, or installing from a private fork)
 set -eu
 
 REPO="sayef/comind"
