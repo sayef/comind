@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.94"
 license = "MIT"
 repository = "https://github.com/sayef/comind"
-authors = ["Comind"]
+authors = ["Saiful Islam"]
 description = "Deterministic, cross-repo code intelligence for coding agents — self-hosted, single binary."
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
