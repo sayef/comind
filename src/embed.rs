@@ -8,7 +8,7 @@
 //! search fuses this signal with lexical BM25 and graph centrality (see comind's hybrid
 //! search) — never the sole retrieval path.
 
-use crate::model::{GlobalSymbolId, Symbol, SymbolKind};
+use crate::model::Symbol;
 use anyhow::{Context, Result};
 use model2vec_rs::model::StaticModel;
 
@@ -60,50 +60,13 @@ pub fn symbol_text(s: &Symbol) -> String {
     parts.join("  ")
 }
 
-/// Cosine similarity for L2-normalized vectors == dot product.
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
-
-/// An in-memory semantic index over symbols: ids + normalized vectors. Small and fast;
-/// for the shared org index these vectors are persisted as a Lance column instead.
-pub struct SemanticIndex {
-    pub ids: Vec<GlobalSymbolId>,
-    pub vectors: Vec<Vec<f32>>,
-}
-
-impl SemanticIndex {
-    /// Embed all non-file symbols (files aren't useful semantic-search targets).
-    pub fn build(embedder: &Embedder, symbols: &[Symbol]) -> Self {
-        let targets: Vec<&Symbol> = symbols
-            .iter()
-            .filter(|s| !matches!(s.kind, SymbolKind::File))
-            .collect();
-        let texts: Vec<String> = targets.iter().map(|s| symbol_text(s)).collect();
-        let vectors = embedder.embed(&texts);
-        let ids = targets.iter().map(|s| s.id.clone()).collect();
-        Self { ids, vectors }
-    }
-
-    /// Top-`k` symbols by semantic similarity to `query`. Returns `(index, score)` where
-    /// `index` points into `self.ids`.
-    pub fn search(&self, embedder: &Embedder, query: &str, k: usize) -> Vec<(usize, f32)> {
-        let q = embedder.embed_query(query);
-        let mut scored: Vec<(usize, f32)> = self
-            .vectors
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (i, dot(&q, v)))
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(k);
-        scored
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dot(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).map(|(x, y)| x * y).sum()
+    }
 
     // Downloads a model from Hugging Face — run explicitly: `cargo test -p comind-embed -- --ignored`.
     #[test]

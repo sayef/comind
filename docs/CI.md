@@ -1,19 +1,41 @@
 # Comind CI — building the shared org index
 
-**Model.** One central *indexing* pipeline checks out the team's repos, runs
-`comind link … --to <s3> --embed --enrich`, and writes a new **atomically-versioned** Lance
-dataset to S3. Lance's newest version manifest is the "latest" pointer every consumer reads, so
-there is no coordination and no staleness. comind needs **no remote git credentials** itself — the
-CI job clones the repos (with its token); comind indexes the local checkouts + their `.git`.
+**Model.** One central pipeline checks out the team's repos, runs
+`comind link … --embed [--enrich]`, and writes a new **atomically-versioned** LanceDB dataset.
+Lance's newest version manifest is the "latest" pointer every consumer reads — no coordination, no
+staleness. comind needs **no remote git credentials** itself: the CI job clones the repos (with its
+token); comind indexes the local checkouts and their `.git`.
 
-- GitHub Actions: [`.github/workflows/comind-index.yml`](../.github/workflows/comind-index.yml).
-- GitLab CI: the example below.
+The output destination (`--to`) is either a **local directory** (published as a downloadable CI
+artifact) or an **`s3://…`** path. The shipped GitHub workflow uses the local-path + artifact
+approach; the GitLab example below uses S3. Both are equivalent.
+
+## GitHub Actions (shipped)
+
+[`.github/workflows/comind-index.yml`](../.github/workflows/comind-index.yml) builds the index on a
+schedule (and on demand). To enable it:
+
+- **Variable** `COMIND_INDEX_ENABLED = true` — lets the schedule run.
+- **Variable** `COMIND_REPOS` — space/newline list of `owner/repo` to index (kept in settings, not
+  committed, so repo names stay out of the public workflow file).
+- **Secret** `COMIND_REPO_TOKEN` — a fine-grained PAT with `Contents: read` (only for **private**
+  repos; omit for public).
+- **Secret** `OPENAI_API_KEY` *(optional)* — turns on `--enrich`.
+
+It clones the listed repos, runs `comind link … --embed --incremental`, and uploads the resulting
+`_graph` directory as the `comind-index` artifact. Consume it with:
+
+```bash
+gh run download -R <owner>/comind -n comind-index   # → ./_graph
+comind serve --from ./_graph
+```
 
 ## Member repos trigger a reindex on push to main
 
-Each product repo fires the central pipeline when it merges to `main`.
+Each product repo can fire the central pipeline when it merges to `main`.
 
-**GitHub** (member repo → `.github/workflows/notify-comind.yml`):
+**GitHub** (member repo → `notify-comind.yml`), matching the `repository_dispatch` hook in
+`comind-index.yml`:
 
 ```yaml
 on: { push: { branches: [main] } }
@@ -25,11 +47,11 @@ jobs:
           curl -sf -X POST \
             -H "Authorization: token ${{ secrets.COMIND_DISPATCH_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/your-org/comind/dispatches \
+            https://api.github.com/repos/<owner>/comind/dispatches \
             -d '{"event_type":"comind-reindex"}'
 ```
 
-**GitLab** (member repo `.gitlab-ci.yml`): trigger the comind project's pipeline via a
+**GitLab** (member repo `.gitlab-ci.yml`) — trigger the comind project's pipeline via a
 [pipeline trigger token](https://docs.gitlab.com/ci/triggers/):
 
 ```yaml
@@ -41,7 +63,7 @@ comind-reindex:
         "$CI_SERVER_URL/api/v4/projects/$COMIND_PROJECT_ID/trigger/pipeline"
 ```
 
-## GitLab indexing pipeline (central `comind` project `.gitlab-ci.yml`)
+## GitLab indexing pipeline (S3 variant)
 
 ```yaml
 index:
@@ -49,7 +71,6 @@ index:
   variables:
     COMIND_S3_URI: s3://YOUR-BUCKET/lancedb/org
     AWS_REGION: us-east-1
-    COMIND_LLM_MODEL: gpt-4o-mini
   rules:
     - if: '$CI_PIPELINE_SOURCE == "trigger"'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
@@ -57,24 +78,28 @@ index:
     key: { files: [Cargo.lock] }
     paths: [.cargo/registry, target]
   before_script:
-    - apt-get update && apt-get install -y protobuf-compiler
-    # Clone member repos with full history (a deploy token / CI job token with read scope).
-    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/pkg-common.git" repos/pkg-common
-    - git clone --depth=0 "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/your-org/service-a.git" repos/service-a
-    # … service-b, service-c, service-d
+    - apt-get update && apt-get install -y protobuf-compiler cmake
+    # Clone member repos with full history (deploy/job token, read scope).
+    - git clone "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/<group>/pkg-common.git" repos/pkg-common
+    - git clone "https://oauth2:${COMIND_REPO_TOKEN}@gitlab.com/<group>/service-a.git" repos/service-a
+    # … more repos
   script:
     - cargo build --release
-    - ./target/release/comind link
-        repos/pkg-common repos/service-a repos/service-b repos/service-c repos/service-d
-        --to "$COMIND_S3_URI" --embed --enrich --enrich-top 200
+    - ./target/release/comind link repos/* --to "$COMIND_S3_URI" --embed --incremental
 ```
 
-Secrets required: `COMIND_REPO_TOKEN` (read repos), AWS creds (OIDC role or keys),
-`OPENAI_API_KEY` (only if `--enrich`).
+Secrets: `COMIND_REPO_TOKEN` (read repos), AWS creds (OIDC role or keys), and an LLM key if using
+`--enrich`.
+
+## LLM provider (for `--enrich` / `--flows`)
+
+Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENAI_API_KEY`, model
+`gpt-4o-mini`). Set `COMIND_LLM_MODEL` and `COMIND_LLM_BASE_URL` to target any OpenAI-compatible
+endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 
 ## Per-repo incremental (optimization)
 
-For large repos, a per-repo job can keep a per-repo dataset fresh cheaply and the central job
-re-merges. `comind index <repo> --to <s3>/repos --incremental` diffs the last-indexed commit
-(stored in the Lance `repo_meta` table) against HEAD and reparses only changed files. Org-level
-re-merge from per-repo Lance datasets is the next step (today `link` re-parses sources).
+`comind index <repo> --to <uri> --incremental` diffs the last-indexed commit (stored in the Lance
+`repo_meta` table) against HEAD and reparses only changed files — useful for keeping a per-repo
+dataset fresh cheaply. Today the central `link` re-parses sources; org-level re-merge from per-repo
+datasets is a future optimization.
