@@ -93,7 +93,7 @@ See [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) a
 [`docs/CI.md`](docs/CI.md) (GitLab variant included). The CI job clones the repos and runs
 `comind link … --to s3://… --embed --enrich --incremental`; Lance's version manifest is the atomic
 "latest" pointer every consumer reads. **LLM enrichment is opt-in** (`--enrich`) and sends code
-signatures to the OpenAI API only when enabled.
+signatures to the configured LLM provider (OpenAI by default, via Rig) only when enabled.
 
 ## Architecture
 
@@ -134,7 +134,7 @@ src/resolve.rs cross-repo import/call binding
 src/index.rs   LanceDB (S3) versioned store: graph, embeddings, enrichment, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack
 src/embed.rs   Model2Vec static embeddings + code-aware ranking
-src/llm.rs     OpenAI summaries / query generation / style guide (opt-in)
+src/llm.rs     LLM summaries / query generation / style guide (opt-in, provider-agnostic via Rig)
 src/mcp.rs     rmcp MCP server (7 tools)
 src/main.rs    the `comind` binary (CLI)
 ```

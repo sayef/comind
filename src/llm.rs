@@ -1,18 +1,17 @@
 //! Comind LLM enrichment — per-symbol summaries, symbol-aware query generation, and a
-//! repo style guide, via OpenAI.
+//! repo style guide, via **Rig** (provider-agnostic: OpenAI by default; any OpenAI-compatible
+//! endpoint via `COMIND_LLM_BASE_URL`; Bedrock/Vertex/others can be added behind cargo features).
 //!
-//! **Opt-in / data egress:** these functions send code (signatures, snippets) to the OpenAI
-//! API. They run only when the caller explicitly enables enrichment (`comind link --enrich`),
-//! never as part of plain indexing. Requires `OPENAI_API_KEY`.
+//! **Opt-in / data egress:** these functions send code (signatures, snippets) to the configured
+//! LLM provider. They run only when the caller explicitly enables enrichment
+//! (`comind link --enrich`), never as part of plain indexing. Requires `OPENAI_API_KEY` (or a
+//! provider key + `COMIND_LLM_BASE_URL`).
 
 use anyhow::{Context, Result};
-use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    CreateChatCompletionRequestArgs,
-};
-use async_openai::Client;
 use futures::stream::{self, StreamExt};
+use rig::client::{CompletionClient, ProviderClient};
+use rig::completion::Prompt;
+use rig::providers::openai;
 
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
 pub const DEFAULT_MODEL: &str = "gpt-4o-mini";
@@ -21,7 +20,9 @@ pub const DEFAULT_MODEL: &str = "gpt-4o-mini";
 const CONCURRENCY: usize = 8;
 
 pub struct LlmClient {
-    client: Client<OpenAIConfig>,
+    // Chat Completions API (works with OpenAI *and* any OpenAI-compatible endpoint), not the
+    // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
+    client: openai::CompletionsClient,
     model: String,
 }
 
@@ -35,45 +36,39 @@ pub struct Enrichment {
 impl LlmClient {
     /// Build a client from the environment (`OPENAI_API_KEY`, optional `COMIND_LLM_MODEL`).
     pub fn from_env() -> Result<Self> {
-        if std::env::var("OPENAI_API_KEY").is_err() {
-            anyhow::bail!("OPENAI_API_KEY not set (LLM enrichment is opt-in and needs a key)");
-        }
         let model = std::env::var("COMIND_LLM_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-        Ok(Self {
-            client: Client::new(),
-            model,
-        })
+        // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
+        // (LiteLLM proxy, Ollama, vLLM, Azure) with COMIND_LLM_BASE_URL.
+        let client = match std::env::var("COMIND_LLM_BASE_URL") {
+            Ok(base) => {
+                let key =
+                    std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "sk-noauth".to_string());
+                openai::CompletionsClient::builder()
+                    .api_key(&key)
+                    .base_url(&base)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("LLM client (COMIND_LLM_BASE_URL): {e}"))?
+            }
+            // Rig's from_env reads OPENAI_API_KEY (and honours OPENAI_BASE_URL too).
+            Err(_) => openai::CompletionsClient::from_env().map_err(|e| {
+                anyhow::anyhow!(
+                    "OpenAI client (set OPENAI_API_KEY, or COMIND_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
+                )
+            })?,
+        };
+        Ok(Self { client, model })
     }
 
     async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String> {
-        let req = CreateChatCompletionRequestArgs::default()
-            .model(&self.model)
-            .max_tokens(max_tokens)
-            .messages(vec![
-                ChatCompletionRequestSystemMessageArgs::default()
-                    .content(system)
-                    .build()?
-                    .into(),
-                ChatCompletionRequestUserMessageArgs::default()
-                    .content(user)
-                    .build()?
-                    .into(),
-            ])
-            .build()?;
-        let resp = self
+        // A Rig "agent" with a preamble is just a system-prompted completion — no tools/RAG.
+        let agent = self
             .client
-            .chat()
-            .create(req)
-            .await
-            .context("openai chat")?;
-        Ok(resp
-            .choices
-            .into_iter()
-            .next()
-            .and_then(|c| c.message.content)
-            .unwrap_or_default()
-            .trim()
-            .to_string())
+            .agent(&self.model)
+            .preamble(system)
+            .max_tokens(max_tokens as u64)
+            .build();
+        let resp = agent.prompt(user).await.context("LLM completion")?;
+        Ok(resp.trim().to_string())
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.

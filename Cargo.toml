@@ -34,7 +34,8 @@ model2vec-rs = "0.2.1"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
 lancedb = { version = "0.31.0", default-features = false, features = ["aws"] }
 lance-index = "=8.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
-async-openai = { version = "0.41.1", features = ["chat-completion"] } # opt-in enrichment
+# LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
+rig-core = "0.36"
 rmcp = { version = "2.2.0", features = ["server", "transport-io"] } # MCP server
 
 [profile.release]

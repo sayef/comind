@@ -94,7 +94,7 @@ src/
   index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
   graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
   embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
-  llm.rs      wiki / style-guide / query-association generation via OpenAI.
+  llm.rs      wiki / style-guide / query-association generation via Rig (provider-agnostic).
   mcp.rs      rmcp server exposing find/zoom/ripple/thread/context_pack/guide.
   git.rs      git2 change detection for incremental indexing.
   main.rs     clap binary: `comind index|serve|resolve|query`. The single distributable.
@@ -171,7 +171,7 @@ MCP verb semantics are ported 1:1 from the Python app — that design is proven;
   `comind search` loads them and only embeds the query → 0.62s (was ~10.8s) for 7471 vectors.
   TODO: real BM25 + RRF (k≈60) lexical retriever + file-saturation decay (×0.5/extra chunk);
   build a Lance ANN index on the vector column for >100k-symbol corpora.
-  **LLM enrichment (done):** `llm` (OpenAI via async-openai, `gpt-4o-mini` default,
+  **LLM enrichment (done):** `llm` (via **Rig** — provider-agnostic, OpenAI by default; `gpt-4o-mini` default,
   bounded concurrency) generates per-symbol summaries + NL queries and infers a repo style guide.
   **Opt-in / data egress:** only runs with `comind link --enrich` (sends code signatures to
   OpenAI); never during plain indexing. Summaries+queries persisted to a Lance `enrichment` table
