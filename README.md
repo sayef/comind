@@ -2,62 +2,63 @@
 
 **Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.**
 
-Comind indexes a whole team's repositories into one versioned knowledge graph on object storage,
-then serves it to coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search,
-it answers *structural, cross-repo* questions deterministically: **who breaks if I change this?**,
-**what's the minimal context to change X safely?**, **where across the org is this used?**
+Comind indexes a whole team's repositories into one versioned knowledge graph, then serves it to
+coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
+*structural, cross-repo* questions deterministically:
+
+- **Who breaks if I change this?** — org-wide blast radius (`ripple`)
+- **What's the minimal context to change X safely?** — token-budgeted read-set (`context_pack`)
+- **How does this flow work?** — a call-trace walkthrough (`flow`)
+- **Where across the org is this used / how do I …?** — hybrid search + a pre-generated question catalog
 
 Written in Rust. One static binary. No server to run, no per-developer re-indexing.
 
 ## Why it's different
 
-- **Deterministic graph, not fuzzy RAG.** Calls/imports/inheritance come from the AST (tree-sitter),
-  not from an LLM guessing — exact, reproducible, free to build.
-- **Cross-repo by design.** Global symbol identity (SCIP scheme) links a definition in `pkg-common`
-  to its users in every other repo. `ripple` gives org-wide blast radius.
-- **Always fresh, shared once.** Push to master → CI builds a new atomically-versioned index on S3;
-  every agent reads the same fresh artifact. Incremental: only changed files/symbols are recomputed.
-- **Token-minimal answers.** `context_pack` returns the smallest correct read-set (personalized
-  PageRank over the dependency graph) within a token budget — not a grep dump.
-- **Graph-aware hybrid search.** Local static embeddings (Model2Vec) + lexical matching + a
-  dependency-**centrality** signal no pure search tool has.
+- **Deterministic graph, not fuzzy RAG.** Calls, imports, and containment come from the AST
+  (tree-sitter) — exact, reproducible, cheap to build.
+- **Cross-repo by design.** A global symbol identity (SCIP scheme) links a definition in one repo to
+  its users in every other. `ripple` gives blast radius across the whole org.
+- **Built once, read everywhere.** CI builds a new atomically-versioned index (local dir or S3);
+  every agent reads the same fresh artifact. Incremental — only changed files/symbols are recomputed.
+- **Graph-aware hybrid search.** Local static embeddings (Model2Vec) + BM25 + a dependency-graph
+  **centrality** signal no pure search tool has.
+- **Provider-agnostic LLM enrichment.** Optional summaries, question catalogs, and flow walkthroughs
+  via [Rig](https://github.com/0xPlaygrounds/rig) — OpenAI, any OpenAI-compatible endpoint, or a
+  local model.
 
 ## Install
 
 Prebuilt binaries (macOS arm64/x64, Linux x64/arm64) are published to
-[GitHub Releases](https://github.com/sayef/comind/releases) by the
-[`release`](.github/workflows/release.yml) workflow on each `vX.Y.Z` tag.
+[GitHub Releases](https://github.com/sayef/comind/releases) on each `vX.Y.Z` tag:
 
 ```bash
-# One-line installer (set GITHUB_TOKEN while the repo is private)
 curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
 ```
 
-Or build from source:
+Or from source (needs Rust — pinned via `rust-toolchain.toml` — plus `protoc` and `cmake`):
 
 ```bash
-# Requires: Rust (pinned via rust-toolchain.toml), protoc, cmake  (`brew install protobuf cmake`)
 git clone https://github.com/sayef/comind && cd comind
 cargo build --release      # → target/release/comind
 
-# See the deterministic engine (parse → resolve → graph → ripple) on any repo, no network/S3:
+# Try the deterministic engine on any repo, no network/S3 needed:
 cargo run --example index_and_search -- ../some-repo
 ```
-
-Coming once the repo is public: `cargo install comind` (crates.io) and a Homebrew tap.
 
 ## Quick start
 
 ```bash
-# 1. Build the org index from several repos → local dir or S3, with embeddings + LLM enrichment
-comind link ../pkg-common ../service-a ../service-b --to s3://my-bucket/comind/org --embed --enrich
+# 1. Build the org index from several repos → a local dir (or s3://…), with embeddings + enrichment
+comind link ../pkg-common ../service-a --to ./comind-index/org --embed --enrich
 
-# 2. Explore / search from the prebuilt index (instant, no re-parse)
-comind explore Settings --from s3://my-bucket/comind/org/_graph      # zoom + ripple + context-pack
-comind search  "how do we connect to postgres" --from s3://my-bucket/comind/org/_graph
+# 2. Explore / search the prebuilt index (instant, no re-parse)
+comind explore Settings --from ./comind-index/org/_graph        # zoom + ripple + context pack
+comind search  "how do we connect to postgres" --from ./comind-index/org/_graph
+comind flow    run_migrations --from ./comind-index/org/_graph  # flow walkthrough + call trace
 
 # 3. Serve it to an agent over MCP
-comind serve --from s3://my-bucket/comind/org/_graph
+comind serve --from ./comind-index/org/_graph
 ```
 
 Add to your MCP client (e.g. Claude Code):
@@ -67,37 +68,34 @@ Add to your MCP client (e.g. Claude Code):
   "mcpServers": {
     "comind": {
       "command": "/path/to/comind",
-      "args": ["serve", "--from", "s3://my-bucket/comind/org/_graph"]
+      "args": ["serve", "--from", "./comind-index/org/_graph"]
     }
   }
 }
 ```
 
-MCP tools: `search`, `suggest`, `repos`, `find`, `zoom`, `ripple`, `thread`, `flow`, `context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON also attached; `comind serve --from <uri> --format json` for raw JSON).
+**MCP tools:** `search`, `suggest`, `repos`, `find`, `zoom`, `ripple`, `thread`, `flow`,
+`context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON
+is also attached; use `serve --format json` for raw JSON).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `comind index <repo> --to <uri> [--incremental]` | Index one repo (git-incremental) |
 | `comind link <repos…> --to <uri> [--embed] [--enrich] [--flows] [--incremental]` | Build the cross-repo org index |
-| `comind changed <repo> --since <sha>` | Show files changed since a commit (git diff) |
-| `comind explore <focus> --from <uri>` | Zoom, blast radius, context pack for a symbol |
+| `comind index <repo> --to <uri> [--incremental]` | Index a single repo |
+| `comind explore <focus> --from <uri>` | Zoom, blast radius, and context pack for a symbol |
 | `comind search <query…> --from <uri> [--format md]` | Graph-aware hybrid code search |
 | `comind flow <focus> --from <uri>` | Pre-generated flow walkthrough + live call trace |
-| `comind serve --from <uri> [--format md|json]` | MCP server over stdio |
+| `comind changed <repo> --since <sha>` | Files changed since a commit (git diff) |
+| `comind serve --from <uri> [--format md\|json]` | MCP server over stdio |
 
-## CI (push-to-master → fresh org index)
+`<uri>` is a local directory or an `s3://…` path. `--enrich`/`--flows` are opt-in and send code
+signatures to the configured LLM provider (see below); everything else stays local.
 
-See [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) and
-[`docs/CI.md`](docs/CI.md) (GitLab variant included). The CI job clones the repos and runs
-`comind link … --to s3://… --embed --enrich --incremental`; Lance's version manifest is the atomic
-"latest" pointer every consumer reads. **LLM enrichment is opt-in** (`--enrich`) and sends code
-signatures to the configured LLM provider (OpenAI by default, via Rig) only when enabled.
+## How it works
 
-## Architecture
-
-Build the index once in CI; every consumer reads the same versioned artifact.
+Build the index once (in CI or locally); every consumer reads the same versioned artifact.
 
 ```mermaid
 flowchart LR
@@ -105,45 +103,74 @@ flowchart LR
         R1["pkg-common"]
         R2["service-a / service-b / …"]
     end
-    subgraph IDX["Index — CI, incremental"]
+    subgraph IDX["Index — incremental"]
         P["parse<br/>tree-sitter"]
         RS["resolve<br/>cross-repo SCIP"]
         G["git<br/>changed files only"]
     end
-    subgraph ART["Versioned LanceDB artifact on S3"]
+    subgraph ART["Versioned LanceDB artifact (local dir or S3)"]
         GR["graph<br/>symbols · edges"]
         SE["search<br/>vectors · BM25"]
-        EN["enrichment<br/>summaries · queries · style"]
+        EN["enrichment<br/>summaries · queries · flows"]
     end
     subgraph USE["Consume — instant"]
-        MCP["comind serve<br/>MCP · 7 tools"]
-        CLI["comind search / explore"]
+        MCP["comind serve<br/>MCP · 10 tools"]
+        CLI["comind search / explore / flow"]
     end
     SRC --> IDX --> ART --> USE
     AGENT(["coding agent"]) -. ripple / context_pack .-> MCP
 ```
 
-Single crate, one module per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
-the competitive landscape, and the phase log.
+Single crate, one module per stage — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and the
+competitive landscape.
 
 ```
 src/model.rs   SCIP identity, Symbol/Edge model
 src/parse.rs   tree-sitter → symbols + intra-file edges (Python, TypeScript; polyglot-ready)
 src/git.rs     git change detection (incremental)
 src/resolve.rs cross-repo import/call binding
-src/index.rs   LanceDB (S3) versioned store: graph, embeddings, enrichment, style guide
+src/index.rs   versioned LanceDB store: symbols, edges, search, enrichment, flows, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack
-src/embed.rs   Model2Vec static embeddings + code-aware ranking
-src/llm.rs     LLM summaries / query generation / style guide (opt-in, provider-agnostic via Rig)
-src/mcp.rs     rmcp MCP server (7 tools)
-src/main.rs    the `comind` binary (CLI)
+src/embed.rs   Model2Vec embeddings + code-aware hybrid ranking
+src/search.rs  hybrid retrieval (BM25 + vector + graph centrality)
+src/llm.rs     LLM summaries / questions / flow walkthroughs (opt-in, provider-agnostic via Rig)
+src/mcp.rs     MCP server (10 tools)
+src/main.rs    the comind binary (CLI)
 ```
+
+## CI
+
+[`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) (and
+[`docs/CI.md`](docs/CI.md), with a GitLab variant) builds the shared index on a schedule: it clones
+the listed repos and runs `comind link … --embed [--enrich] [--incremental]`, publishing the result
+as a downloadable artifact (or to S3). Lance's version manifest is the atomic "latest" pointer every
+consumer reads.
+
+## Configuration (LLM)
+
+`--enrich` / `--flows` use an LLM via Rig. By default: OpenAI, `OPENAI_API_KEY`, model
+`gpt-4o-mini`. Override with:
+
+- `COMIND_LLM_MODEL` — model id
+- `COMIND_LLM_BASE_URL` — any OpenAI-compatible endpoint (LiteLLM proxy, Ollama, vLLM, Azure)
 
 ## Status
 
-Core complete (P0–P7): parse → resolve → index → graph → embed → enrich → search → serve, with
-git-incremental indexing at both repo and org level, and CI. Roadmap: real BM25+RRF fusion, a Lance
-ANN index for very large corpora, and `cargo install` / brew / curl packaging.
+Feature-complete: parse → resolve → index → graph → embed → enrich → search → serve, with
+git-incremental indexing at repo and org level, hybrid search (BM25 + vector + centrality), flow
+walkthroughs, and CI. Roadmap: more languages, native Bedrock/Vertex backends, and
+`cargo install` / Homebrew packaging.
+
+## Development
+
+```bash
+cargo test
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+```
+
+Pre-commit hooks (fmt + clippy + basic file checks) live in `.pre-commit-config.yaml` — install
+with `pre-commit install`, or the Rust-native `prek install` (both read the same file).
 
 ## License
 

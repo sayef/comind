@@ -1,12 +1,8 @@
-//! Comind index — persist the symbol/edge graph to LanceDB (local dir or S3), versioned.
+//! Comind index — the versioned LanceDB store (local dir or S3).
 //!
-//! Phase 2 scope: write `symbols` and `edges` tables and read their row counts back,
-//! proving the round-trip against real object storage. Incremental change detection and
-//! the versioned "latest" pointer build on top of Lance's native table versioning next.
-//!
-//! Credentials/region come from the standard AWS environment (`AWS_ACCESS_KEY_ID`,
-//! `AWS_SESSION_TOKEN`, `AWS_REGION`, ...), so an SSO profile works via
-//! `aws configure export-credentials --profile <p> --format env`.
+//! Tables: `symbols`, `edges`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
+//! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
+//! is the atomic "latest" pointer. S3 uses the standard AWS environment for credentials/region.
 
 use std::sync::Arc;
 
@@ -17,6 +13,13 @@ use lancedb::arrow::arrow_array::{
 };
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use lancedb::table::AddDataMode;
+
+/// One enrichment/flow row: (symbol or entry id, generated text, associated queries).
+type TextRow = (GlobalSymbolId, String, Vec<String>);
+/// One search-table row: (symbol id, search text, embedding vector).
+type SearchRow = (GlobalSymbolId, String, Vec<f32>);
+/// A persisted (symbol id, embedding vector) pair.
+type VectorRow = (GlobalSymbolId, Vec<f32>);
 
 fn symbols_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
@@ -421,70 +424,6 @@ pub fn latest_versions_blocking(uri: &str) -> Result<(u64, u64)> {
 
 // ---- embeddings (semantic search vectors) -----------------------------------------------
 
-fn embeddings_schema(dim: usize) -> Arc<Schema> {
-    let item = Arc::new(Field::new("item", DataType::Float32, true));
-    Arc::new(Schema::new(vec![
-        Field::new("symbol_id", DataType::Utf8, false),
-        Field::new("vector", DataType::FixedSizeList(item, dim as i32), false),
-    ]))
-}
-
-/// Persist per-symbol embedding vectors as a Lance `embeddings` table
-/// (`symbol_id`, `vector: FixedSizeList<Float32>[dim]`) — the fixed-size vector column a
-/// Lance vector index can later be built on. Returns the new table version. No-op if empty.
-pub async fn write_embeddings(uri: &str, rows: &[(GlobalSymbolId, Vec<f32>)]) -> Result<u64> {
-    let Some((_, first)) = rows.first() else {
-        return Ok(0);
-    };
-    let dim = first.len();
-    let ids = StringArray::from_iter_values(rows.iter().map(|(id, _)| id.render()));
-    let flat: Vec<f32> = rows.iter().flat_map(|(_, v)| v.iter().copied()).collect();
-    let values = Arc::new(Float32Array::from(flat));
-    let item = Arc::new(Field::new("item", DataType::Float32, true));
-    let vectors = FixedSizeListArray::try_new(item, dim as i32, values, None)
-        .context("build FixedSizeList vector column")?;
-    let batch = RecordBatch::try_new(
-        embeddings_schema(dim),
-        vec![Arc::new(ids) as ArrayRef, Arc::new(vectors) as ArrayRef],
-    )
-    .context("build embeddings batch")?;
-
-    let db = lancedb::connect(uri).execute().await?;
-    write_versioned(&db, "embeddings", batch).await
-}
-
-/// Load persisted embeddings back as `(symbol_id, vector)` pairs. `Ok(None)` if the table
-/// doesn't exist yet (search then falls back to embedding on the fly).
-pub async fn read_embeddings(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, Vec<f32>)>>> {
-    let db = lancedb::connect(uri).execute().await?;
-    let Ok(tbl) = db.open_table("embeddings").execute().await else {
-        return Ok(None);
-    };
-    let mut out = Vec::new();
-    let mut st = tbl.query().execute().await?;
-    while let Some(b) = st.try_next().await? {
-        let ids = str_col(&b, "symbol_id")?;
-        let vecs = b
-            .column_by_name("vector")
-            .and_then(|c| c.as_any().downcast_ref::<FixedSizeListArray>())
-            .context("vector column not FixedSizeList")?;
-        for i in 0..b.num_rows() {
-            let sub = vecs.value(i);
-            let f = sub
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .context("vector items not Float32")?;
-            out.push((id_from_rendered(ids.value(i)), f.values().to_vec()));
-        }
-    }
-    Ok(Some(out))
-}
-
-/// Blocking wrapper for [`write_embeddings`].
-pub fn write_embeddings_blocking(uri: &str, rows: &[(GlobalSymbolId, Vec<f32>)]) -> Result<u64> {
-    runtime()?.block_on(write_embeddings(uri, rows))
-}
-
 // ---- repo metadata (last-indexed commit for incremental) --------------------------------
 
 /// Record the commit a repo dataset was indexed at (single-row `repo_meta` table).
@@ -605,10 +544,7 @@ fn search_schema(dim: usize) -> Arc<Schema> {
 /// Write the denormalized retrieval table (`symbol_id`, `text`, `vector`) and build a native
 /// BM25 full-text index on `text`. Hybrid search then fuses this FTS index with vector search
 /// using LanceDB's own RRF reranker — no hand-rolled BM25.
-pub async fn write_search_table(
-    uri: &str,
-    rows: &[(GlobalSymbolId, String, Vec<f32>)],
-) -> Result<u64> {
+pub async fn write_search_table(uri: &str, rows: &[SearchRow]) -> Result<u64> {
     let Some((_, _, first)) = rows.first() else {
         return Ok(0);
     };
@@ -654,7 +590,7 @@ pub async fn write_search_table(
 }
 
 /// Read `(symbol_id, vector)` from the search table for incremental reuse. `Ok(None)` if absent.
-pub async fn read_search_vectors(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, Vec<f32>)>>> {
+pub async fn read_search_vectors(uri: &str) -> Result<Option<Vec<VectorRow>>> {
     let db = lancedb::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("search").execute().await else {
         return Ok(None);
@@ -719,13 +655,10 @@ pub async fn hybrid_search(
 }
 
 /// Blocking wrappers.
-pub fn write_search_table_blocking(
-    uri: &str,
-    rows: &[(GlobalSymbolId, String, Vec<f32>)],
-) -> Result<u64> {
+pub fn write_search_table_blocking(uri: &str, rows: &[SearchRow]) -> Result<u64> {
     runtime()?.block_on(write_search_table(uri, rows))
 }
-pub fn read_search_vectors_blocking(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, Vec<f32>)>>> {
+pub fn read_search_vectors_blocking(uri: &str) -> Result<Option<Vec<VectorRow>>> {
     runtime()?.block_on(read_search_vectors(uri))
 }
 pub fn hybrid_search_blocking(
@@ -749,10 +682,7 @@ fn enrichment_schema() -> Arc<Schema> {
 
 /// Persist LLM enrichment (one-line summary + generated NL queries) as a Lance `enrichment`
 /// table. `queries` is a JSON array string. Returns the new version. No-op if empty.
-pub async fn write_enrichment(
-    uri: &str,
-    rows: &[(GlobalSymbolId, String, Vec<String>)],
-) -> Result<u64> {
+pub async fn write_enrichment(uri: &str, rows: &[TextRow]) -> Result<u64> {
     if rows.is_empty() {
         return Ok(0);
     }
@@ -776,9 +706,7 @@ pub async fn write_enrichment(
 }
 
 /// Load persisted enrichment as `(symbol_id, summary, queries)`. `Ok(None)` if absent.
-pub async fn read_enrichment(
-    uri: &str,
-) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+pub async fn read_enrichment(uri: &str) -> Result<Option<Vec<TextRow>>> {
     let db = lancedb::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("enrichment").execute().await else {
         return Ok(None);
@@ -802,17 +730,12 @@ pub async fn read_enrichment(
 }
 
 /// Blocking wrapper for [`write_enrichment`].
-pub fn write_enrichment_blocking(
-    uri: &str,
-    rows: &[(GlobalSymbolId, String, Vec<String>)],
-) -> Result<u64> {
+pub fn write_enrichment_blocking(uri: &str, rows: &[TextRow]) -> Result<u64> {
     runtime()?.block_on(write_enrichment(uri, rows))
 }
 
 /// Blocking wrapper for [`read_enrichment`].
-pub fn read_enrichment_blocking(
-    uri: &str,
-) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+pub fn read_enrichment_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
     runtime()?.block_on(read_enrichment(uri))
 }
 
@@ -825,7 +748,7 @@ fn flows_schema() -> Arc<Schema> {
 }
 
 /// Persist pre-generated flow walkthroughs: `(entry_id, narration_markdown, flow_questions)`.
-pub async fn write_flows(uri: &str, rows: &[(GlobalSymbolId, String, Vec<String>)]) -> Result<u64> {
+pub async fn write_flows(uri: &str, rows: &[TextRow]) -> Result<u64> {
     if rows.is_empty() {
         return Ok(0);
     }
@@ -849,7 +772,7 @@ pub async fn write_flows(uri: &str, rows: &[(GlobalSymbolId, String, Vec<String>
 }
 
 /// Load persisted flows as `(entry_id, narration, queries)`. `Ok(None)` if absent.
-pub async fn read_flows(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+pub async fn read_flows(uri: &str) -> Result<Option<Vec<TextRow>>> {
     let db = lancedb::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("flows").execute().await else {
         return Ok(None);
@@ -869,15 +792,10 @@ pub async fn read_flows(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, String,
 }
 
 /// Blocking wrappers.
-pub fn write_flows_blocking(
-    uri: &str,
-    rows: &[(GlobalSymbolId, String, Vec<String>)],
-) -> Result<u64> {
+pub fn write_flows_blocking(uri: &str, rows: &[TextRow]) -> Result<u64> {
     runtime()?.block_on(write_flows(uri, rows))
 }
-pub fn read_flows_blocking(
-    uri: &str,
-) -> Result<Option<Vec<(GlobalSymbolId, String, Vec<String>)>>> {
+pub fn read_flows_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
     runtime()?.block_on(read_flows(uri))
 }
 
@@ -921,11 +839,6 @@ pub fn write_style_guide_blocking(uri: &str, content: &str) -> Result<()> {
 /// Blocking wrapper for [`read_style_guide`].
 pub fn read_style_guide_blocking(uri: &str) -> Result<Option<String>> {
     runtime()?.block_on(read_style_guide(uri))
-}
-
-/// Blocking wrapper for [`read_embeddings`].
-pub fn read_embeddings_blocking(uri: &str) -> Result<Option<Vec<(GlobalSymbolId, Vec<f32>)>>> {
-    runtime()?.block_on(read_embeddings(uri))
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime> {

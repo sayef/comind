@@ -1,10 +1,8 @@
-//! Comind parse — tree-sitter extraction of symbols + intra-file edges.
+//! Comind parse — tree-sitter extraction of symbols and intra-file edges.
 //!
-//! Phase 1 scope: definitions (functions, methods, classes, interfaces), the `Contains`
-//! hierarchy, and provisional `Calls` edges (callee bound by name, confidence < 1.0 —
-//! real cross-file/cross-repo binding happens in `comind-resolve`, phase 3).
-//!
-//! Polyglot by construction: Python + TypeScript today, new languages are a match arm.
+//! Emits definitions (functions, methods, classes, interfaces), the `Contains` hierarchy, and
+//! provisional `Imports`/`Calls` edges that [`crate::resolve`] binds to real definitions.
+//! Polyglot by construction: Python + TypeScript today, a new language is one match arm.
 
 use std::path::{Path, MAIN_SEPARATOR};
 

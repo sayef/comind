@@ -1,7 +1,6 @@
-//! Comind CLI — the single distributable binary: `comind index|serve|resolve|query`.
+//! Comind CLI — the single distributable binary.
 //!
-//! Status: scaffold. `index` (phase 1) parses a repo and prints graph stats; the
-//! remaining subcommands land per phase (see ../../ARCHITECTURE.md).
+//! Subcommands: `index`, `link`, `explore`, `search`, `flow`, `changed`, `serve`.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

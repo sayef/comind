@@ -1,10 +1,10 @@
-# Fast checks: format + tests on a single Linux target, heavily cached.
-# While the repo is PRIVATE (limited free Actions minutes) this runs on PRs + manual only,
-# not on every push. Actions are free & unlimited on public repos — once comind is public,
-# re-add `push: { branches: [main] }` here for per-commit CI.
+# Fast checks on every push/PR: format, clippy, and tests on a single Linux target, cached.
+# The expensive cross-platform build lives in test-matrix.yml (scheduled), not here.
 name: ci
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,5 +26,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test

@@ -1,10 +1,10 @@
 //! Comind resolve — bind provisional references to real definitions, across repos.
 //!
-//! `comind-parse` emits two kinds of unresolved edge:
+//! [`crate::parse`] emits two kinds of unresolved edge:
 //!   * `Imports` to an *external* target (package `?`, descriptor = the import path core),
 //!   * `Calls` to a provisional target (descriptor `?/<name>()`).
 //!
-//! This crate rebinds them against the union of definitions from the whole corpus:
+//! This module rebinds them against the union of definitions from the whole corpus:
 //!   * an import `from acme.const import Settings` in `service-a` binds to the definition
 //!     `acme/const/Settings#` in `pkg-common` → a **cross-repo edge**. This is the
 //!     signal `ripple` traverses for org-wide blast radius.
