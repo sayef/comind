@@ -1,18 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind logo">
   <title>comind</title>
   <!-- Graph mark adapted from Phosphor Icons "graph" (MIT, https://github.com/phosphor-icons/core) -->
-  <path d="M128 12 L228.5 70 L228.5 186 L128 244 L27.5 186 L27.5 70 Z"
-        fill="none" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M128 18 L222 72 L222 184 L128 238 L34 184 L34 72 Z"
+        fill="#ffffff" stroke="#FB7185" stroke-width="6" stroke-linejoin="round"/>
   <g transform="translate(128 124) scale(0.58) translate(-128 -124)"
      fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="16">
-    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#ffffff"/>
-    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#ffffff"/>
-    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#ffffff"/>
+    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#16202E"/>
+    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#16202E"/>
+    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#16202E"/>
     <line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#FB7185"/>
-    <circle cx="128" cy="128" r="24" stroke="#ffffff"/>
-    <circle cx="200" cy="104" r="24" stroke="#ffffff"/>
-    <circle cx="200" cy="184" r="24" stroke="#ffffff"/>
-    <circle cx="56" cy="192" r="24" stroke="#ffffff"/>
+    <circle cx="128" cy="128" r="24" stroke="#16202E"/>
+    <circle cx="200" cy="104" r="24" stroke="#16202E"/>
+    <circle cx="200" cy="184" r="24" stroke="#16202E"/>
+    <circle cx="56" cy="192" r="24" stroke="#16202E"/>
     <circle cx="96" cy="56" r="24" stroke="#FB7185"/>
   </g>
 </svg>
