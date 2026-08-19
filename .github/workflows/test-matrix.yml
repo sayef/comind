@@ -5,11 +5,12 @@
 # macOS is built + tested natively (containers can't cover it).
 name: test-matrix
 
-# Expensive (full release build + many distros + macOS). Nightly + manual only — not per-push.
+# Expensive (full release build + many distros + macOS). Runs on release tags + manual only —
+# the portability check that matters right before binaries ship, not on a nightly timer.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * *" # 03:00 UTC nightly
+  push:
+    tags: ["v*.*.*"]
 
 jobs:
   # ---- Linux: build a portable glibc binary, then exec it on several distros --------------
@@ -54,22 +55,27 @@ jobs:
             ./comind index /tmp/s            # exercises tree-sitter + binary load, no network
           '
 
-  # ---- macOS: build + smoke natively (arm64 on macos-14, x64 on macos-13) -----------------
+  # ---- macOS: build + smoke on Apple Silicon; x86_64 built there too and run under Rosetta ---
+  # (Intel macos-13 runners are being retired and stall in the queue.)
   build-test-macos:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-13]
-    runs-on: ${{ matrix.os }}
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - run: brew install protobuf cmake
-      - run: cargo build --release
+      - name: Ensure Rosetta (run x86_64 binary on arm)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
       - name: Smoke test
         run: |
           mkdir -p /tmp/s && printf 'class A:\n  def run(self):\n    pass\n' > /tmp/s/x.py
-          ./target/release/comind --help
-          ./target/release/comind index /tmp/s
+          ./target/${{ matrix.target }}/release/comind --help
+          ./target/${{ matrix.target }}/release/comind index /tmp/s
 
   # Windows is intentionally omitted for now: aws-lc-sys (BoringSSL) + vendored libgit2 on MSVC
   # need extra setup (nasm, protoc, cmake). Add a windows-latest job once those are proven.
