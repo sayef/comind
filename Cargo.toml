@@ -7,6 +7,10 @@ license = "MIT"
 repository = "https://github.com/sayef/comind"
 authors = ["Saiful Islam"]
 description = "Deterministic, cross-repo code intelligence for coding agents — self-hosted, single binary."
+readme = "README.md"
+homepage = "https://github.com/sayef/comind"
+keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
+categories = ["development-tools", "command-line-utilities"]
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
 [lib]
