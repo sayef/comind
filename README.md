@@ -117,6 +117,8 @@ is also attached; use `serve --format json` for raw JSON).
 | `comind serve --from <uri> [--format md\|json]` | MCP server over stdio |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
+Run `comind <command> --help` for the full flags of any subcommand.
+
 `<uri>` is a local directory or an `s3://…` path; `--to`/`--from` are optional and default to the
 configured index location. `--enrich`/`--flows` are opt-in and send code signatures to the
 configured LLM provider (see below); everything else stays local. Both cover the **whole codebase**

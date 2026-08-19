@@ -9,37 +9,163 @@ use std::process::ExitCode;
 
 use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
-fn usage() {
-    println!(
-        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--flows] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> [--from <uri>] [--format md]\n  comind flow <focus> [--from <uri>]\n  comind serve [--from <uri>] [--format md|json]\n  comind config <path|init>\n\n--to/--from default to the configured index dir (see `comind config path`).\nAccepts a local path or an s3://bucket/prefix URI.\n\n  -h, --help       show this help\n  -V, --version    show version",
-        env!("CARGO_PKG_VERSION")
-    );
+use clap::{Parser, Subcommand};
+
+/// Cross-repo code intelligence for coding agents.
+///
+/// `--to`/`--from` default to the configured index dir (`comind config path`); both accept a local
+/// path or an `s3://bucket/prefix` URI.
+#[derive(Parser)]
+#[command(name = "comind", version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Index a single repo into the LanceDB store
+    Index {
+        /// Repository path
+        repo: String,
+        /// Index location (default: configured index dir; local path or s3://…)
+        #[arg(long)]
+        to: Option<String>,
+        /// Reparse only files changed since the last indexed commit
+        #[arg(long)]
+        incremental: bool,
+        /// Diff against this commit instead of the recorded base
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Build the cross-repo org index from one or more repos
+    Link {
+        /// Repository paths
+        #[arg(required = true)]
+        repos: Vec<String>,
+        /// Index location (default: configured index dir; local path or s3://…)
+        #[arg(long)]
+        to: Option<String>,
+        /// Compute vector embeddings (enables hybrid search)
+        #[arg(long)]
+        embed: bool,
+        /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
+        #[arg(long)]
+        enrich: bool,
+        /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
+        #[arg(long)]
+        flows: bool,
+        /// Recompute only symbols in files changed since the last index
+        #[arg(long)]
+        incremental: bool,
+    },
+    /// Zoom, blast radius, and context pack for a symbol
+    Explore {
+        /// Symbol name or fragment to focus on
+        focus: String,
+        /// Prebuilt index to read (default: configured <index>/_graph)
+        #[arg(long)]
+        from: Option<String>,
+        /// Repo paths to parse on the fly instead of reading an index
+        repos: Vec<String>,
+    },
+    /// Graph-aware hybrid code search
+    Search {
+        /// Natural-language query
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        /// Prebuilt index to read (default: configured <index>/_graph)
+        #[arg(long)]
+        from: Option<String>,
+        /// Output format: `md` for markdown
+        #[arg(long)]
+        format: Option<String>,
+        /// Shortcut for `--format md`
+        #[arg(long)]
+        md: bool,
+    },
+    /// Files changed since a commit (git diff)
+    Changed {
+        /// Repository path
+        repo: String,
+        /// Base commit (default: HEAD's parent)
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Pre-generated flow walkthrough + live call trace
+    Flow {
+        /// Entry-point symbol
+        focus: String,
+        /// Prebuilt index to read (default: configured <index>/_graph)
+        #[arg(long)]
+        from: Option<String>,
+    },
+    /// Run the MCP server over stdio
+    Serve {
+        /// Prebuilt index to read (default: configured <index>/_graph)
+        #[arg(long)]
+        from: Option<String>,
+        /// Output format handed to the agent: `md` (default) or `json`
+        #[arg(long)]
+        format: Option<String>,
+        /// Shortcut for `--format json`
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show or scaffold the config file
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print the config file location and resolved index dir
+    Path,
+    /// Write a commented config.toml with the current defaults
+    Init,
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(String::as_str) {
-        Some("index") => cmd_index(&args[2..]),
-        Some("link") => cmd_link(&args[2..]),
-        Some("explore") => cmd_explore(&args[2..]),
-        Some("search") => cmd_search(&args[2..]),
-        Some("changed") => cmd_changed(&args[2..]),
-        Some("flow") => cmd_flow(&args[2..]),
-        Some("serve") => cmd_serve(&args[2..]),
-        Some("config") => cmd_config(&args[2..]),
-        Some("-h" | "--help" | "help") | None => {
-            usage();
-            ExitCode::SUCCESS
+    match Cli::parse().cmd {
+        Cmd::Index {
+            repo,
+            to,
+            incremental,
+            since,
+        } => cmd_index(&repo, to.as_deref(), incremental, since.as_deref()),
+        Cmd::Link {
+            repos,
+            to,
+            embed,
+            enrich,
+            flows,
+            incremental,
+        } => {
+            let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
+            cmd_link(&repos, to.as_deref(), embed, enrich, flows, incremental)
         }
-        Some("-V" | "--version") => {
-            println!("comind {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
+        Cmd::Explore { focus, from, repos } => {
+            let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
+            cmd_explore(&focus, from.as_deref(), &repos)
         }
-        Some(other) => {
-            eprintln!("comind: unknown subcommand `{other}`\n");
-            usage();
-            ExitCode::FAILURE
+        Cmd::Search {
+            query,
+            from,
+            format,
+            md,
+        } => {
+            let markdown = md || matches!(format.as_deref(), Some("md" | "markdown"));
+            cmd_search(&query.join(" "), from.as_deref(), markdown)
         }
+        Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
+        Cmd::Flow { focus, from } => cmd_flow(&focus, from.as_deref()),
+        Cmd::Serve { from, format, json } => {
+            let markdown = !json && !matches!(format.as_deref(), Some("json"));
+            cmd_serve(from.as_deref(), markdown)
+        }
+        Cmd::Config { action } => cmd_config(action),
     }
 }
 
@@ -60,28 +186,7 @@ fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String>
 
 /// `comind explore <focus> <repo>...` — the agent-facing view: zoom, blast radius, and a
 /// token-budgeted context pack for one symbol, across the whole corpus.
-fn cmd_explore(args: &[String]) -> ExitCode {
-    // `comind explore <focus> [--from <lancedb-uri> | <repo-path>...]`
-    let Some((focus, rest)) = args.split_first() else {
-        eprintln!("comind explore: usage: comind explore <focus> (--from <uri> | <repo-path>...)");
-        return ExitCode::FAILURE;
-    };
-    let mut from: Option<&str> = None;
-    let mut repos: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while i < rest.len() {
-        match rest[i].as_str() {
-            "--from" => {
-                from = rest.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            p => {
-                repos.push(p);
-                i += 1;
-            }
-        }
-    }
-
+fn cmd_explore(focus: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
     // No repos and no --from: fall back to the configured index location.
     let default_uri = comind::config::Config::load().graph_dir(None);
     let from = from.or_else(|| repos.is_empty().then_some(default_uri.as_str()));
@@ -100,7 +205,7 @@ fn cmd_explore(args: &[String]) -> ExitCode {
                 eprintln!("comind explore: give --from <uri> or one or more <repo-path>");
                 return ExitCode::FAILURE;
             }
-            match parse_and_resolve(&repos) {
+            match parse_and_resolve(repos) {
                 Ok(x) => x,
                 Err(e) => {
                     eprintln!("{e}");
@@ -183,38 +288,7 @@ fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
 
 /// `comind search <query...> --from <uri>` — semantic search reranked by graph centrality,
 /// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
-fn cmd_search(args: &[String]) -> ExitCode {
-    let mut from: Option<&str> = None;
-    let mut markdown = false;
-    let mut query_parts: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--from" => {
-                from = args.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            "--format" => {
-                markdown = matches!(args.get(i + 1).map(String::as_str), Some("md" | "markdown"));
-                i += 2;
-            }
-            "--md" | "--markdown" => {
-                markdown = true;
-                i += 1;
-            }
-            w => {
-                query_parts.push(w);
-                i += 1;
-            }
-        }
-    }
-    let query = query_parts.join(" ");
-    if query.is_empty() {
-        eprintln!(
-            "comind search: usage: comind search <query...> [--from <lancedb-uri>] [--format md]"
-        );
-        return ExitCode::FAILURE;
-    }
+fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -249,19 +323,17 @@ fn cmd_search(args: &[String]) -> ExitCode {
 
     // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comind's code-aware boosts
     // and dependency-graph centrality — shared with the `search` MCP tool.
-    let hits =
-        match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, &query, 12) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!(
-                    "comind search: hybrid search failed (did you run `link --embed`?): {e:#}"
-                );
-                return ExitCode::FAILURE;
-            }
-        };
+    let hits = match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, query, 12)
+    {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("comind search: hybrid search failed (did you run `link --embed`?): {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     if markdown {
-        print!("{}", comind::search::markdown(&query, &hits));
+        print!("{}", comind::search::markdown(query, &hits));
     } else {
         println!("search: {query:?}\n");
         for h in &hits {
@@ -291,26 +363,7 @@ fn truncate(s: &str, n: usize) -> String {
 
 /// `comind changed <repo> [--since <sha>]` — show files changed since a commit (incremental
 /// indexing targeting). With no `--since`, just prints the current HEAD commit.
-fn cmd_changed(args: &[String]) -> ExitCode {
-    let mut repo: Option<&str> = None;
-    let mut since: Option<&str> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--since" => {
-                since = args.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            p => {
-                repo = Some(p);
-                i += 1;
-            }
-        }
-    }
-    let Some(repo) = repo else {
-        eprintln!("comind changed: usage: comind changed <repo> [--since <commit>]");
-        return ExitCode::FAILURE;
-    };
+fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
     let path = Path::new(repo);
 
     let head = match comind::git::head_commit(path) {
@@ -354,28 +407,7 @@ fn cmd_changed(args: &[String]) -> ExitCode {
 
 /// `comind serve --from <lancedb-uri>` — run the MCP server over stdio. Only the MCP
 /// protocol goes to stdout; diagnostics go to stderr so the stream stays clean.
-fn cmd_serve(args: &[String]) -> ExitCode {
-    let mut from: Option<&str> = None;
-    let mut markdown = true; // default: hand results to the agent as markdown
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--from" => {
-                from = args.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            "--format" => {
-                // `--format json` → raw JSON text; anything else (md/markdown) → markdown
-                markdown = args.get(i + 1).map(|v| v != "json").unwrap_or(true);
-                i += 2;
-            }
-            "--json" => {
-                markdown = false;
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
+fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     eprintln!("comind serve: loading graph from {uri} ...");
@@ -399,14 +431,14 @@ fn cmd_serve(args: &[String]) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
-fn cmd_config(args: &[String]) -> ExitCode {
-    match args.first().map(String::as_str) {
-        Some("path") | None => {
+fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
+    match action {
+        None | Some(ConfigAction::Path) => {
             println!("{}", comind::config::config_path().display());
             println!("index dir: {}", comind::config::default_index_dir());
             ExitCode::SUCCESS
         }
-        Some("init") => match comind::config::init() {
+        Some(ConfigAction::Init) => match comind::config::init() {
             Ok(path) => {
                 comind::ui::ok(&format!("wrote {}", path.display()));
                 ExitCode::SUCCESS
@@ -416,10 +448,6 @@ fn cmd_config(args: &[String]) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some(other) => {
-            eprintln!("comind config: unknown subcommand `{other}` (use `path` or `init`)");
-            ExitCode::FAILURE
-        }
     }
 }
 
@@ -433,52 +461,18 @@ fn repo_name(path: &str) -> String {
 
 /// Parse several repos, resolve references across them, and report the cross-repo graph
 /// (the org-wide blast-radius signal that per-repo tools cannot produce).
-fn cmd_link(args: &[String]) -> ExitCode {
-    // Parse `<repo-path>... [--to <lancedb-uri>] [--embed]`.
-    let mut repos: Vec<&str> = Vec::new();
-    let mut to: Option<&str> = None;
-    let mut embed = false;
-    let mut enrich = false;
-    let mut flows = false;
-    let mut incremental = false;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--to" => {
-                to = args.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            "--embed" => {
-                embed = true;
-                i += 1;
-            }
-            "--enrich" => {
-                enrich = true;
-                i += 1;
-            }
-            "--flows" => {
-                flows = true;
-                i += 1;
-            }
-            "--incremental" => {
-                incremental = true;
-                i += 1;
-            }
-            p => {
-                repos.push(p);
-                i += 1;
-            }
-        }
-    }
-    if repos.is_empty() {
-        eprintln!("comind link: give one or more <repo-path> arguments");
-        return ExitCode::FAILURE;
-    }
-
+fn cmd_link(
+    repos: &[&str],
+    to: Option<&str>,
+    embed: bool,
+    enrich: bool,
+    flows: bool,
+    incremental: bool,
+) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     comind::ui::header(&format!("Parsing {} repo(s)", repos.len()));
-    for path in &repos {
+    for path in repos {
         let name = repo_name(path);
         match comind::parse::parse_repo(Path::new(path), &name) {
             Ok(o) => {
@@ -589,7 +583,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
             })
             .collect();
         let stale_ids: HashSet<String> = if incremental {
-            compute_stale_ids(&repos, &dst, &symbols)
+            compute_stale_ids(repos, &dst, &symbols)
         } else {
             symbols.iter().map(|s| s.id.render()).collect() // full recompute
         };
@@ -744,21 +738,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
 
 /// `comind flow <focus> --from <uri>` — the pre-generated flow walkthrough for an entry point (if
 /// the index was built with `--flows`), followed by its live forward call trace.
-fn cmd_flow(args: &[String]) -> ExitCode {
-    let Some((focus, rest)) = args.split_first() else {
-        eprintln!("comind flow: usage: comind flow <focus> --from <uri>");
-        return ExitCode::FAILURE;
-    };
-    let mut from: Option<&str> = None;
-    let mut i = 0;
-    while i < rest.len() {
-        if rest[i] == "--from" {
-            from = rest.get(i + 1).map(String::as_str);
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
+fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
@@ -1077,39 +1057,10 @@ fn truncate_lines(s: &str, n: usize) -> String {
     s.lines().take(n).collect::<Vec<_>>().join("\n")
 }
 
-fn cmd_index(args: &[String]) -> ExitCode {
-    // Parse `<repo-path> [--to <uri>] [--incremental] [--since <commit>]`.
-    let mut path: Option<&str> = None;
-    let mut to: Option<&str> = None;
-    let mut incremental = false;
-    let mut since: Option<&str> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--to" => {
-                to = args.get(i + 1).map(String::as_str);
-                i += 2;
-            }
-            "--incremental" => {
-                incremental = true;
-                i += 1;
-            }
-            "--since" => {
-                since = args.get(i + 1).map(String::as_str);
-                incremental = true;
-                i += 2;
-            }
-            p => {
-                path = Some(p);
-                i += 1;
-            }
-        }
-    }
-    let Some(path) = path else {
-        eprintln!("comind index: missing <repo-path>");
-        return ExitCode::FAILURE;
-    };
-    let root = Path::new(path);
+fn cmd_index(repo: &str, to: Option<&str>, incremental: bool, since: Option<&str>) -> ExitCode {
+    // `--since` implies incremental.
+    let incremental = incremental || since.is_some();
+    let root = Path::new(repo);
     let repo_name = root
         .file_name()
         .and_then(|n| n.to_str())

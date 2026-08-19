@@ -1308,6 +1308,7 @@ name = "comind"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "clap",
  "comfy-table",
  "console 0.16.4",
  "futures",
