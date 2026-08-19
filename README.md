@@ -9,6 +9,13 @@
 
 <p align="center"><b>Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.</b></p>
 
+<p align="center">
+  <a href="https://github.com/sayef/comind/actions/workflows/ci.yml"><img src="https://github.com/sayef/comind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3f7e78" alt="MIT license"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94%2B-3f7e78" alt="Rust 1.94+"></a>
+  <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comind"><img src="https://img.shields.io/crates/v/comind.svg" alt="crates.io"></a> -->
+</p>
+
 
 Comind indexes a whole team's repositories into one versioned knowledge graph, then serves it to
 coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
