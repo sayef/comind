@@ -29,8 +29,9 @@ impl Embedder {
         Ok(Self { model })
     }
 
+    /// Load the configured embedding model (env → `config.toml` → [`DEFAULT_MODEL`]).
     pub fn load_default() -> Result<Self> {
-        Self::load(DEFAULT_MODEL)
+        Self::load(&crate::config::Config::load().embed_model())
     }
 
     /// Embed a batch of documents.

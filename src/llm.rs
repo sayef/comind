@@ -34,13 +34,16 @@ pub struct Enrichment {
 }
 
 impl LlmClient {
-    /// Build a client from the environment (`OPENAI_API_KEY`, optional `COMIND_LLM_MODEL`).
+    /// Build a client from config + environment. Model and base URL resolve via
+    /// [`crate::config`] (env → `config.toml` → default); the key stays env-only
+    /// (`OPENAI_API_KEY`).
     pub fn from_env() -> Result<Self> {
-        let model = std::env::var("COMIND_LLM_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let cfg = crate::config::Config::load();
+        let model = cfg.llm_model();
         // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
         // (LiteLLM proxy, Ollama, vLLM, Azure) with COMIND_LLM_BASE_URL.
-        let client = match std::env::var("COMIND_LLM_BASE_URL") {
-            Ok(base) => {
+        let client = match cfg.llm_base_url() {
+            Some(base) => {
                 let key =
                     std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "sk-noauth".to_string());
                 openai::CompletionsClient::builder()
@@ -50,7 +53,7 @@ impl LlmClient {
                     .map_err(|e| anyhow::anyhow!("LLM client (COMIND_LLM_BASE_URL): {e}"))?
             }
             // Rig's from_env reads OPENAI_API_KEY (and honours OPENAI_BASE_URL too).
-            Err(_) => openai::CompletionsClient::from_env().map_err(|e| {
+            None => openai::CompletionsClient::from_env().map_err(|e| {
                 anyhow::anyhow!(
                     "OpenAI client (set OPENAI_API_KEY, or COMIND_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
                 )

@@ -11,7 +11,7 @@ use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
 fn usage() {
     println!(
-        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--flows] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> --from <uri>\n  comind flow <focus> --from <uri>\n  comind serve --from <uri> [--format md|json]\n\n  -h, --help       show this help\n  -V, --version    show version",
+        "comind {} — cross-repo code intelligence for agents\n\nUSAGE:\n  comind index <repo-path> [--to <uri>] [--incremental] [--since <sha>]\n  comind link <repo-path>... [--to <uri>] [--embed] [--enrich] [--flows] [--incremental]\n  comind changed <repo-path> [--since <sha>]\n  comind explore <focus> (--from <uri> | <repo>...)\n  comind search <query...> [--from <uri>] [--format md]\n  comind flow <focus> [--from <uri>]\n  comind serve [--from <uri>] [--format md|json]\n  comind config <path|init>\n\n--to/--from default to the configured index dir (see `comind config path`).\nAccepts a local path or an s3://bucket/prefix URI.\n\n  -h, --help       show this help\n  -V, --version    show version",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -26,6 +26,7 @@ fn main() -> ExitCode {
         Some("changed") => cmd_changed(&args[2..]),
         Some("flow") => cmd_flow(&args[2..]),
         Some("serve") => cmd_serve(&args[2..]),
+        Some("config") => cmd_config(&args[2..]),
         Some("-h" | "--help" | "help") | None => {
             usage();
             ExitCode::SUCCESS
@@ -80,6 +81,10 @@ fn cmd_explore(args: &[String]) -> ExitCode {
             }
         }
     }
+
+    // No repos and no --from: fall back to the configured index location.
+    let default_uri = comind::config::Config::load().index_dir(None);
+    let from = from.or_else(|| repos.is_empty().then_some(default_uri.as_str()));
 
     // Fast path: load the prebuilt graph from LanceDB (no re-parse). Otherwise parse+resolve.
     let (symbols, edges) = match from {
@@ -204,12 +209,14 @@ fn cmd_search(args: &[String]) -> ExitCode {
         }
     }
     let query = query_parts.join(" ");
-    let (Some(uri), false) = (from, query.is_empty()) else {
+    if query.is_empty() {
         eprintln!(
-            "comind search: usage: comind search <query...> --from <lancedb-uri> [--format md]"
+            "comind search: usage: comind search <query...> [--from <lancedb-uri>] [--format md]"
         );
         return ExitCode::FAILURE;
-    };
+    }
+    let uri = comind::config::Config::load().index_dir(from);
+    let uri = uri.as_str();
 
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
@@ -369,10 +376,8 @@ fn cmd_serve(args: &[String]) -> ExitCode {
             _ => i += 1,
         }
     }
-    let Some(uri) = from else {
-        eprintln!("comind serve: --from <lancedb-uri> is required");
-        return ExitCode::FAILURE;
-    };
+    let uri = comind::config::Config::load().index_dir(from);
+    let uri = uri.as_str();
     eprintln!("comind serve: loading graph from {uri} ...");
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -388,6 +393,31 @@ fn cmd_serve(args: &[String]) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("comind serve: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `comind config <path|init>` — show or scaffold the config file.
+fn cmd_config(args: &[String]) -> ExitCode {
+    match args.first().map(String::as_str) {
+        Some("path") | None => {
+            println!("{}", comind::config::config_path().display());
+            println!("index dir: {}", comind::config::default_index_dir());
+            ExitCode::SUCCESS
+        }
+        Some("init") => match comind::config::init() {
+            Ok(path) => {
+                println!("wrote {}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("comind config: {e:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Some(other) => {
+            eprintln!("comind config: unknown subcommand `{other}` (use `path` or `init`)");
             ExitCode::FAILURE
         }
     }
@@ -531,9 +561,11 @@ fn cmd_link(args: &[String]) -> ExitCode {
         }
     }
 
-    if let Some(uri) = to {
+    {
         // Persist the resolved org-wide graph. Overwrite creates a new Lance version whose
         // manifest is the atomic "latest" pointer every consumer reads (push-to-master model).
+        let to_uri = comind::config::Config::load().index_dir(to);
+        let uri = to_uri.as_str();
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
         println!("\npersisting resolved org graph to {dst} ...");
         match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
@@ -712,10 +744,8 @@ fn cmd_flow(args: &[String]) -> ExitCode {
             i += 1;
         }
     }
-    let Some(uri) = from else {
-        eprintln!("comind flow: --from <uri> is required");
-        return ExitCode::FAILURE;
-    };
+    let uri = comind::config::Config::load().index_dir(from);
+    let uri = uri.as_str();
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
@@ -1048,7 +1078,8 @@ fn cmd_index(args: &[String]) -> ExitCode {
         .and_then(|n| n.to_str())
         .unwrap_or("repo")
         .to_string();
-    let dst = to.map(|u| format!("{}/{repo_name}", u.trim_end_matches('/')));
+    let to_uri = comind::config::Config::load().index_dir(to);
+    let dst = Some(format!("{}/{repo_name}", to_uri.trim_end_matches('/')));
 
     // Incremental path: diff against a base commit and reparse only what changed.
     if incremental {

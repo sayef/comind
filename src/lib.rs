@@ -7,6 +7,8 @@
 
 pub mod model;
 
+pub mod config;
+
 pub mod git;
 pub mod parse;
 pub mod resolve;
