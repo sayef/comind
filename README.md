@@ -1,6 +1,9 @@
-# Comind
+<p align="center"><img src="assets/logo.svg" alt="comind" width="88"></p>
 
-**Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.**
+<h1 align="center">comind</h1>
+
+<p align="center"><b>Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.</b></p>
+
 
 Comind indexes a whole team's repositories into one versioned knowledge graph, then serves it to
 coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
