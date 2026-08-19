@@ -178,3 +178,5 @@ with `pre-commit install`, or the Rust-native `prek install` (both read the same
 ## License
 
 MIT.
+
+The logo mark is adapted from the [Phosphor Icons](https://phosphoricons.com) `graph` glyph (MIT).

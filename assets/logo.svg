@@ -1,20 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="comind logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind logo">
   <title>comind</title>
-  <!-- hexagon of 6 nodes = a code graph -->
-  <path d="M60 20 L94.64 40 L94.64 80 L60 100 L25.36 80 L25.36 40 Z"
-        fill="none" stroke="#2F5BD0" stroke-width="4" stroke-linejoin="round"/>
-  <!-- the one amber edge = a cross-repo ripple, emanating from the center -->
-  <path d="M71 60 L94.64 40" fill="none" stroke="#D9772E" stroke-width="5" stroke-linecap="round"/>
-  <!-- center diamond -->
-  <path d="M60 49 L71 60 L60 71 L49 60 Z"
-        fill="none" stroke="#2F5BD0" stroke-width="4" stroke-linejoin="round"/>
-  <!-- nodes (the ripple endpoint is amber) -->
-  <g fill="#2F5BD0">
-    <circle cx="60" cy="20" r="5.5"/>
-    <circle cx="94.64" cy="80" r="5.5"/>
-    <circle cx="60" cy="100" r="5.5"/>
-    <circle cx="25.36" cy="80" r="5.5"/>
-    <circle cx="25.36" cy="40" r="5.5"/>
+  <!-- Graph mark adapted from Phosphor Icons "graph" (MIT, https://github.com/phosphor-icons/core) -->
+  <path d="M128 12 L228.5 70 L228.5 186 L128 244 L27.5 186 L27.5 70 Z"
+        fill="none" stroke="#0F766E" stroke-width="10" stroke-linejoin="round"/>
+  <g transform="translate(128 124) scale(0.58) translate(-128 -124)"
+     fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="16">
+    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#0F766E"/>
+    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#0F766E"/>
+    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#0F766E"/>
+    <line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#FB7185"/>
+    <circle cx="128" cy="128" r="24" stroke="#0F766E"/>
+    <circle cx="200" cy="104" r="24" stroke="#0F766E"/>
+    <circle cx="200" cy="184" r="24" stroke="#0F766E"/>
+    <circle cx="56" cy="192" r="24" stroke="#0F766E"/>
+    <circle cx="96" cy="56" r="24" stroke="#FB7185"/>
   </g>
-  <circle cx="94.64" cy="40" r="5.5" fill="#D9772E"/>
 </svg>
