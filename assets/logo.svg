@@ -2,17 +2,17 @@
   <title>comind</title>
   <!-- Graph mark adapted from Phosphor Icons "graph" (MIT, https://github.com/phosphor-icons/core) -->
   <path d="M128 12 L228.5 70 L228.5 186 L128 244 L27.5 186 L27.5 70 Z"
-        fill="none" stroke="#0F766E" stroke-width="10" stroke-linejoin="round"/>
+        fill="none" stroke="#16202E" stroke-width="10" stroke-linejoin="round"/>
   <g transform="translate(128 124) scale(0.58) translate(-128 -124)"
      fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="16">
-    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#0F766E"/>
-    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#0F766E"/>
-    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#0F766E"/>
+    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#16202E"/>
+    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#16202E"/>
+    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#16202E"/>
     <line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#FB7185"/>
-    <circle cx="128" cy="128" r="24" stroke="#0F766E"/>
-    <circle cx="200" cy="104" r="24" stroke="#0F766E"/>
-    <circle cx="200" cy="184" r="24" stroke="#0F766E"/>
-    <circle cx="56" cy="192" r="24" stroke="#0F766E"/>
+    <circle cx="128" cy="128" r="24" stroke="#16202E"/>
+    <circle cx="200" cy="104" r="24" stroke="#16202E"/>
+    <circle cx="200" cy="184" r="24" stroke="#16202E"/>
+    <circle cx="56" cy="192" r="24" stroke="#16202E"/>
     <circle cx="96" cy="56" r="24" stroke="#FB7185"/>
   </g>
 </svg>

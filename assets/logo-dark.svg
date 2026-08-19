@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind logo">
   <title>comind</title>
   <!-- Graph mark adapted from Phosphor Icons "graph" (MIT, https://github.com/phosphor-icons/core) -->
-  <rect x="8" y="8" width="240" height="240" rx="52" fill="#16202E"/>
-  <g transform="translate(128 124) scale(0.62) translate(-128 -124)"
+  <path d="M128 12 L228.5 70 L228.5 186 L128 244 L27.5 186 L27.5 70 Z"
+        fill="none" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+  <g transform="translate(128 124) scale(0.58) translate(-128 -124)"
      fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="16">
     <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#ffffff"/>
     <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#ffffff"/>
