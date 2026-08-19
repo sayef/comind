@@ -18,6 +18,10 @@ pub struct Config {
     pub embed_model: Option<String>,
     /// OpenAI-compatible base URL (Ollama, vLLM, LiteLLM proxy, Azure).
     pub llm_base_url: Option<String>,
+    /// Cap on symbols enriched by `--enrich`. Absent = no cap (enrich the whole codebase).
+    pub max_enrich: Option<usize>,
+    /// Cap on flows narrated by `--flows`. Absent = no cap (narrate every entry point).
+    pub max_flows: Option<usize>,
 }
 
 impl Config {
@@ -79,6 +83,16 @@ impl Config {
     pub fn llm_base_url(&self) -> Option<String> {
         non_empty_env("COMIND_LLM_BASE_URL").or_else(|| self.llm_base_url.clone())
     }
+
+    /// Cap on enriched symbols (`max_enrich` in the file); `usize::MAX` = no cap.
+    pub fn max_enrich(&self) -> usize {
+        self.max_enrich.unwrap_or(usize::MAX)
+    }
+
+    /// Cap on narrated flows (`max_flows` in the file); `usize::MAX` = no cap.
+    pub fn max_flows(&self) -> usize {
+        self.max_flows.unwrap_or(usize::MAX)
+    }
 }
 
 /// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
@@ -106,7 +120,10 @@ pub fn init() -> Result<PathBuf> {
          index_dir   = \"{}\"\n\
          llm_model   = \"{}\"\n\
          embed_model = \"{}\"\n\
-         # llm_base_url = \"http://localhost:11434/v1\"  # Ollama / vLLM / LiteLLM proxy\n",
+         # llm_base_url = \"http://localhost:11434/v1\"  # Ollama / vLLM / LiteLLM proxy\n\n\
+         # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
+         # max_enrich = 200   # max symbols enriched by --enrich\n\
+         # max_flows  = 50    # max flows narrated by --flows\n",
         default_index_dir(),
         crate::llm::DEFAULT_MODEL,
         crate::embed::DEFAULT_MODEL,

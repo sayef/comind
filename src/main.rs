@@ -439,8 +439,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
     let mut to: Option<&str> = None;
     let mut embed = false;
     let mut enrich = false;
-    let mut enrich_top: usize = usize::MAX; // enrich the whole codebase by default
-    let mut flows_top: usize = 0; // 0 = don't pre-generate flow narrations
+    let mut flows = false;
     let mut incremental = false;
     let mut i = 0;
     while i < args.len() {
@@ -458,25 +457,8 @@ fn cmd_link(args: &[String]) -> ExitCode {
                 i += 1;
             }
             "--flows" => {
-                if flows_top == 0 {
-                    flows_top = usize::MAX; // narrate every entry point by default
-                }
+                flows = true;
                 i += 1;
-            }
-            "--flows-top" => {
-                flows_top = args
-                    .get(i + 1)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(usize::MAX);
-                i += 2;
-            }
-            "--enrich-top" => {
-                enrich_top = args
-                    .get(i + 1)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(usize::MAX);
-                enrich = true;
-                i += 2;
             }
             "--incremental" => {
                 incremental = true;
@@ -625,12 +607,13 @@ fn cmd_link(args: &[String]) -> ExitCode {
             }
         }
 
+        let cfg = comind::config::Config::load();
         if enrich {
             if let ExitCode::FAILURE = run_enrich(
                 &dst,
                 &symbols,
                 &resolved.edges,
-                enrich_top,
+                cfg.max_enrich(),
                 &stale_ids,
                 incremental,
             ) {
@@ -638,8 +621,8 @@ fn cmd_link(args: &[String]) -> ExitCode {
             }
         }
 
-        if flows_top > 0 {
-            if let ExitCode::FAILURE = run_flows(&dst, &symbols, &resolved.edges, flows_top) {
+        if flows {
+            if let ExitCode::FAILURE = run_flows(&dst, &symbols, &resolved.edges, cfg.max_flows()) {
                 return ExitCode::FAILURE;
             }
         }
@@ -651,7 +634,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Pre-generate flow walkthroughs (opt-in `--flows[-top N]`): pick the top entry points by how
+/// Pre-generate flow walkthroughs (opt-in `--flows`): pick the top entry points by how
 /// much they orchestrate (forward call-trace size), trace each with `thread`, narrate via the
 /// LLM, and persist to the `flows` table. Sends call traces to the OpenAI API.
 fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitCode {

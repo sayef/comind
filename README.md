@@ -120,7 +120,7 @@ is also attached; use `serve --format json` for raw JSON).
 `<uri>` is a local directory or an `s3://…` path; `--to`/`--from` are optional and default to the
 configured index location. `--enrich`/`--flows` are opt-in and send code signatures to the
 configured LLM provider (see below); everything else stays local. Both cover the **whole codebase**
-by default — cap them with `--enrich-top N` / `--flows-top N` to bound LLM cost.
+by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
 
 ## How it works
 
@@ -186,6 +186,8 @@ index_dir   = "~/.local/share/comind"   # default --to / --from (local path or s
 llm_model   = "gpt-4o-mini"
 embed_model = "minishlab/potion-base-8M"
 # llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
+# max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
+# max_flows   = 50    # cap --flows narrations (omit = no cap)
 ```
 
 Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`,
