@@ -1,5 +1,5 @@
 # Fast checks on every push/PR: format, clippy, and tests on a single Linux target, cached.
-# The expensive cross-platform build lives in test-matrix.yml (scheduled), not here.
+# The expensive cross-platform build lives in portability.yml (release tags), not here.
 name: ci
 
 on:

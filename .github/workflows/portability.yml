@@ -3,7 +3,7 @@
 # Build once on an OLD glibc (portable), then run the prebuilt binary on clean distro images
 # via `docker run` — the real "does it run on a fresh box" test (no Rust/protoc installed there).
 # macOS is built + tested natively (containers can't cover it).
-name: test-matrix
+name: portability
 
 # Expensive (full release build + many distros + macOS). Runs on release tags + manual only —
 # the portability check that matters right before binaries ship, not on a nightly timer.
