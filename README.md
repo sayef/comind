@@ -63,11 +63,22 @@ cargo run --example index_and_search -- ../some-repo
 
 ## Quick start
 
+Zero-config: with no `--to`/`--from`, comind reads and writes a default index location
+(`~/.local/share/comind`, XDG-aware — see `comind config path`).
+
 ```bash
-# 1. Build the org index from several repos → a local dir (or s3://…), with embeddings + enrichment
+comind link ../service-a --embed        # build → default index dir
+comind search "how do we connect to postgres"   # search it, no path needed
+comind serve                            # MCP server over the default index
+```
+
+Explicit locations — a local dir or `s3://…`, shared across a team:
+
+```bash
+# 1. Build the org index from several repos, with embeddings + full enrichment
 comind link ../pkg-common ../service-a --to ./comind-index/org --embed --enrich
 
-# 2. Explore / search the prebuilt index (instant, no re-parse)
+# 2. Explore / search the prebuilt index (instant, no re-parse). Read commands point at <root>/_graph
 comind explore Settings --from ./comind-index/org/_graph        # zoom + ripple + context pack
 comind search  "how do we connect to postgres" --from ./comind-index/org/_graph
 comind flow    run_migrations --from ./comind-index/org/_graph  # flow walkthrough + call trace
@@ -104,9 +115,12 @@ is also attached; use `serve --format json` for raw JSON).
 | `comind flow <focus> --from <uri>` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> --since <sha>` | Files changed since a commit (git diff) |
 | `comind serve --from <uri> [--format md\|json]` | MCP server over stdio |
+| `comind config <path\|init>` | Show or scaffold the config file |
 
-`<uri>` is a local directory or an `s3://…` path. `--enrich`/`--flows` are opt-in and send code
-signatures to the configured LLM provider (see below); everything else stays local.
+`<uri>` is a local directory or an `s3://…` path; `--to`/`--from` are optional and default to the
+configured index location. `--enrich`/`--flows` are opt-in and send code signatures to the
+configured LLM provider (see below); everything else stays local. Both cover the **whole codebase**
+by default — cap them with `--enrich-top N` / `--flows-top N` to bound LLM cost.
 
 ## How it works
 
@@ -161,13 +175,26 @@ the listed repos and runs `comind link … --embed [--enrich] [--incremental]`, 
 as a downloadable artifact (or to S3). Lance's version manifest is the atomic "latest" pointer every
 consumer reads.
 
-## Configuration (LLM)
+## Configuration
 
-`--enrich` / `--flows` use an LLM via Rig. By default: OpenAI, `OPENAI_API_KEY`, model
-`gpt-4o-mini`. Override with:
+Persistent, non-secret defaults live in `config.toml` (`comind config path` shows where; `comind
+config init` scaffolds it). Precedence, highest first: **CLI flag → environment variable → config
+file → built-in default**.
 
-- `COMIND_LLM_MODEL` — model id
-- `COMIND_LLM_BASE_URL` — any OpenAI-compatible endpoint (LiteLLM proxy, Ollama, vLLM, Azure)
+```toml
+index_dir   = "~/.local/share/comind"   # default --to / --from (local path or s3://…)
+llm_model   = "gpt-4o-mini"
+embed_model = "minishlab/potion-base-8M"
+# llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
+```
+
+Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`,
+`COMIND_LLM_BASE_URL`.
+
+**Secrets stay in the environment**, never the file: `--enrich`/`--flows` use an LLM via Rig
+(default OpenAI, `OPENAI_API_KEY`; any OpenAI-compatible endpoint via `COMIND_LLM_BASE_URL`). For an
+`s3://…` index, AWS credentials/region come from the standard AWS environment (`AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, or an SSO profile).
 
 ## Status
 

@@ -51,6 +51,16 @@ impl Config {
         default_index_dir()
     }
 
+    /// Resolve the graph dataset to read from. An explicit flag is used verbatim (callers pass
+    /// the full `<root>/_graph` path); otherwise default to `<index_dir>/_graph`, matching where
+    /// `link` writes.
+    pub fn graph_dir(&self, flag: Option<&str>) -> String {
+        match flag {
+            Some(f) => expand_tilde(f),
+            None => format!("{}/_graph", self.index_dir(None).trim_end_matches('/')),
+        }
+    }
+
     /// Resolve the LLM model: `COMIND_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
     pub fn llm_model(&self) -> String {
         non_empty_env("COMIND_LLM_MODEL")
@@ -88,8 +98,7 @@ pub fn init() -> Result<PathBuf> {
         anyhow::bail!("config already exists at {}", path.display());
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let body = format!(
         "# Comind configuration. CLI flags and environment variables override these.\n\
@@ -111,7 +120,9 @@ fn non_empty_env(key: &str) -> Option<String> {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 fn config_home() -> PathBuf {

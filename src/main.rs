@@ -83,7 +83,7 @@ fn cmd_explore(args: &[String]) -> ExitCode {
     }
 
     // No repos and no --from: fall back to the configured index location.
-    let default_uri = comind::config::Config::load().index_dir(None);
+    let default_uri = comind::config::Config::load().graph_dir(None);
     let from = from.or_else(|| repos.is_empty().then_some(default_uri.as_str()));
 
     // Fast path: load the prebuilt graph from LanceDB (no re-parse). Otherwise parse+resolve.
@@ -215,7 +215,7 @@ fn cmd_search(args: &[String]) -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    let uri = comind::config::Config::load().index_dir(from);
+    let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
@@ -376,7 +376,7 @@ fn cmd_serve(args: &[String]) -> ExitCode {
             _ => i += 1,
         }
     }
-    let uri = comind::config::Config::load().index_dir(from);
+    let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     eprintln!("comind serve: loading graph from {uri} ...");
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -408,7 +408,7 @@ fn cmd_config(args: &[String]) -> ExitCode {
         }
         Some("init") => match comind::config::init() {
             Ok(path) => {
-                println!("wrote {}", path.display());
+                comind::ui::ok(&format!("wrote {}", path.display()));
                 ExitCode::SUCCESS
             }
             Err(e) => {
@@ -439,7 +439,7 @@ fn cmd_link(args: &[String]) -> ExitCode {
     let mut to: Option<&str> = None;
     let mut embed = false;
     let mut enrich = false;
-    let mut enrich_top: usize = 40;
+    let mut enrich_top: usize = usize::MAX; // enrich the whole codebase by default
     let mut flows_top: usize = 0; // 0 = don't pre-generate flow narrations
     let mut incremental = false;
     let mut i = 0;
@@ -459,19 +459,22 @@ fn cmd_link(args: &[String]) -> ExitCode {
             }
             "--flows" => {
                 if flows_top == 0 {
-                    flows_top = 8;
+                    flows_top = usize::MAX; // narrate every entry point by default
                 }
                 i += 1;
             }
             "--flows-top" => {
-                flows_top = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(8);
+                flows_top = args
+                    .get(i + 1)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(usize::MAX);
                 i += 2;
             }
             "--enrich-top" => {
                 enrich_top = args
                     .get(i + 1)
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(enrich_top);
+                    .unwrap_or(usize::MAX);
                 enrich = true;
                 i += 2;
             }
@@ -492,21 +495,20 @@ fn cmd_link(args: &[String]) -> ExitCode {
 
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
-    println!("parsing {} repos:", repos.len());
+    comind::ui::header(&format!("Parsing {} repo(s)", repos.len()));
     for path in &repos {
         let name = repo_name(path);
         match comind::parse::parse_repo(Path::new(path), &name) {
             Ok(o) => {
-                println!(
-                    "  {name:<16} {:>6} symbols, {:>6} edges",
-                    o.symbols.len(),
-                    o.edges.len()
+                comind::ui::field(
+                    &name,
+                    &format!("{} symbols, {} edges", o.symbols.len(), o.edges.len()),
                 );
                 symbols.extend(o.symbols);
                 edges.extend(o.edges);
             }
             Err(e) => {
-                eprintln!("  {name}: parse failed: {e:#}");
+                comind::ui::err(&format!("{name}: parse failed: {e:#}"));
                 return ExitCode::FAILURE;
             }
         }
@@ -514,10 +516,10 @@ fn cmd_link(args: &[String]) -> ExitCode {
 
     let resolved = comind::resolve::resolve(&symbols, &edges);
     let s = &resolved.stats;
-    println!(
-        "\nresolved: {} imports ({} cross-repo), {} calls; {} imports unresolved (third-party)",
+    comind::ui::ok(&format!(
+        "resolved: {} imports ({} cross-repo), {} calls; {} unresolved (third-party)",
         s.resolved_imports, s.cross_repo_edges, s.resolved_calls, s.unresolved_imports
-    );
+    ));
 
     // Rank cross-repo import targets by how many distinct repos depend on them.
     // (dst descriptor) -> (defining repo, set of importer repos, total refs)
@@ -535,29 +537,37 @@ fn cmd_link(args: &[String]) -> ExitCode {
     let mut ranked: Vec<_> = targets.into_iter().collect();
     ranked.sort_by(|a, b| b.1 .1.len().cmp(&a.1 .1.len()).then(b.1 .2.cmp(&a.1 .2)));
 
-    println!("\ntop cross-repo dependencies (org-wide blast radius):");
-    println!("  {:<48} {:<12} repos  refs", "symbol", "defined-in");
-    for (descriptor, (def_repo, importers, refs)) in ranked.iter().take(15) {
-        let short = if descriptor.len() > 46 {
-            format!("…{}", &descriptor[descriptor.len() - 45..])
-        } else {
-            descriptor.clone()
-        };
-        println!(
-            "  {short:<48} {def_repo:<12} {:>4}  {refs:>5}",
-            importers.len()
-        );
+    if !ranked.is_empty() {
+        comind::ui::header("Top cross-repo dependencies (org-wide blast radius)");
+        let mut table = comfy_table::Table::new();
+        table
+            .load_preset(comfy_table::presets::UTF8_FULL)
+            .set_header(vec!["symbol", "defined-in", "repos", "refs"]);
+        for (descriptor, (def_repo, importers, refs)) in ranked.iter().take(15) {
+            let short = if descriptor.len() > 46 {
+                format!("…{}", &descriptor[descriptor.len() - 45..])
+            } else {
+                descriptor.clone()
+            };
+            table.add_row(vec![
+                short,
+                def_repo.clone(),
+                importers.len().to_string(),
+                refs.to_string(),
+            ]);
+        }
+        println!("{table}");
     }
 
     // ripple demo on the single most-depended-on symbol.
     if let Some((descriptor, (def_repo, importers, refs))) = ranked.first() {
-        println!("\nripple({descriptor})  [defined in {def_repo}]");
-        println!(
-            "  changing this would impact {} repos ({refs} references):",
+        comind::ui::header(&format!("ripple({descriptor})  [defined in {def_repo}]"));
+        comind::ui::note(&format!(
+            "changing this would impact {} repos ({refs} references):",
             importers.len()
-        );
+        ));
         for repo in importers {
-            println!("    - {repo}");
+            comind::ui::note(&format!("- {repo}"));
         }
     }
 
@@ -567,20 +577,21 @@ fn cmd_link(args: &[String]) -> ExitCode {
         let to_uri = comind::config::Config::load().index_dir(to);
         let uri = to_uri.as_str();
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
-        println!("\npersisting resolved org graph to {dst} ...");
+        comind::ui::header("Persisting");
+        comind::ui::step(&format!("writing org graph to {dst}"));
         match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
-            Ok((sv, ev)) => {
-                println!("wrote org graph: symbols v{sv}, edges v{ev}  (latest pointer)")
-            }
+            Ok((sv, ev)) => comind::ui::ok(&format!(
+                "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
+            )),
             Err(e) => {
-                eprintln!("comind link: write failed: {e:#}");
+                comind::ui::err(&format!("write failed: {e:#}"));
                 return ExitCode::FAILURE;
             }
         }
         match comind::index::count_rows_blocking(&dst) {
-            Ok((s, e)) => println!("read back: {s} symbols, {e} edges"),
+            Ok((s, e)) => comind::ui::note(&format!("read back: {s} symbols, {e} edges")),
             Err(e) => {
-                eprintln!("comind link: read-back failed: {e:#}");
+                comind::ui::err(&format!("read-back failed: {e:#}"));
                 return ExitCode::FAILURE;
             }
         }
@@ -601,11 +612,11 @@ fn cmd_link(args: &[String]) -> ExitCode {
             symbols.iter().map(|s| s.id.render()).collect() // full recompute
         };
         if incremental {
-            eprintln!(
-                "(incremental: {} of {} symbols stale)",
+            comind::ui::note(&format!(
+                "incremental: {} of {} symbols stale",
                 stale_ids.len(),
                 symbols.len()
-            );
+            ));
         }
 
         if embed {
@@ -663,6 +674,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     };
     let g = comind::graph::CodeGraph::build(symbols, edges);
 
+    comind::ui::header("Narrating flows (LLM)");
     // Entry points = functions/methods ranked by forward call-trace size (biggest flows first).
     let mut candidates: Vec<(&Symbol, usize)> = symbols
         .iter()
@@ -679,50 +691,70 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     candidates.truncate(top);
 
     if candidates.is_empty() {
-        println!("flows: no multi-step flows found to narrate");
+        comind::ui::note("flows: no multi-step flows found to narrate");
         return ExitCode::SUCCESS;
     }
-    eprintln!(
-        "narrating {} flows via {} (sends call traces to the OpenAI API) ...",
-        candidates.len(),
-        comind::llm::DEFAULT_MODEL
-    );
+    comind::ui::warn("--flows sends call traces to the OpenAI API — opt-in egress.");
 
-    let mut rows: Vec<(comind::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
-    for (s, _) in &candidates {
-        let Some(idx) = g.lookup(&s.id.render()) else {
-            continue;
-        };
-        let trace: String = g
-            .thread(idx, 4)
-            .iter()
-            .map(|h| {
-                format!(
-                    "d{} {:?} {} {}",
-                    h.depth, h.via, h.node.name, h.node.location
-                )
+    // Precompute call traces (graph ops) up front, then narrate concurrently.
+    let prep: Vec<(comind::model::GlobalSymbolId, String, String, String)> = candidates
+        .iter()
+        .filter_map(|(s, _)| {
+            let idx = g.lookup(&s.id.render())?;
+            let trace = g
+                .thread(idx, 4)
+                .iter()
+                .map(|h| {
+                    format!(
+                        "d{} {:?} {} {}",
+                        h.depth, h.via, h.node.name, h.node.location
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some((
+                s.id.clone(),
+                s.name.clone(),
+                s.signature.clone().unwrap_or_default(),
+                trace,
+            ))
+        })
+        .collect();
+
+    let pb = comind::ui::progress(prep.len() as u64, "narrating flows");
+    let rows: Vec<(comind::model::GlobalSymbolId, String, Vec<String>)> = rt.block_on(async {
+        use futures::StreamExt;
+        futures::stream::iter(prep.iter())
+            .map(|(id, name, sig, trace)| {
+                let (pb, client) = (&pb, &client);
+                async move {
+                    let r = client
+                        .narrate_flow(name, sig, trace)
+                        .await
+                        .ok()
+                        .map(|(narr, q)| (id.clone(), narr, q));
+                    pb.inc(1);
+                    r
+                }
             })
+            .buffered(8)
             .collect::<Vec<_>>()
-            .join("\n");
-        let sig = s.signature.clone().unwrap_or_default();
-        match rt.block_on(client.narrate_flow(&s.name, &sig, &trace)) {
-            Ok((narration, queries)) => rows.push((s.id.clone(), narration, queries)),
-            Err(e) => eprintln!(
-                "comind link: flow narration for {} failed (non-fatal): {e:#}",
-                s.name
-            ),
-        }
-    }
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
+    });
+    pb.finish_and_clear();
 
     match comind::index::write_flows_blocking(dst, &rows) {
-        Ok(v) => println!("flows v{v}: {} narrated", rows.len()),
+        Ok(v) => comind::ui::ok(&format!("flows v{v}: {} narrated", rows.len())),
         Err(e) => {
-            eprintln!("comind link: write flows failed: {e:#}");
+            comind::ui::err(&format!("write flows failed: {e:#}"));
             return ExitCode::FAILURE;
         }
     }
     if let Some((_, narr, _)) = rows.first() {
-        println!("  e.g. {}", truncate(narr, 120));
+        comind::ui::note(&format!("e.g. {}", truncate(narr, 120)));
     }
     ExitCode::SUCCESS
 }
@@ -744,7 +776,7 @@ fn cmd_flow(args: &[String]) -> ExitCode {
             i += 1;
         }
     }
-    let uri = comind::config::Config::load().index_dir(from);
+    let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
@@ -874,6 +906,11 @@ fn run_embed(
         }
         to_embed.push(s);
     }
+    comind::ui::header("Building search index");
+    let pb = comind::ui::spinner(&format!(
+        "embedding {} symbols + building BM25 index",
+        to_embed.len()
+    ));
     let texts: Vec<String> = to_embed
         .iter()
         .map(|s| comind::embed::symbol_text(s))
@@ -881,14 +918,16 @@ fn run_embed(
     for (s, v) in to_embed.iter().zip(embedder.embed(&texts)) {
         rows.push((s.id.clone(), comind::embed::symbol_text(s), v));
     }
-    match comind::index::write_search_table_blocking(dst, &rows) {
-        Ok(v) => println!(
+    let write = comind::index::write_search_table_blocking(dst, &rows);
+    pb.finish_and_clear();
+    match write {
+        Ok(v) => comind::ui::ok(&format!(
             "search index v{v}: {} symbols ({reused} reused, {} embedded) + BM25 FTS index",
             rows.len(),
             to_embed.len()
-        ),
+        )),
         Err(e) => {
-            eprintln!("comind link: write search table failed: {e:#}");
+            comind::ui::err(&format!("write search table failed: {e:#}"));
             return ExitCode::FAILURE;
         }
     }
@@ -925,6 +964,7 @@ fn run_enrich(
     };
     let g = comind::graph::CodeGraph::build(symbols, edges);
 
+    comind::ui::header("Enriching symbols (LLM)");
     // Most-central definitions first — enrich where it matters most (bounded cost).
     let mut defs: Vec<&Symbol> = symbols
         .iter()
@@ -979,17 +1019,31 @@ fn run_enrich(
             )
         })
         .collect();
-    if !items.is_empty() {
-        eprintln!(
-            "NOTE: --enrich sends code (names/signatures) to the OpenAI API — opt-in egress."
+    let results: Vec<Option<comind::llm::Enrichment>> = if items.is_empty() {
+        Vec::new()
+    } else {
+        comind::ui::warn(
+            "--enrich sends code (names/signatures) to the OpenAI API — opt-in egress.",
         );
-        eprintln!(
-            "enriching {} symbols via {} ...",
-            items.len(),
-            comind::llm::DEFAULT_MODEL
-        );
-    }
-    let results = rt.block_on(client.enrich_batch(&items));
+        let pb = comind::ui::progress(items.len() as u64, "enriching symbols");
+        let out = rt.block_on(async {
+            use futures::StreamExt;
+            futures::stream::iter(items.iter())
+                .map(|(n, s, c)| {
+                    let (pb, client) = (&pb, &client);
+                    async move {
+                        let r = client.enrich_symbol(n, s, c).await.ok();
+                        pb.inc(1);
+                        r
+                    }
+                })
+                .buffered(8)
+                .collect::<Vec<_>>()
+                .await
+        });
+        pb.finish_and_clear();
+        out
+    };
     for (s, r) in to_call.iter().zip(results) {
         if let Some(e) = r {
             rows.push((s.id.clone(), e.summary, e.queries));
@@ -997,14 +1051,14 @@ fn run_enrich(
     }
 
     match comind::index::write_enrichment_blocking(dst, &rows) {
-        Ok(v) => println!(
-            "enrichment v{v}: {} total ({} reused, {} generated)",
+        Ok(v) => comind::ui::ok(&format!(
+            "enrichment v{v}: {} symbols ({} reused, {} generated)",
             rows.len(),
             rows.len() - items.len(),
             items.len()
-        ),
+        )),
         Err(e) => {
-            eprintln!("comind link: write enrichment failed: {e:#}");
+            comind::ui::err(&format!("write enrichment failed: {e:#}"));
             return ExitCode::FAILURE;
         }
     }

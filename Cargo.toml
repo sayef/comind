@@ -28,6 +28,9 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
+console = "0.16" # styled status lines + TTY detection
+comfy-table = "7" # unicode result tables
 anyhow = "1"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std"] }
 futures = "0.3"
