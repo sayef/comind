@@ -11,6 +11,9 @@ readme = "README.md"
 homepage = "https://github.com/sayef/comind"
 keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
 categories = ["development-tools", "command-line-utilities"]
+# Dev-only files that shouldn't ship in the published crate (rust-toolchain.toml would otherwise
+# force our pinned toolchain on anyone running `cargo install`).
+exclude = ["rust-toolchain.toml", ".github", ".pre-commit-config.yaml", "docs"]
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
 [lib]
