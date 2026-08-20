@@ -575,7 +575,7 @@ fn hop_dto(h: crate::graph::Hop) -> HopDto {
         repo: h.node.repo,
         location: h.node.location,
         depth: h.depth,
-        via: format!("{:?}", h.via),
+        via: h.via.as_str().to_string(),
     }
 }
 

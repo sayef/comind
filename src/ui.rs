@@ -64,6 +64,15 @@ pub fn table(headers: &[&str]) -> comfy_table::Table {
     t
 }
 
+/// Right-align the given (0-based) columns — for numbers, which read best flush-right.
+pub fn right_align(t: &mut comfy_table::Table, cols: &[usize]) {
+    for &c in cols {
+        if let Some(col) = t.column_mut(c) {
+            col.set_cell_alignment(comfy_table::CellAlignment::Right);
+        }
+    }
+}
+
 /// Determinate `pos/len` progress bar on stderr.
 pub fn progress(len: u64, msg: &str) -> ProgressBar {
     let pb = ProgressBar::with_draw_target(Some(len), ProgressDrawTarget::stderr());

@@ -257,11 +257,15 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         }
     };
     let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let dangling = if g.dangling_edges > 0 {
+        format!(", {} dangling", g.dangling_edges)
+    } else {
+        String::new()
+    };
     comind::ui::note(&format!(
-        "graph: {} symbols, {} edges, {} dangling",
+        "graph: {} symbols, {} edges{dangling}",
         g.node_count(),
         g.edge_count(),
-        g.dangling_edges
     ));
 
     let Some(idx) = g.lookup(focus) else {
@@ -281,7 +285,12 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         }
     }
     if let Some(c) = &z.container {
-        comind::ui::field("in", &format!("{}  ({})", c.name, c.location));
+        // Drop the redundant location when the container is the file itself.
+        if c.kind.eq_ignore_ascii_case("file") {
+            comind::ui::field("in", &c.name);
+        } else {
+            comind::ui::field("in", &format!("{}  ({})", c.name, c.location));
+        }
     }
     print_group("calls", &z.callees, 8);
     print_group("called by", &z.callers, 8);
@@ -303,6 +312,7 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         for (repo, n) in &by_repo {
             t.add_row(vec![repo.clone(), n.to_string()]);
         }
+        comind::ui::right_align(&mut t, &[1]); // dependents
         println!("{t}");
     }
 
@@ -311,9 +321,9 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
     let pack = g.context_pack(idx, BUDGET);
     let total: usize = pack.iter().map(|(_, t)| t).sum();
     comind::ui::header(&format!(
-        "context pack for changing `{}` (~{total} tokens, budget {BUDGET}): {} symbols",
+        "context pack for changing `{}` (~{total} tokens, budget {BUDGET}): {}",
         z.focus.as_ref().map_or("?", |f| f.name.as_str()),
-        pack.len()
+        plural(pack.len(), "symbol")
     ));
     if !pack.is_empty() {
         let mut t = comind::ui::table(&["symbol", "location"]);
@@ -390,7 +400,11 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     if markdown {
         print!("{}", comind::search::markdown(query, &hits));
     } else {
-        comind::ui::header(&format!("search: {query:?}"));
+        comind::ui::header(&format!("search: \"{query}\""));
+        if hits.is_empty() {
+            comind::ui::note("no matches — try a broader query, or build the index with --embed");
+            return ExitCode::SUCCESS;
+        }
         let mut t = comind::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
         for h in &hits {
             t.add_row(vec![
@@ -402,6 +416,7 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
                 h.summary.clone().unwrap_or_default(),
             ]);
         }
+        comind::ui::right_align(&mut t, &[0, 3]); // score, deps
         println!("{t}");
     }
     ExitCode::SUCCESS
@@ -786,12 +801,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
             let trace = g
                 .thread(idx, 4)
                 .iter()
-                .map(|h| {
-                    format!(
-                        "d{} {:?} {} {}",
-                        h.depth, h.via, h.node.name, h.node.location
-                    )
-                })
+                .map(|h| format!("d{} {} {} {}", h.depth, h.via, h.node.name, h.node.location))
                 .collect::<Vec<_>>()
                 .join("\n");
             Some((
@@ -885,16 +895,19 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     // Live forward call trace.
     let hops = g.thread(idx, 4);
     comind::ui::header(&format!("flow trace from `{focus}` ({} steps)", hops.len()));
-    if !hops.is_empty() {
+    if hops.is_empty() {
+        comind::ui::note("no outgoing calls from here");
+    } else {
         let mut t = comind::ui::table(&["depth", "via", "symbol", "location"]);
         for h in &hops {
             t.add_row(vec![
                 format!("d{}", h.depth),
-                format!("{:?}", h.via),
+                h.via.to_string(),
                 h.node.name.clone(),
                 h.node.location.clone(),
             ]);
         }
+        comind::ui::right_align(&mut t, &[0]);
         println!("{t}");
     }
     ExitCode::SUCCESS
@@ -1171,6 +1184,15 @@ fn run_enrich(
 
 fn truncate_lines(s: &str, n: usize) -> String {
     s.lines().take(n).collect::<Vec<_>>().join("\n")
+}
+
+/// `n word` / `n words` — naive English pluralization for count phrases.
+fn plural(n: usize, word: &str) -> String {
+    if n == 1 {
+        format!("{n} {word}")
+    } else {
+        format!("{n} {word}s")
+    }
 }
 
 /// Turn a LanceDB "dataset/table not found" error into an actionable one-liner, hiding the raw

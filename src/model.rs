@@ -68,6 +68,29 @@ pub enum EdgeKind {
     ParticipatesIn,
 }
 
+impl EdgeKind {
+    /// Stable lowercase label for user- and agent-facing output (not Rust `Debug`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EdgeKind::Contains => "contains",
+            EdgeKind::Imports => "imports",
+            EdgeKind::Calls => "calls",
+            EdgeKind::Inherits => "inherits",
+            EdgeKind::Implements => "implements",
+            EdgeKind::References => "references",
+            EdgeKind::Defines => "defines",
+            EdgeKind::Uses => "uses",
+            EdgeKind::ParticipatesIn => "participates_in",
+        }
+    }
+}
+
+impl std::fmt::Display for EdgeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Identifier for a repository within the federated index.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RepoId(pub String);

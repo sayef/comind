@@ -71,10 +71,11 @@ pub fn markdown(query: &str, hits: &[SearchHit]) -> String {
     for (i, h) in hits.iter().enumerate() {
         let _ = write!(
             o,
-            "{}. **{}** _{}_ — `{}`  ·  {} deps",
+            "{}. **{}** _{}_  ·  score {:.3}  ·  `{}`  ·  {} deps",
             i + 1,
             h.name,
             h.kind,
+            h.score,
             h.location,
             h.deps
         );
