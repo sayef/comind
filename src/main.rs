@@ -408,8 +408,10 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() > n {
-        format!("{}…", &s[..n - 1])
+    // Count by characters, not bytes, so multibyte UTF-8 never splits mid-codepoint.
+    if s.chars().count() > n {
+        let cut = n.saturating_sub(1);
+        format!("{}…", s.chars().take(cut).collect::<String>())
     } else {
         s.to_string()
     }
@@ -562,6 +564,10 @@ fn cmd_link(
 ) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
+    if let Some(bad) = repos.iter().find(|p| !Path::new(p).is_dir()) {
+        comind::ui::err(&format!("no such repo directory: {bad}"));
+        return ExitCode::FAILURE;
+    }
     comind::ui::header(&format!("Parsing {} repo(s)", repos.len()));
     for path in repos {
         let name = repo_name(path);
@@ -611,8 +617,16 @@ fn cmd_link(
             .load_preset(comfy_table::presets::UTF8_FULL)
             .set_header(vec!["symbol", "defined-in", "repos", "refs"]);
         for (descriptor, (def_repo, importers, refs)) in ranked.iter().take(15) {
-            let short = if descriptor.len() > 46 {
-                format!("…{}", &descriptor[descriptor.len() - 45..])
+            let short = if descriptor.chars().count() > 46 {
+                let tail: String = descriptor
+                    .chars()
+                    .rev()
+                    .take(45)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                format!("…{tail}")
             } else {
                 descriptor.clone()
             };
@@ -1102,18 +1116,27 @@ fn run_enrich(
         pb.finish_and_clear();
         out
     };
+    let mut generated = 0usize;
     for (s, r) in to_call.iter().zip(results) {
         if let Some(e) = r {
             rows.push((s.id.clone(), e.summary, e.queries));
+            generated += 1;
         }
     }
+    // rows = reused (prior) + generated (this run); failed API calls are dropped, so derive
+    // `reused` from the total to avoid underflow when some calls fail.
+    let reused = rows.len().saturating_sub(generated);
+    let failed = items.len().saturating_sub(generated);
 
     match comind::index::write_enrichment_blocking(dst, &rows) {
         Ok(v) => comind::ui::ok(&format!(
-            "enrichment v{v}: {} symbols ({} reused, {} generated)",
+            "enrichment v{v}: {} symbols ({reused} reused, {generated} generated{})",
             rows.len(),
-            rows.len() - items.len(),
-            items.len()
+            if failed > 0 {
+                format!(", {failed} failed")
+            } else {
+                String::new()
+            }
         )),
         Err(e) => {
             comind::ui::err(&format!("write enrichment failed: {e:#}"));
@@ -1162,6 +1185,10 @@ fn cmd_index(
     // `--since` implies incremental.
     let incremental = incremental || since.is_some();
     let root = Path::new(repo);
+    if !root.is_dir() {
+        comind::ui::err(&format!("no such repo directory: {repo}"));
+        return ExitCode::FAILURE;
+    }
     let repo_name = repo_name(repo);
     // Same default location `link` writes to, so `search`/`serve` find it with zero config.
     let dst = format!(
@@ -1257,8 +1284,9 @@ fn cmd_index(
     ExitCode::SUCCESS
 }
 
-fn short(sha: &str) -> &str {
-    &sha[..sha.len().min(8)]
+fn short(sha: &str) -> String {
+    // Char-safe: a `--since` ref can be non-ASCII, so never byte-slice it.
+    sha.chars().take(8).collect()
 }
 
 /// Incremental index: reparse only files changed since `base`, drop symbols/edges of
@@ -1341,4 +1369,25 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         edges.len()
     ));
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{short, truncate};
+
+    #[test]
+    fn truncate_is_char_safe() {
+        // Multibyte chars near the boundary must not panic (byte-slicing would).
+        assert_eq!(truncate("abc", 5), "abc");
+        assert_eq!(truncate("日本語テキスト", 3), "日本…");
+        assert_eq!(truncate("—↳“smart”", 3), "—↳…");
+        assert_eq!(truncate("x", 0), "…"); // n == 0 must not underflow
+    }
+
+    #[test]
+    fn short_is_char_safe() {
+        assert_eq!(short("abcdef1234"), "abcdef12");
+        assert_eq!(short("日本語branch"), "日本語branc"); // 8 chars, no byte-boundary panic
+        assert_eq!(short("abc"), "abc");
+    }
 }
