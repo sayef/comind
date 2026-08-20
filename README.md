@@ -67,7 +67,7 @@ Zero-config: with no `--to`/`--from`, comind reads and writes a default index lo
 (`~/.local/share/comind`, XDG-aware — see `comind config path`).
 
 ```bash
-comind link ../service-a --embed        # build → default index dir
+comind index . --embed                  # index this repo → default index dir
 comind search "how do we connect to postgres"   # search it, no path needed
 comind serve                            # MCP server over the default index
 ```
@@ -108,8 +108,8 @@ is also attached; use `serve --format json` for raw JSON).
 
 | Command | Purpose |
 |---|---|
-| `comind link <repos…> --to <uri> [--embed] [--enrich] [--flows] [--incremental]` | Build the cross-repo org index |
-| `comind index <repo> --to <uri> [--incremental]` | Index a single repo |
+| `comind index <repo> [--embed] [--enrich] [--flows] [--incremental]` | Index a single repo |
+| `comind link <repos…> [--embed] [--enrich] [--flows] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
 | `comind explore <focus> --from <uri>` | Zoom, blast radius, and context pack for a symbol |
 | `comind search <query…> --from <uri> [--format md]` | Graph-aware hybrid code search |
 | `comind flow <focus> --from <uri>` | Pre-generated flow walkthrough + live call trace |

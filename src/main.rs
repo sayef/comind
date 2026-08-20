@@ -24,13 +24,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Index a single repo into the LanceDB store
+    /// Index a single repo (searchable by default)
     Index {
         /// Repository path
         repo: String,
         /// Index location (default: configured index dir; local path or s3://…)
         #[arg(long)]
         to: Option<String>,
+        /// Compute vector embeddings (enables hybrid search)
+        #[arg(long)]
+        embed: bool,
+        /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
+        #[arg(long)]
+        enrich: bool,
+        /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
+        #[arg(long)]
+        flows: bool,
         /// Reparse only files changed since the last indexed commit
         #[arg(long)]
         incremental: bool,
@@ -38,7 +47,7 @@ enum Cmd {
         #[arg(long)]
         since: Option<String>,
     },
-    /// Build the cross-repo org index from one or more repos
+    /// Link several repos into one cross-repo index (adds cross-repo edges + blast radius)
     Link {
         /// Repository paths
         #[arg(required = true)]
@@ -132,9 +141,20 @@ fn main() -> ExitCode {
         Cmd::Index {
             repo,
             to,
+            embed,
+            enrich,
+            flows,
             incremental,
             since,
-        } => cmd_index(&repo, to.as_deref(), incremental, since.as_deref()),
+        } => cmd_index(
+            &repo,
+            to.as_deref(),
+            embed,
+            enrich,
+            flows,
+            incremental,
+            since.as_deref(),
+        ),
         Cmd::Link {
             repos,
             to,
@@ -452,11 +472,15 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
 }
 
 fn repo_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("repo")
-        .to_string()
+    let p = Path::new(path);
+    // Use the directory's own name; for `.`/`..`/relative paths, resolve to the real dir first.
+    match p.file_name().and_then(|n| n.to_str()) {
+        Some(n) if n != "." && n != ".." => n.to_string(),
+        _ => std::fs::canonicalize(p)
+            .ok()
+            .and_then(|c| c.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "repo".to_string()),
+    }
 }
 
 /// Parse several repos, resolve references across them, and report the cross-repo graph
@@ -1057,37 +1081,43 @@ fn truncate_lines(s: &str, n: usize) -> String {
     s.lines().take(n).collect::<Vec<_>>().join("\n")
 }
 
-fn cmd_index(repo: &str, to: Option<&str>, incremental: bool, since: Option<&str>) -> ExitCode {
+fn cmd_index(
+    repo: &str,
+    to: Option<&str>,
+    embed: bool,
+    enrich: bool,
+    flows: bool,
+    incremental: bool,
+    since: Option<&str>,
+) -> ExitCode {
     // `--since` implies incremental.
     let incremental = incremental || since.is_some();
     let root = Path::new(repo);
-    let repo_name = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("repo")
-        .to_string();
-    let to_uri = comind::config::Config::load().index_dir(to);
-    let dst = Some(format!("{}/{repo_name}", to_uri.trim_end_matches('/')));
+    let repo_name = repo_name(repo);
+    // Same default location `link` writes to, so `search`/`serve` find it with zero config.
+    let dst = format!(
+        "{}/_graph",
+        comind::config::Config::load()
+            .index_dir(to)
+            .trim_end_matches('/')
+    );
 
     // Incremental path: diff against a base commit and reparse only what changed.
     if incremental {
-        let Some(dst) = &dst else {
-            eprintln!("comind index: --incremental requires --to <uri>");
-            return ExitCode::FAILURE;
-        };
         let base = since
             .map(str::to_string)
-            .or_else(|| comind::index::read_repo_meta_blocking(dst).ok().flatten());
+            .or_else(|| comind::index::read_repo_meta_blocking(&dst).ok().flatten());
         match base {
-            Some(base) => return incremental_index(root, &repo_name, dst, &base),
-            None => eprintln!("(no recorded base commit — doing a full index)"),
+            Some(base) => return incremental_index(root, &repo_name, &dst, &base),
+            None => comind::ui::note("no recorded base commit — doing a full index"),
         }
     }
 
+    comind::ui::header(&format!("Indexing {repo_name}"));
     let out = match comind::parse::parse_repo(root, &repo_name) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("comind index: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -1106,41 +1136,53 @@ fn cmd_index(repo: &str, to: Option<&str>, incremental: bool, since: Option<&str
         .iter()
         .filter(|e| e.kind == EdgeKind::Contains)
         .count();
-
-    println!("repo: {repo_name}");
-    println!("symbols: {}", out.symbols.len());
+    comind::ui::field("symbols", &out.symbols.len().to_string());
     for (k, n) in &by_kind {
-        println!("  {k:<10} {n}");
+        comind::ui::note(&format!("{k:<10} {n}"));
     }
-    println!(
-        "edges: {} (contains={contains}, calls={calls})",
-        out.edges.len()
+    comind::ui::field(
+        "edges",
+        &format!("{} (contains={contains}, calls={calls})", out.edges.len()),
     );
 
-    println!("\nsample callables:");
-    for s in out
-        .symbols
-        .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
-        .take(8)
-    {
-        println!("  {}", s.id.descriptor);
+    comind::ui::header("Persisting");
+    comind::ui::step(&format!("writing graph to {dst}"));
+    match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges) {
+        Ok((sv, ev)) => comind::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
+        Err(e) => {
+            comind::ui::err(&format!("write failed: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    }
+    // Record the HEAD commit so later runs can index incrementally.
+    if let Ok(head) = comind::git::head_commit(root) {
+        let _ = comind::index::write_repo_meta_blocking(&dst, &repo_name, &head);
+        comind::ui::note(&format!("recorded commit {}", short(&head)));
     }
 
-    if let Some(dst) = &dst {
-        // Persist to LanceDB under a per-repo prefix, then read back to prove the round-trip.
-        println!("\npersisting to {dst} ...");
-        match comind::index::write_graph_blocking(dst, &out.symbols, &out.edges) {
-            Ok((sv, ev)) => println!("wrote LanceDB versions: symbols v{sv}, edges v{ev}"),
-            Err(e) => {
-                eprintln!("comind index: write failed: {e:#}");
-                return ExitCode::FAILURE;
-            }
+    // Optional enrichment steps — recompute everything (full index).
+    let all: HashSet<String> = out.symbols.iter().map(|s| s.id.render()).collect();
+    let cfg = comind::config::Config::load();
+    if embed {
+        if let ExitCode::FAILURE = run_embed(&dst, &out.symbols, &all, false) {
+            return ExitCode::FAILURE;
         }
-        // Record the HEAD commit so later runs can index incrementally.
-        if let Ok(head) = comind::git::head_commit(root) {
-            let _ = comind::index::write_repo_meta_blocking(dst, &repo_name, &head);
-            println!("recorded commit {}", short(&head));
+    }
+    if enrich {
+        if let ExitCode::FAILURE = run_enrich(
+            &dst,
+            &out.symbols,
+            &out.edges,
+            cfg.max_enrich(),
+            &all,
+            false,
+        ) {
+            return ExitCode::FAILURE;
+        }
+    }
+    if flows {
+        if let ExitCode::FAILURE = run_flows(&dst, &out.symbols, &out.edges, cfg.max_flows()) {
+            return ExitCode::FAILURE;
         }
     }
     ExitCode::SUCCESS
