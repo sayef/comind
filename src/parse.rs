@@ -304,8 +304,26 @@ fn is_call(lang: &Language, node_kind: &str) -> bool {
 /// `None` when `node` is not an import statement. Relative imports are skipped (they
 /// resolve within the same package, not cross-repo).
 fn import_targets(node: Node, lang: &Language, src: &[u8]) -> Option<Vec<String>> {
+    // TypeScript/JavaScript: `import … from "mod"` / `export … from "mod"`. The module specifier
+    // is the `source` string child. Skip relative (`./`, `../`) imports.
+    if matches!(lang, Language::TypeScript | Language::JavaScript) {
+        match node.kind() {
+            "import_statement" | "export_statement" => {
+                let s = node.child_by_field_name("source")?;
+                let m = s
+                    .utf8_text(src)
+                    .ok()?
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                if m.is_empty() || m.starts_with('.') {
+                    return Some(vec![]);
+                }
+                return Some(vec![m.to_string()]);
+            }
+            _ => return None,
+        }
+    }
     if !matches!(lang, Language::Python) {
-        return None; // Python carries the cross-repo signal we care about first
+        return None;
     }
     match node.kind() {
         // from <module> import a, b as c

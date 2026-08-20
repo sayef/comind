@@ -130,7 +130,14 @@ fn import_histogram(
     // module -> set of importing files
     let mut mods: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for e in edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
-        let module = e.dst.descriptor.split('/').next().unwrap_or("").to_string();
+        // top-level module: keep `@scope/pkg` for scoped npm packages, else the first segment.
+        let d = &e.dst.descriptor;
+        let parts: Vec<&str> = d.split('/').collect();
+        let module = if d.starts_with('@') && parts.len() >= 2 {
+            format!("{}/{}", parts[0], parts[1])
+        } else {
+            parts.first().unwrap_or(&"").to_string()
+        };
         if module.is_empty() {
             continue;
         }
