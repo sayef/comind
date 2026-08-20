@@ -24,7 +24,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Index a single repo (searchable by default)
+    /// Index a single repo into the default index dir (add --embed to enable search)
     Index {
         /// Repository path
         repo: String,
@@ -251,7 +251,7 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         match comind::index::read_graph_blocking(&uri) {
             Ok(x) => x,
             Err(e) => {
-                comind::ui::err(&format!("load from {uri} failed: {e:#}"));
+                comind::ui::err(&friendly_load_err(&uri, &e));
                 return ExitCode::FAILURE;
             }
         }
@@ -348,7 +348,7 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
-            comind::ui::err(&format!("load from {uri} failed: {e:#}"));
+            comind::ui::err(&friendly_load_err(uri, &e));
             return ExitCode::FAILURE;
         }
     };
@@ -480,7 +480,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
     match rt.block_on(comind::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&friendly_load_err(uri, &e));
             ExitCode::FAILURE
         }
     }
@@ -849,7 +849,7 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
-            comind::ui::err(&format!("load from {uri} failed: {e:#}"));
+            comind::ui::err(&friendly_load_err(uri, &e));
             return ExitCode::FAILURE;
         }
     };
@@ -1171,6 +1171,17 @@ fn run_enrich(
 
 fn truncate_lines(s: &str, n: usize) -> String {
     s.lines().take(n).collect::<Vec<_>>().join("\n")
+}
+
+/// Turn a LanceDB "dataset/table not found" error into an actionable one-liner, hiding the raw
+/// internal backtrace. `uri` is the internal `<root>/_graph` path; we show the root the user gave.
+fn friendly_load_err(uri: &str, e: &anyhow::Error) -> String {
+    let root = uri.trim_end_matches("/_graph");
+    if e.to_string().contains("not found") {
+        format!("no index at {root} — build one first: comind index <repo> --embed")
+    } else {
+        format!("load from {root} failed: {e:#}")
+    }
 }
 
 fn cmd_index(
