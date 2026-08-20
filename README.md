@@ -63,7 +63,7 @@ cargo run --example index_and_search -- ../some-repo
 
 ## Quick start
 
-Zero-config: with no `--to`/`--from`, comind reads and writes a default index location
+Zero-config: with no `--index-dir`, comind reads and writes a default index location
 (`~/.local/share/comind`, XDG-aware — see `comind config path`).
 
 ```bash
@@ -72,19 +72,20 @@ comind search "how do we connect to postgres"   # search it, no path needed
 comind serve                            # MCP server over the default index
 ```
 
-Explicit locations — a local dir or `s3://…`, shared across a team:
+Explicit location — a local dir or `s3://…`, shared across a team. The **same `--index-dir`**
+builds and reads it (comind manages the internal dataset layout):
 
 ```bash
 # 1. Build the org index from several repos, with embeddings + full enrichment
-comind link ../pkg-common ../service-a --to ./comind-index/org --embed --enrich
+comind link ../pkg-common ../service-a --index-dir ./comind-index/org --embed --enrich
 
-# 2. Explore / search the prebuilt index (instant, no re-parse). Read commands point at <root>/_graph
-comind explore Settings --from ./comind-index/org/_graph        # zoom + ripple + context pack
-comind search  "how do we connect to postgres" --from ./comind-index/org/_graph
-comind flow    run_migrations --from ./comind-index/org/_graph  # flow walkthrough + call trace
+# 2. Explore / search the prebuilt index (instant, no re-parse)
+comind explore Settings --index-dir ./comind-index/org        # zoom + ripple + context pack
+comind search  "how do we connect to postgres" --index-dir ./comind-index/org
+comind flow    run_migrations --index-dir ./comind-index/org  # flow walkthrough + call trace
 
 # 3. Serve it to an agent over MCP
-comind serve --from ./comind-index/org/_graph
+comind serve --index-dir ./comind-index/org
 ```
 
 Add to your MCP client (e.g. Claude Code):
@@ -94,7 +95,7 @@ Add to your MCP client (e.g. Claude Code):
   "mcpServers": {
     "comind": {
       "command": "/path/to/comind",
-      "args": ["serve", "--from", "./comind-index/org/_graph"]
+      "args": ["serve", "--index-dir", "./comind-index/org"]
     }
   }
 }
@@ -110,16 +111,16 @@ is also attached; use `serve --format json` for raw JSON).
 |---|---|
 | `comind index <repo> [--embed] [--enrich] [--flows] [--incremental]` | Index a single repo |
 | `comind link <repos…> [--embed] [--enrich] [--flows] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
-| `comind explore <focus> --from <uri>` | Zoom, blast radius, and context pack for a symbol |
-| `comind search <query…> --from <uri> [--format md]` | Graph-aware hybrid code search |
-| `comind flow <focus> --from <uri>` | Pre-generated flow walkthrough + live call trace |
-| `comind changed <repo> --since <sha>` | Files changed since a commit (git diff) |
-| `comind serve --from <uri> [--format md\|json]` | MCP server over stdio |
+| `comind explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
+| `comind search <query…> [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
+| `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
+| `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
+| `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for the full flags of any subcommand.
 
-`<uri>` is a local directory or an `s3://…` path; `--to`/`--from` are optional and default to the
+`--index-dir` is a local directory or an `s3://…` path; it is optional and defaults to the
 configured index location. `--enrich`/`--flows` are opt-in and send code signatures to the
 configured LLM provider (see below); everything else stays local. Both cover the **whole codebase**
 by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
@@ -184,7 +185,7 @@ config init` scaffolds it). Precedence, highest first: **CLI flag → environmen
 file → built-in default**.
 
 ```toml
-index_dir   = "~/.local/share/comind"   # default --to / --from (local path or s3://…)
+index_dir   = "~/.local/share/comind"   # default --index-dir (local path or s3://…)
 llm_model   = "gpt-4o-mini"
 embed_model = "minishlab/potion-base-8M"
 format      = "md"    # default when --format is absent (search: md|table, serve: md|json)

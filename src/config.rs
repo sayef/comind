@@ -58,14 +58,10 @@ impl Config {
         default_index_dir()
     }
 
-    /// Resolve the graph dataset to read from. An explicit flag is used verbatim (callers pass
-    /// the full `<root>/_graph` path); otherwise default to `<index_dir>/_graph`, matching where
-    /// `link` writes.
+    /// Resolve the graph dataset to read from: `<index_dir>/_graph`. The `_graph` suffix is an
+    /// internal detail — callers pass the index dir (root), never the dataset path.
     pub fn graph_dir(&self, flag: Option<&str>) -> String {
-        match flag {
-            Some(f) => expand_tilde(f),
-            None => format!("{}/_graph", self.index_dir(None).trim_end_matches('/')),
-        }
+        format!("{}/_graph", self.index_dir(flag).trim_end_matches('/'))
     }
 
     /// Resolve the LLM model: `COMIND_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.

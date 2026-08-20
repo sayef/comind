@@ -13,8 +13,8 @@ use clap::{Parser, Subcommand};
 
 /// Cross-repo code intelligence for coding agents.
 ///
-/// `--to`/`--from` default to the configured index dir (`comind config path`); both accept a local
-/// path or an `s3://bucket/prefix` URI.
+/// `--index-dir` defaults to the configured index dir (`comind config path`) and accepts a local
+/// path or an `s3://bucket/prefix` URI. The same value is used to build and to read an index.
 #[derive(Parser)]
 #[command(name = "comind", version, about, long_about = None)]
 struct Cli {
@@ -28,9 +28,9 @@ enum Cmd {
     Index {
         /// Repository path
         repo: String,
-        /// Index location (default: configured index dir; local path or s3://…)
-        #[arg(long)]
-        to: Option<String>,
+        /// Index directory — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
         /// Compute vector embeddings (enables hybrid search)
         #[arg(long)]
         embed: bool,
@@ -52,9 +52,9 @@ enum Cmd {
         /// Repository paths
         #[arg(required = true)]
         repos: Vec<String>,
-        /// Index location (default: configured index dir; local path or s3://…)
-        #[arg(long)]
-        to: Option<String>,
+        /// Index directory — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
         /// Compute vector embeddings (enables hybrid search)
         #[arg(long)]
         embed: bool,
@@ -72,9 +72,9 @@ enum Cmd {
     Explore {
         /// Symbol name or fragment to focus on
         focus: String,
-        /// Prebuilt index to read (default: configured <index>/_graph)
-        #[arg(long)]
-        from: Option<String>,
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
         /// Repo paths to parse on the fly instead of reading an index
         repos: Vec<String>,
     },
@@ -83,9 +83,9 @@ enum Cmd {
         /// Natural-language query
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
-        /// Prebuilt index to read (default: configured <index>/_graph)
-        #[arg(long)]
-        from: Option<String>,
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
         /// Output format: `md` or `table` (default from config, else `md`)
         #[arg(long)]
         format: Option<String>,
@@ -105,15 +105,15 @@ enum Cmd {
     Flow {
         /// Entry-point symbol
         focus: String,
-        /// Prebuilt index to read (default: configured <index>/_graph)
-        #[arg(long)]
-        from: Option<String>,
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
     },
     /// Run the MCP server over stdio
     Serve {
-        /// Prebuilt index to read (default: configured <index>/_graph)
-        #[arg(long)]
-        from: Option<String>,
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
         /// Output format handed to the agent: `md` (default) or `json`
         #[arg(long)]
         format: Option<String>,
@@ -144,7 +144,7 @@ fn main() -> ExitCode {
     match Cli::parse().cmd {
         Cmd::Index {
             repo,
-            to,
+            index_dir,
             embed,
             enrich,
             flows,
@@ -152,7 +152,7 @@ fn main() -> ExitCode {
             since,
         } => cmd_index(
             &repo,
-            to.as_deref(),
+            index_dir.as_deref(),
             embed,
             enrich,
             flows,
@@ -161,22 +161,33 @@ fn main() -> ExitCode {
         ),
         Cmd::Link {
             repos,
-            to,
+            index_dir,
             embed,
             enrich,
             flows,
             incremental,
         } => {
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
-            cmd_link(&repos, to.as_deref(), embed, enrich, flows, incremental)
+            cmd_link(
+                &repos,
+                index_dir.as_deref(),
+                embed,
+                enrich,
+                flows,
+                incremental,
+            )
         }
-        Cmd::Explore { focus, from, repos } => {
+        Cmd::Explore {
+            focus,
+            index_dir,
+            repos,
+        } => {
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
-            cmd_explore(&focus, from.as_deref(), &repos)
+            cmd_explore(&focus, index_dir.as_deref(), &repos)
         }
         Cmd::Search {
             query,
-            from,
+            index_dir,
             format,
             md,
         } => {
@@ -184,11 +195,15 @@ fn main() -> ExitCode {
             let fmt = if md { Some("md".to_string()) } else { format };
             let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            cmd_search(&query.join(" "), from.as_deref(), markdown)
+            cmd_search(&query.join(" "), index_dir.as_deref(), markdown)
         }
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
-        Cmd::Flow { focus, from } => cmd_flow(&focus, from.as_deref()),
-        Cmd::Serve { from, format, json } => {
+        Cmd::Flow { focus, index_dir } => cmd_flow(&focus, index_dir.as_deref()),
+        Cmd::Serve {
+            index_dir,
+            format,
+            json,
+        } => {
             // CLI flag → config → default. `json` = raw JSON; anything else = markdown.
             let fmt = if json {
                 Some("json".to_string())
@@ -197,7 +212,7 @@ fn main() -> ExitCode {
             };
             let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
             let markdown = !matches!(fmt.as_str(), "json");
-            cmd_serve(from.as_deref(), markdown)
+            cmd_serve(index_dir.as_deref(), markdown)
         }
         Cmd::Config { action } => cmd_config(action),
     }
@@ -220,31 +235,24 @@ fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String>
 
 /// `comind explore <focus> <repo>...` — the agent-facing view: zoom, blast radius, and a
 /// token-budgeted context pack for one symbol, across the whole corpus.
-fn cmd_explore(focus: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
-    // No repos and no --from: fall back to the configured index location.
-    let default_uri = comind::config::Config::load().graph_dir(None);
-    let from = from.or_else(|| repos.is_empty().then_some(default_uri.as_str()));
-
-    // Fast path: load the prebuilt graph from LanceDB (no re-parse). Otherwise parse+resolve.
-    let (symbols, edges) = match from {
-        Some(uri) => match comind::index::read_graph_blocking(uri) {
+fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode {
+    // With repo paths and no --index-dir, parse them on the fly; otherwise read the prebuilt
+    // index (flag or configured default — comind resolves the internal dataset path).
+    let (symbols, edges) = if index_dir.is_none() && !repos.is_empty() {
+        match parse_and_resolve(repos) {
+            Ok(x) => x,
+            Err(e) => {
+                comind::ui::err(&e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let uri = comind::config::Config::load().graph_dir(index_dir);
+        match comind::index::read_graph_blocking(&uri) {
             Ok(x) => x,
             Err(e) => {
                 comind::ui::err(&format!("load from {uri} failed: {e:#}"));
                 return ExitCode::FAILURE;
-            }
-        },
-        None => {
-            if repos.is_empty() {
-                comind::ui::err("give --from <uri> or one or more <repo-path>");
-                return ExitCode::FAILURE;
-            }
-            match parse_and_resolve(repos) {
-                Ok(x) => x,
-                Err(e) => {
-                    comind::ui::err(&e);
-                    return ExitCode::FAILURE;
-                }
             }
         }
     };

@@ -6,7 +6,7 @@ Lance's newest version manifest is the "latest" pointer every consumer reads —
 staleness. comind needs **no remote git credentials** itself: the CI job clones the repos (with its
 token); comind indexes the local checkouts and their `.git`.
 
-The output destination (`--to`) is either a **local directory** (published as a downloadable CI
+The output location (`--index-dir`) is either a **local directory** (published as a downloadable CI
 artifact) or an **`s3://…`** path. The shipped GitHub workflow uses the local-path + artifact
 approach; the GitLab example below uses S3. Both are equivalent.
 
@@ -23,11 +23,11 @@ schedule (and on demand). To enable it:
 - **Secret** `OPENAI_API_KEY` *(optional)* — turns on `--enrich`.
 
 It clones the listed repos, runs `comind link … --embed --incremental`, and uploads the resulting
-`_graph` directory as the `comind-index` artifact. Consume it with:
+index directory (which contains the internal `_graph` dataset) as the `comind-index` artifact. Consume it with:
 
 ```bash
-gh run download -R <owner>/comind -n comind-index   # → ./_graph
-comind serve --from ./_graph
+gh run download -R <owner>/comind -n comind-index   # → ./ (contains _graph)
+comind serve --index-dir .
 ```
 
 ## Member repos trigger a reindex on push to main
@@ -85,7 +85,7 @@ index:
     # … more repos
   script:
     - cargo build --release
-    - ./target/release/comind link repos/* --to "$COMIND_S3_URI" --embed --incremental
+    - ./target/release/comind link repos/* --index-dir "$COMIND_S3_URI" --embed --incremental
 ```
 
 Secrets: `COMIND_REPO_TOKEN` (read repos), AWS creds (OIDC role or keys), and an LLM key if using
@@ -99,7 +99,7 @@ endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 
 ## Per-repo incremental (optimization)
 
-`comind index <repo> --to <uri> --incremental` diffs the last-indexed commit (stored in the Lance
+`comind index <repo> --index-dir <dir> --incremental` diffs the last-indexed commit (stored in the Lance
 `repo_meta` table) against HEAD and reparses only changed files — useful for keeping a per-repo
 dataset fresh cheaply. Today the central `link` re-parses sources; org-level re-merge from per-repo
 datasets is a future optimization.

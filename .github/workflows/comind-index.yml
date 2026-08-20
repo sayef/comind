@@ -78,17 +78,18 @@ jobs:
         run: |
           BIN=comind/target/release/comind
           ENRICH=""
-          [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich --enrich-top 200"
-          "$BIN" link repos/*/ --to "$INDEX_DIR" --embed --incremental $ENRICH
+          [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich"
+          COMIND_MAX_ENRICH=200 "$BIN" link repos/*/ --index-dir "$INDEX_DIR" --embed --incremental $ENRICH
 
       - name: Upload index artifact
         uses: actions/upload-artifact@v4
         with:
           name: comind-index
-          path: ${{ runner.temp }}/comind-index/org/_graph
+          # Upload the index dir (contains _graph) so consumers point --index-dir at it.
+          path: ${{ runner.temp }}/comind-index/org
           retention-days: 7
           if-no-files-found: error
 
 # Consume it: `gh run download -R <owner>/comind -n comind-index` then
-#   comind serve  --from ./_graph      (MCP)
-#   comind search "…" --from ./_graph
+#   comind serve  --index-dir .      (MCP)
+#   comind search "…" --index-dir .
