@@ -1,6 +1,6 @@
 [package]
 name = "comind"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.94"
 license = "MIT"
@@ -13,7 +13,7 @@ keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
 categories = ["development-tools", "command-line-utilities"]
 # Dev-only files that shouldn't ship in the published crate (rust-toolchain.toml would otherwise
 # force our pinned toolchain on anyone running `cargo install`).
-exclude = ["rust-toolchain.toml", ".github", ".pre-commit-config.yaml", "docs"]
+exclude = ["rust-toolchain.toml", ".github", ".pre-commit-config.yaml", "docs", "assets", "scripts"]
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
 [lib]
