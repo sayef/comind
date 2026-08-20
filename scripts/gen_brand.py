@@ -25,6 +25,14 @@ C = 128          # center (256 viewBox)
 R = 104          # ring radius
 RX, RY = 10, 21  # petal half-axes
 PW = 4           # petal stroke width
+GRAPH_SCALE = 0.46
+GRAPH_SW = 17    # graph stroke width (in graph space)
+# Graph glyph geometry (Phosphor "graph"), in its own 256 space.
+LINES = [(177.23, 111.59, 150.77, 120.41), (181.06, 169.27, 146.94, 142.73),
+         (110.06, 143.94, 73.94, 176.06), (118.25, 106.07, 105.75, 77.93)]
+NODES = [(128, 128), (200, 104), (200, 184), (56, 192), (96, 56)]
+TILE_INNER = 0.86   # graph+ring scale inside the tiled icon
+TILE_RADIUS = 58    # tiled-icon corner radius (256 space)
 
 
 def _rgb(h):
@@ -61,14 +69,11 @@ def petals(stops, cx=C, cy=C, r=R, rx=RX, ry=RY, sw=PW):
     return "\n    ".join(out)
 
 
-def graph(ink, scale=0.46, cx=C, cy=C):
-    lines = [(177.23, 111.59, 150.77, 120.41), (181.06, 169.27, 146.94, 142.73),
-             (110.06, 143.94, 73.94, 176.06), (118.25, 106.07, 105.75, 77.93)]
-    nodes = [(128, 128), (200, 104), (200, 184), (56, 192), (96, 56)]
-    inner = "".join(f'<line x1="{a}" y1="{b}" x2="{c}" y2="{d}" stroke="{ink}"/>' for a, b, c, d in lines)
-    inner += "".join(f'<circle cx="{x}" cy="{y}" r="24" stroke="{ink}"/>' for x, y in nodes)
+def graph(ink, scale=GRAPH_SCALE, cx=C, cy=C):
+    inner = "".join(f'<line x1="{a}" y1="{b}" x2="{c}" y2="{d}" stroke="{ink}"/>' for a, b, c, d in LINES)
+    inner += "".join(f'<circle cx="{x}" cy="{y}" r="24" stroke="{ink}"/>' for x, y in NODES)
     return (f'<g transform="translate({cx} {cy}) scale({scale}) translate(-128 -124)" '
-            f'fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="17">{inner}</g>')
+            f'fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="{GRAPH_SW}">{inner}</g>')
 
 
 def mark_svg(stops, ink):

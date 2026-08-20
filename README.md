@@ -239,6 +239,7 @@ MIT.
 
 Logo/icon assets live in [`assets/`](assets/) — mark (`logo.svg` / `logo-dark.svg`), self-contained
 icon (`icon.svg`), wordmark + slogan lockups, and a social card (`og.svg`). They're generated from
-[`scripts/gen_brand.py`](scripts/gen_brand.py) (edit palette/geometry there); rasterize to PNG with
-[`scripts/render_pngs.sh`](scripts/render_pngs.sh). The graph glyph is adapted from the
+[`scripts/gen_brand.py`](scripts/gen_brand.py) (edit palette/geometry there); PNGs in
+[`assets/png/`](assets/png/) come from [`scripts/render_pngs.py`](scripts/render_pngs.py)
+(pure Python — `pip install pillow`, no browser). The graph glyph is adapted from the
 [Phosphor Icons](https://phosphoricons.com) `graph` glyph (MIT).
