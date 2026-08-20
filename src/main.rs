@@ -1562,14 +1562,51 @@ fn run_style_guides(
             .filter(|e| &e.src.package == repo)
             .cloned()
             .collect();
-        let evidence = comind::styleguide::evidence_block(root, &rsyms, &redges);
-        match rt.block_on(client.style_guide(repo, &evidence)) {
-            Ok(guide) => {
-                comind::ui::ok(&format!("{repo}: style guide"));
-                guide_rows.push((repo.clone(), guide));
-            }
-            Err(e) => comind::ui::warn(&format!("{repo}: style guide failed (non-fatal): {e:#}")),
+        let sections = comind::styleguide::build_sections(root, &rsyms, &redges);
+        if sections.is_empty() {
+            continue;
         }
+        let pb = comind::ui::progress(sections.len() as u64, &format!("{repo}: guide sections"));
+        // One focused LLM call per section, concurrently; preserves order for stitching.
+        let bodies: Vec<Option<String>> = rt.block_on(async {
+            use futures::StreamExt;
+            futures::stream::iter(sections.iter())
+                .map(|sec| {
+                    let (pb, client) = (&pb, &client);
+                    async move {
+                        let r = client
+                            .guide_section(repo, &sec.title, &sec.guidance, &sec.evidence)
+                            .await
+                            .ok();
+                        pb.inc(1);
+                        r
+                    }
+                })
+                .buffered(4)
+                .collect()
+                .await
+        });
+        pb.finish_and_clear();
+        // Stitch sections, dropping empties / "no convention" replies.
+        let mut doc = String::new();
+        for (sec, body) in sections.iter().zip(bodies) {
+            let body = body.unwrap_or_default();
+            let t = body.trim();
+            if t.is_empty() || t.eq_ignore_ascii_case("No consistent convention observed.") {
+                continue;
+            }
+            doc.push_str(&format!("## {}\n\n{}\n\n", sec.title, t));
+        }
+        if doc.is_empty() {
+            comind::ui::warn(&format!("{repo}: no sections generated"));
+            continue;
+        }
+        doc.push_str("\n_AI-generated from the codebase; review before enforcing._\n");
+        comind::ui::ok(&format!(
+            "{repo}: style guide ({} sections)",
+            doc.matches("\n## ").count() + 1
+        ));
+        guide_rows.push((repo.clone(), doc));
     }
     if !guide_rows.is_empty() {
         let _ = comind::index::write_style_guide_blocking(dst, &guide_rows);

@@ -1,170 +1,192 @@
-//! Evidence for the LLM style-guide synthesis.
+//! Evidence for the multi-pass LLM style-guide synthesis.
 //!
-//! Surface stats (naming casing, docstring style, idiom counts) can be *computed*, but the valuable
-//! conventions — how the repo uses its libraries, AWS/DB/HTTP I/O, its own shared modules — cannot
-//! be derived from statistics; the model has to read real code. So this assembles a bounded
-//! **evidence payload**: the dependency stack, an import-frequency histogram, and real code
-//! excerpts (a representative call-site per top dependency, plus entrypoint/config/test files),
-//! alongside the surface stats. `COMIND_DEBUG_EVIDENCE=1` prints the payload to stderr.
+//! A single prompt produces a shallow guide. Instead we split the guide into ~10 dimensions and
+//! hand each its OWN tailored evidence (real signatures for the parameters section, the biggest
+//! classes for design patterns, per-library call-sites for library usage, …), then run one focused
+//! LLM call per dimension and stitch the results. The valuable, non-surface conventions live in the
+//! code, so every section is grounded in real excerpts, dependency facts, or measured stats.
+//! `COMIND_DEBUG_EVIDENCE=1` prints each section's evidence to stderr.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
-const MAX_EXCERPTS: usize = 12;
-const EXCERPT_LINES: usize = 20;
-const CHAR_BUDGET: usize = 16000; // rough cap on the whole payload
-
-pub fn evidence_block(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> String {
-    let mut o = String::new();
-    file_tree(&mut o, symbols);
-    stack(&mut o, root);
-    let hist = import_histogram(&mut o, symbols, edges);
-    surface(&mut o, symbols, root);
-    excerpts(&mut o, root, symbols, &hist);
-    if o.len() > CHAR_BUDGET {
-        o.truncate(CHAR_BUDGET);
-        o.push_str("\n…(truncated)\n");
-    }
-    if std::env::var("COMIND_DEBUG_EVIDENCE").is_ok() {
-        eprintln!("\n----- evidence payload -----\n{o}\n----- end evidence -----\n");
-    }
-    o
+/// One dimension of the guide: a heading, guidance for the LLM, and the evidence it reasons over.
+pub struct Section {
+    pub title: String,
+    pub guidance: String,
+    pub evidence: String,
 }
 
-// ---- file tree -----------------------------------------------------------------------------
-fn file_tree(o: &mut String, symbols: &[&Symbol]) {
-    let mut dirs: BTreeMap<String, usize> = BTreeMap::new();
-    for s in symbols
+const EXCERPT_LINES: usize = 22;
+const SECTION_BUDGET: usize = 9000; // per-section evidence cap (chars)
+
+/// An evidence builder for one section.
+type EvFn = fn(&Ctx) -> String;
+
+/// Build every guide section for one repo. Reads source lazily (cached).
+pub fn build_sections(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> Vec<Section> {
+    let ctx = Ctx::new(root, symbols, edges);
+    let specs: &[(&str, &str, EvFn)] = &[
+        ("Stack & dependencies",
+         "Name each key dependency and, in one line, what the repo uses it for. Note the language/runtime + versions. Group first-party (their own) modules separately. No generic filler.",
+         ev_stack),
+        ("Project layout & architecture",
+         "Describe the directory responsibilities, the layering (e.g. routes→services→repositories→models), where entry points live, and how modules are wired. Cite real dirs/files. If layering isn't evident, say so.",
+         ev_layout),
+        ("Naming & formatting",
+         "State the casing per symbol kind (with the measured ratio), private-name convention, file/module naming, line length / quote style / indent from the tooling config. Give a real conforming example. Bans name the replacement.",
+         ev_naming),
+        ("Function signatures & parameters",
+         "From the real signatures: how are parameters typed, ordered, defaulted? keyword-only args, *args/**kwargs, return-type annotations, self/cls, async. Document the dominant signature shape with a real example; flag what to avoid.",
+         ev_signatures),
+        ("Types & data modeling",
+         "How is data modeled and validated — pydantic BaseModel / dataclasses / TypedDict / TS interfaces / zod? Where do models live, how are they named, how is validation done at boundaries? Quote a real model.",
+         ev_types),
+        ("Design patterns & idioms",
+         "Identify the recurring architectural patterns from the largest/most-central classes and decorated defs: base classes, dependency injection, factories, context managers, decorators, service/repository objects, the repo's own wrappers. Quote a real one and say when to follow it.",
+         ev_patterns),
+        ("Library & infra usage",
+         "For each major dependency shown, document the ONE idiomatic way this repo uses it, quoting a real call-site (file path). Prefer the repo's own wrapper over the raw library where one exists (e.g. AWS via a wrapper, not raw boto3). Include DB/HTTP access patterns.",
+         ev_library),
+        ("Error handling, logging & configuration",
+         "How are errors raised/caught (custom exceptions? broad except? Result types?), how is logging done (which logger, structured?), and how is configuration/secrets accessed (never hardcoded)? Quote real call-sites.",
+         ev_errlog),
+        ("Testing",
+         "Framework, test file location/naming, fixtures, how external I/O is mocked, assertion style. Quote a real test. If tests are sparse, say so.",
+         ev_testing),
+        ("Docstrings & comments",
+         "Dominant docstring style (Google/NumPy/reST/JSDoc) and when docs are expected (public API?), comment density/placement. Quote a real docstring. Don't demand docs the repo doesn't write.",
+         ev_docstrings),
+    ];
+    let debug = std::env::var("COMIND_DEBUG_EVIDENCE").is_ok();
+    specs
         .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::File))
-    {
-        let top = s.file_path.split('/').next().unwrap_or(".").to_string();
-        let key = if s.file_path.contains('/') {
-            format!("{top}/")
-        } else {
-            "(root)".into()
-        };
-        *dirs.entry(key).or_default() += 1;
-    }
-    let _ = writeln!(o, "## Layout (top-level dirs → file count)");
-    for (d, n) in dirs.iter() {
-        let _ = writeln!(o, "- {d}  {n}");
-    }
-    o.push('\n');
-}
-
-// ---- dependency stack ----------------------------------------------------------------------
-fn stack(o: &mut String, root: &Path) {
-    let read = |n: &str| std::fs::read_to_string(root.join(n)).ok();
-    let mut deps: Vec<String> = Vec::new();
-
-    if let Some(txt) = read("pyproject.toml") {
-        if let Ok(v) = txt.parse::<toml::Value>() {
-            if let Some(arr) = v
-                .get("project")
-                .and_then(|p| p.get("dependencies"))
-                .and_then(|d| d.as_array())
-            {
-                for d in arr {
-                    if let Some(s) = d.as_str() {
-                        deps.push(s.to_string());
-                    }
-                }
+        .filter_map(|(title, guidance, f)| {
+            let mut evidence = f(&ctx);
+            if evidence.trim().is_empty() {
+                return None;
             }
-            if let Some(tbl) = v
-                .get("tool")
-                .and_then(|t| t.get("poetry"))
-                .and_then(|p| p.get("dependencies"))
-                .and_then(|d| d.as_table())
-            {
-                for (k, val) in tbl {
-                    if k != "python" {
-                        deps.push(format!("{k} {}", val.as_str().unwrap_or("")));
-                    }
-                }
+            if evidence.len() > SECTION_BUDGET {
+                evidence.truncate(SECTION_BUDGET);
+                evidence.push_str("\n…(truncated)");
             }
-        }
-    }
-    if deps.is_empty() {
-        if let Some(txt) = read("requirements.txt") {
-            for l in txt.lines() {
-                let l = l.trim();
-                if !l.is_empty() && !l.starts_with('#') {
-                    deps.push(l.to_string());
-                }
+            if debug {
+                eprintln!("\n----- evidence: {title} -----\n{evidence}\n-----");
             }
-        }
-    }
-    if let Some(txt) = read("package.json") {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-            if let Some(obj) = v.get("dependencies").and_then(|d| d.as_object()) {
-                for (k, ver) in obj {
-                    deps.push(format!("{k} {}", ver.as_str().unwrap_or("")));
-                }
-            }
-        }
-    }
-    if !deps.is_empty() {
-        let _ = writeln!(o, "## Declared dependencies");
-        for d in deps.iter().take(40) {
-            let _ = writeln!(o, "- {}", d.trim());
-        }
-        o.push('\n');
-    }
-}
-
-// ---- import histogram + call-site targets --------------------------------------------------
-/// Returns ranked `(module, importing_file_paths)` for third-party imports, most-used first.
-fn import_histogram(
-    o: &mut String,
-    symbols: &[&Symbol],
-    edges: &[Edge],
-) -> Vec<(String, Vec<String>)> {
-    let id2file: BTreeMap<String, String> = symbols
-        .iter()
-        .map(|s| (s.id.render(), s.file_path.clone()))
-        .collect();
-    // module -> set of importing files
-    let mut mods: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for e in edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
-        // top-level module: keep `@scope/pkg` for scoped npm packages, else the first segment.
-        let d = &e.dst.descriptor;
-        let parts: Vec<&str> = d.split('/').collect();
-        let module = if d.starts_with('@') && parts.len() >= 2 {
-            format!("{}/{}", parts[0], parts[1])
-        } else {
-            parts.first().unwrap_or(&"").to_string()
-        };
-        if module.is_empty() {
-            continue;
-        }
-        let file = id2file.get(&e.src.render()).cloned().unwrap_or_default();
-        mods.entry(module).or_default().insert(file);
-    }
-    let mut ranked: Vec<(String, Vec<String>)> = mods
-        .into_iter()
-        .map(|(m, fs)| {
-            (
-                m,
-                fs.into_iter().filter(|f| !f.is_empty()).collect::<Vec<_>>(),
-            )
+            Some(Section {
+                title: title.to_string(),
+                guidance: guidance.to_string(),
+                evidence,
+            })
         })
-        .collect();
-    ranked.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
-    if !ranked.is_empty() {
-        let _ = writeln!(o, "## Most-used imports (module → #files)");
-        for (m, fs) in ranked.iter().take(18) {
-            let _ = writeln!(o, "- {m}  ({} files)", fs.len());
-        }
-        o.push('\n');
-    }
-    ranked
+        .collect()
 }
 
-// ---- surface stats (condensed) -------------------------------------------------------------
+// ---- shared repo context -------------------------------------------------------------------
+struct Ctx<'a> {
+    root: PathBuf,
+    symbols: &'a [&'a Symbol],
+    files: Vec<String>,
+    cache: RefCell<HashMap<String, Option<String>>>,
+    hist: Vec<(String, Vec<String>)>, // module -> importing files, ranked
+}
+
+impl<'a> Ctx<'a> {
+    fn new(root: &Path, symbols: &'a [&'a Symbol], edges: &'a [Edge]) -> Self {
+        let mut files: Vec<String> = symbols
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::File))
+            .map(|s| s.file_path.clone())
+            .collect();
+        files.sort();
+        files.dedup();
+        let id2file: HashMap<String, String> = symbols
+            .iter()
+            .map(|s| (s.id.render(), s.file_path.clone()))
+            .collect();
+        let mut mods: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for e in edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
+            let d = &e.dst.descriptor;
+            let p: Vec<&str> = d.split('/').collect();
+            let m = if d.starts_with('@') && p.len() >= 2 {
+                format!("{}/{}", p[0], p[1])
+            } else {
+                p.first().unwrap_or(&"").to_string()
+            };
+            if m.is_empty() {
+                continue;
+            }
+            let f = id2file.get(&e.src.render()).cloned().unwrap_or_default();
+            if !f.is_empty() {
+                mods.entry(m).or_default().insert(f);
+            }
+        }
+        let mut hist: Vec<(String, Vec<String>)> = mods
+            .into_iter()
+            .map(|(m, f)| (m, f.into_iter().collect()))
+            .collect();
+        hist.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
+        Ctx {
+            root: root.to_path_buf(),
+            symbols,
+            files,
+            cache: RefCell::new(HashMap::new()),
+            hist,
+        }
+    }
+
+    fn read(&self, file: &str) -> Option<String> {
+        if let Some(v) = self.cache.borrow().get(file) {
+            return v.clone();
+        }
+        let v = std::fs::read_to_string(self.root.join(file)).ok();
+        self.cache.borrow_mut().insert(file.to_string(), v.clone());
+        v
+    }
+
+    fn excerpt(&self, file: &str, start: usize, n: usize) -> Option<String> {
+        let src = self.read(file)?;
+        let lines: Vec<&str> = src.lines().skip(start.saturating_sub(1)).take(n).collect();
+        if lines.iter().all(|l| l.trim().is_empty()) {
+            return None;
+        }
+        Some(lines.join("\n"))
+    }
+
+    fn syms(&self, kinds: &[SymbolKind]) -> Vec<&Symbol> {
+        self.symbols
+            .iter()
+            .filter(|s| kinds.contains(&s.kind))
+            .copied()
+            .collect()
+    }
+
+    /// Find files whose content matches a predicate (bounded scan).
+    fn files_matching(&self, pred: impl Fn(&str) -> bool, limit: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        for f in &self.files {
+            if out.len() >= limit {
+                break;
+            }
+            if let Some(src) = self.read(f) {
+                if pred(&src) {
+                    out.push(f.clone());
+                }
+            }
+        }
+        out
+    }
+}
+
+fn block(o: &mut String, file: &str, body: &str) {
+    let _ = writeln!(o, "\n### {file}\n```\n{}\n```", body.trim_end());
+}
+
+// ---- casing (shared) -----------------------------------------------------------------------
 fn casing(name: &str) -> &'static str {
     let core = name.trim_matches('_');
     if core.is_empty() {
@@ -172,11 +194,10 @@ fn casing(name: &str) -> &'static str {
     }
     let up = core.chars().any(|c| c.is_ascii_uppercase());
     let lo = core.chars().any(|c| c.is_ascii_lowercase());
-    let us = core.contains('_');
     if !lo && up {
         return "SCREAMING_SNAKE";
     }
-    if us && lo {
+    if core.contains('_') && lo {
         return "snake_case";
     }
     let f = core.chars().next().unwrap();
@@ -189,136 +210,347 @@ fn casing(name: &str) -> &'static str {
     "snake_case"
 }
 
-fn surface(o: &mut String, symbols: &[&Symbol], root: &Path) {
-    let dom = |kinds: &[SymbolKind]| -> Option<(String, usize, usize)> {
-        let mut h: BTreeMap<&str, usize> = BTreeMap::new();
-        let mut n = 0;
-        for s in symbols.iter().filter(|s| kinds.contains(&s.kind)) {
-            *h.entry(casing(&s.name)).or_default() += 1;
-            n += 1;
-        }
-        h.into_iter()
-            .max_by_key(|(_, c)| *c)
-            .map(|(k, c)| (k.to_string(), c, n))
-    };
-    let _ = writeln!(o, "## Surface stats (measured)");
-    if let Some((k, c, n)) = dom(&[SymbolKind::Function, SymbolKind::Method]) {
-        let _ = writeln!(o, "- functions/methods: {k} {}/{n}", c);
-    }
-    if let Some((k, c, n)) = dom(&[SymbolKind::Class, SymbolKind::Interface]) {
-        let _ = writeln!(o, "- classes: {k} {}/{n}", c);
-    }
-    // one cheap idiom + docstring scan over a sample of files
-    let mut files: Vec<&str> = symbols
-        .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::File))
-        .map(|s| s.file_path.as_str())
-        .collect();
-    files.sort();
-    files.dedup();
-    let (mut logger, mut prints, mut fstr, mut fmt, mut bare_exc, mut broad_exc) =
-        (0, 0, 0, 0, 0, 0);
-    let (mut g, mut numpy, mut rest) = (0, 0, 0);
-    for f in files.iter().take(400) {
-        if let Ok(src) = std::fs::read_to_string(root.join(f)) {
-            logger += src.matches("logger.").count() + src.matches("getLogger").count();
-            prints += src.matches("print(").count();
-            fstr += src.matches("f\"").count() + src.matches("f'").count();
-            fmt += src.matches(".format(").count();
-            bare_exc += src.matches("except:").count();
-            broad_exc += src.matches("except Exception").count();
-            if src.contains("Args:") || src.contains("Returns:") {
-                g += 1;
-            }
-            if src.contains("Parameters\n") {
-                numpy += 1;
-            }
-            if src.contains(":param ") {
-                rest += 1;
+// ---- section evidence builders -------------------------------------------------------------
+fn ev_stack(ctx: &Ctx) -> String {
+    let mut o = String::new();
+    let read = |n: &str| std::fs::read_to_string(ctx.root.join(n)).ok();
+    let mut deps: Vec<String> = Vec::new();
+    if let Some(t) = read("pyproject.toml") {
+        if let Ok(v) = t.parse::<toml::Value>() {
+            if let Some(a) = v
+                .get("project")
+                .and_then(|p| p.get("dependencies"))
+                .and_then(|d| d.as_array())
+            {
+                deps.extend(a.iter().filter_map(|d| d.as_str().map(str::to_string)));
             }
         }
     }
-    let style = [("Google", g), ("NumPy", numpy), ("reST", rest)]
-        .into_iter()
-        .max_by_key(|(_, n)| *n)
-        .filter(|(_, n)| *n > 0)
-        .map(|(k, _)| k)
-        .unwrap_or("none/mixed");
-    let _ = writeln!(o, "- docstring style (dominant): {style}");
-    let _ = writeln!(o, "- logging: logger×{logger} vs print×{prints}; strings: f-string×{fstr} vs .format×{fmt}; except: bare×{bare_exc}, broad×{broad_exc}");
-    o.push('\n');
+    if let Some(t) = read("package.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+            if let Some(ob) = v.get("dependencies").and_then(|d| d.as_object()) {
+                deps.extend(
+                    ob.iter()
+                        .map(|(k, ver)| format!("{k} {}", ver.as_str().unwrap_or(""))),
+                );
+            }
+        }
+    }
+    if !deps.is_empty() {
+        let _ = writeln!(o, "Declared dependencies:");
+        for d in deps.iter().take(40) {
+            let _ = writeln!(o, "- {}", d.trim());
+        }
+    }
+    if !ctx.hist.is_empty() {
+        let _ = writeln!(
+            o,
+            "\nMost-imported modules (module → #files; some are first-party):"
+        );
+        for (m, f) in ctx.hist.iter().take(20) {
+            let _ = writeln!(o, "- {m}  ({} files)", f.len());
+        }
+    }
+    o
 }
 
-// ---- real code excerpts --------------------------------------------------------------------
-fn read_excerpt(root: &Path, file: &str, lines: usize) -> Option<String> {
-    let src = std::fs::read_to_string(root.join(file)).ok()?;
-    let head: Vec<&str> = src.lines().take(lines).collect();
-    if head.iter().all(|l| l.trim().is_empty()) {
-        return None;
+fn ev_layout(ctx: &Ctx) -> String {
+    let mut o = String::new();
+    let mut dirs: BTreeMap<String, usize> = BTreeMap::new();
+    for f in &ctx.files {
+        let d = match f.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/"),
+            None => "(root)".into(),
+        };
+        *dirs.entry(d).or_default() += 1;
     }
-    Some(head.join("\n"))
-}
-
-fn excerpts(o: &mut String, root: &Path, symbols: &[&Symbol], hist: &[(String, Vec<String>)]) {
-    let mut picked: Vec<String> = Vec::new();
-    let push_file = |picked: &mut Vec<String>, f: &str| {
-        if !f.is_empty() && !picked.iter().any(|p| p == f) && picked.len() < MAX_EXCERPTS {
-            picked.push(f.to_string());
-        }
-    };
-
-    // 1) one representative call-site file per top third-party module
-    for (_m, files) in hist.iter().take(8) {
-        if let Some(f) = files.first() {
-            push_file(&mut picked, f);
-        }
+    let _ = writeln!(o, "Directories (path → file count):");
+    for (d, n) in dirs.iter().take(40) {
+        let _ = writeln!(o, "- {d}  {n}");
     }
-    // 2) notable files by name (entrypoints / infra / config / layers)
-    let all_files: BTreeSet<&str> = symbols
-        .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::File))
-        .map(|s| s.file_path.as_str())
-        .collect();
+    // entry points + a couple central files
     let hints = [
         "main.py",
         "app.py",
         "cli.py",
-        "settings.py",
-        "config.py",
-        "client",
-        "handler",
-        "service",
-        "repository",
-        "conftest.py",
+        "index.ts",
+        "index.tsx",
+        "__main__.py",
+        "server.py",
     ];
-    for f in &all_files {
-        let low = f.to_lowercase();
-        if hints
-            .iter()
-            .any(|h| low.ends_with(h) || low.contains(&format!("/{h}")) || low.contains(h))
-        {
-            push_file(&mut picked, f);
+    let mut shown = 0;
+    let _ = writeln!(o, "\nEntry-point / central files:");
+    for f in &ctx.files {
+        if hints.iter().any(|h| f.ends_with(h)) {
+            if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+                block(&mut o, f, &ex);
+                shown += 1;
+            }
+        }
+        if shown >= 4 {
+            break;
         }
     }
-    // 3) one test file
-    if let Some(t) = all_files.iter().find(|f| {
-        let l = f.to_lowercase();
-        l.contains("test_") || l.ends_with("_test.py") || l.contains("/tests/")
-    }) {
-        push_file(&mut picked, t);
-    }
+    o
+}
 
-    if picked.is_empty() {
-        return;
-    }
-    let _ = writeln!(
-        o,
-        "## Representative code excerpts (infer library/infra/architecture conventions from these)"
-    );
-    for f in &picked {
-        if let Some(ex) = read_excerpt(root, f, EXCERPT_LINES) {
-            let _ = writeln!(o, "\n### {f}\n```\n{ex}\n```");
+fn ev_naming(ctx: &Ctx) -> String {
+    let mut o = String::new();
+    let dom = |kinds: &[SymbolKind]| {
+        let mut h: BTreeMap<&str, usize> = BTreeMap::new();
+        let ss = ctx.syms(kinds);
+        for s in &ss {
+            *h.entry(casing(&s.name)).or_default() += 1;
+        }
+        let total = ss.len();
+        let names: Vec<String> = ss.iter().take(10).map(|s| s.name.clone()).collect();
+        (
+            h.into_iter()
+                .max_by_key(|(_, c)| *c)
+                .map(|(k, c)| (k.to_string(), c)),
+            total,
+            names,
+        )
+    };
+    for (label, kinds) in [
+        (
+            "functions/methods",
+            &[SymbolKind::Function, SymbolKind::Method][..],
+        ),
+        (
+            "classes/interfaces",
+            &[SymbolKind::Class, SymbolKind::Interface][..],
+        ),
+    ] {
+        let (d, total, names) = dom(kinds);
+        if let Some((k, c)) = d {
+            let _ = writeln!(
+                o,
+                "{label}: {k} {c}/{total}. examples: {}",
+                names.join(", ")
+            );
         }
     }
-    o.push('\n');
+    // formatting facts
+    if let Ok(t) = std::fs::read_to_string(ctx.root.join(".editorconfig")) {
+        for l in t.lines() {
+            let l = l.trim();
+            if ["indent_style", "indent_size", "max_line_length"]
+                .iter()
+                .any(|k| l.starts_with(k))
+            {
+                let _ = writeln!(o, "editorconfig: {l}");
+            }
+        }
+    }
+    if let Ok(t) = std::fs::read_to_string(ctx.root.join("pyproject.toml")) {
+        for key in ["line-length", "quote-style"] {
+            if let Some(line) = t.lines().find(|l| l.trim_start().starts_with(key)) {
+                let _ = writeln!(o, "ruff/black: {}", line.trim());
+            }
+        }
+    }
+    o
+}
+
+fn ev_signatures(ctx: &Ctx) -> String {
+    let mut o = String::from("Real signatures (sampled):\n");
+    let mut n = 0;
+    for s in ctx.syms(&[SymbolKind::Function, SymbolKind::Method]) {
+        if let Some(sig) = &s.signature {
+            let sig = sig.trim();
+            if sig.len() > 6 {
+                let _ = writeln!(o, "- {}  ({}:{})", sig, s.file_path, s.range.start.line);
+                n += 1;
+            }
+        }
+        if n >= 30 {
+            break;
+        }
+    }
+    if n == 0 {
+        return String::new();
+    }
+    o
+}
+
+fn ev_types(ctx: &Ctx) -> String {
+    let files = ctx.files_matching(
+        |s| {
+            s.contains("BaseModel")
+                || s.contains("@dataclass")
+                || s.contains("TypedDict")
+                || s.contains("z.object(")
+                || s.contains("interface ")
+                || s.contains("z.infer")
+        },
+        4,
+    );
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut o = String::from("Model / type definitions:\n");
+    for f in &files {
+        if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+            block(&mut o, f, &ex);
+        }
+    }
+    o
+}
+
+fn ev_patterns(ctx: &Ctx) -> String {
+    let mut o = String::new();
+    // largest classes (by line span) — usually base/service/controller classes
+    let mut classes = ctx.syms(&[SymbolKind::Class]);
+    classes.sort_by_key(|s| std::cmp::Reverse(s.range.end.line.saturating_sub(s.range.start.line)));
+    if !classes.is_empty() {
+        let _ = writeln!(o, "Largest classes (likely base/service/controller):");
+    }
+    for s in classes.iter().take(4) {
+        if let Some(ex) = ctx.excerpt(&s.file_path, s.range.start.line as usize, EXCERPT_LINES) {
+            block(
+                &mut o,
+                &format!("{} ({}:{})", s.name, s.file_path, s.range.start.line),
+                &ex,
+            );
+        }
+    }
+    // decorated defs (DI / factories / context managers)
+    let deco = ctx.files_matching(
+        |src| {
+            src.contains("@contextmanager")
+                || src.contains("@property")
+                || src.contains("@staticmethod")
+                || src.contains("@classmethod")
+                || src.contains("Depends(")
+                || src.contains("@inject")
+        },
+        2,
+    );
+    for f in &deco {
+        if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+            block(&mut o, f, &ex);
+        }
+    }
+    o
+}
+
+fn ev_library(ctx: &Ctx) -> String {
+    let mut o = String::from("Representative call-sites per major dependency:\n");
+    let mut shown = 0;
+    for (m, files) in ctx.hist.iter().take(10) {
+        if let Some(f) = files.first() {
+            if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+                block(&mut o, &format!("{f}  (uses `{m}`)"), &ex);
+                shown += 1;
+            }
+        }
+        if shown >= 7 {
+            break;
+        }
+    }
+    if shown == 0 {
+        return String::new();
+    }
+    o
+}
+
+fn ev_errlog(ctx: &Ctx) -> String {
+    let files = ctx.files_matching(
+        |s| {
+            s.contains("except ")
+                || s.contains("logger")
+                || s.contains("getLogger")
+                || s.contains("raise ")
+                || s.contains("get_config")
+                || s.contains("Settings(")
+        },
+        4,
+    );
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut o = String::from("Error / logging / config call-sites:\n");
+    for f in &files {
+        if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+            block(&mut o, f, &ex);
+        }
+    }
+    o
+}
+
+fn ev_testing(ctx: &Ctx) -> String {
+    let files: Vec<String> = ctx
+        .files
+        .iter()
+        .filter(|f| {
+            let l = f.to_lowercase();
+            l.contains("test_")
+                || l.ends_with("_test.py")
+                || l.ends_with(".test.ts")
+                || l.ends_with(".spec.ts")
+                || l.contains("/tests/")
+                || l.ends_with("conftest.py")
+        })
+        .take(3)
+        .cloned()
+        .collect();
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut o = String::from("Test files:\n");
+    for f in &files {
+        if let Some(ex) = ctx.excerpt(f, 1, EXCERPT_LINES) {
+            block(&mut o, f, &ex);
+        }
+    }
+    o
+}
+
+fn ev_docstrings(ctx: &Ctx) -> String {
+    let (mut g, mut np, mut rest, mut jsdoc) = (0, 0, 0, 0);
+    for f in ctx.files.iter().take(400) {
+        if let Some(s) = ctx.read(f) {
+            if s.contains("Args:") || s.contains("Returns:") {
+                g += 1;
+            }
+            if s.contains("Parameters\n") {
+                np += 1;
+            }
+            if s.contains(":param ") {
+                rest += 1;
+            }
+            if s.contains("@param") || s.contains("/**") {
+                jsdoc += 1;
+            }
+        }
+    }
+    let style = [
+        ("Google", g),
+        ("NumPy", np),
+        ("reST", rest),
+        ("JSDoc", jsdoc),
+    ]
+    .into_iter()
+    .max_by_key(|(_, n)| *n)
+    .filter(|(_, n)| *n > 0)
+    .map(|(k, _)| k);
+    let style = match style {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    let mut o = format!("Dominant docstring style: {style}.\nExamples of documented code:\n");
+    // a couple of files that actually contain the style marker
+    let marker = match style {
+        "Google" => "Returns:",
+        "NumPy" => "Parameters\n",
+        "reST" => ":param ",
+        _ => "/**",
+    };
+    for f in ctx.files_matching(|s| s.contains(marker), 2) {
+        if let Some(ex) = ctx.excerpt(&f, 1, EXCERPT_LINES + 8) {
+            block(&mut o, &f, &ex);
+        }
+    }
+    o
 }
