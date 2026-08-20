@@ -829,6 +829,8 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
                         .await
                         .ok()
                         .map(|(narr, q)| (id.clone(), narr, q));
+                    let (i, o) = client.token_usage();
+                    pb.set_message(format!("{} in / {} out tok", kfmt(i), kfmt(o)));
                     pb.inc(1);
                     r
                 }
@@ -841,6 +843,13 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
             .collect()
     });
     pb.finish_and_clear();
+    let (i, o) = client.token_usage();
+    comind::ui::note(&format!(
+        "tokens: {} in / {} out ({} total)",
+        kfmt(i),
+        kfmt(o),
+        kfmt(i + o)
+    ));
 
     match comind::index::write_flows_blocking(dst, &rows) {
         Ok(v) => comind::ui::ok(&format!("flows v{v}: {} narrated", rows.len())),
@@ -1122,6 +1131,8 @@ fn run_enrich(
                     let (pb, client) = (&pb, &client);
                     async move {
                         let r = client.enrich_symbol(n, s, c).await.ok();
+                        let (i, o) = client.token_usage();
+                        pb.set_message(format!("{} in / {} out tok", kfmt(i), kfmt(o)));
                         pb.inc(1);
                         r
                     }
@@ -1131,6 +1142,13 @@ fn run_enrich(
                 .await
         });
         pb.finish_and_clear();
+        let (i, o) = client.token_usage();
+        comind::ui::note(&format!(
+            "tokens: {} in / {} out ({} total)",
+            kfmt(i),
+            kfmt(o),
+            kfmt(i + o)
+        ));
         out
     };
     let mut generated = 0usize;
@@ -1188,6 +1206,15 @@ fn run_enrich(
 
 fn truncate_lines(s: &str, n: usize) -> String {
     s.lines().take(n).collect::<Vec<_>>().join("\n")
+}
+
+/// Compact `1.2k`-style formatting for token counts.
+fn kfmt(n: u64) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 /// `n word` / `n words` — naive English pluralization for count phrases.

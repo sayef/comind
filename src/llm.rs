@@ -7,10 +7,13 @@
 //! (`comind link --enrich`), never as part of plain indexing. Requires `OPENAI_API_KEY` (or a
 //! provider key + `COMIND_LLM_BASE_URL`).
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::Prompt;
+use rig::completion::{AssistantContent, Completion};
 use rig::providers::openai;
 
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
@@ -24,6 +27,9 @@ pub struct LlmClient {
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
     client: openai::CompletionsClient,
     model: String,
+    // Cumulative token usage across all calls (for live progress + a final total).
+    input_tokens: Arc<AtomicU64>,
+    output_tokens: Arc<AtomicU64>,
 }
 
 /// LLM-generated enrichment for one symbol.
@@ -59,19 +65,51 @@ impl LlmClient {
                 )
             })?,
         };
-        Ok(Self { client, model })
+        Ok(Self {
+            client,
+            model,
+            input_tokens: Arc::new(AtomicU64::new(0)),
+            output_tokens: Arc::new(AtomicU64::new(0)),
+        })
+    }
+
+    /// Cumulative `(input, output)` tokens used so far, across all calls.
+    pub fn token_usage(&self) -> (u64, u64) {
+        (
+            self.input_tokens.load(Ordering::Relaxed),
+            self.output_tokens.load(Ordering::Relaxed),
+        )
     }
 
     async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String> {
         // A Rig "agent" with a preamble is just a system-prompted completion — no tools/RAG.
+        // Use the completion API (not `prompt()`) so we get token `usage` back from the provider.
         let agent = self
             .client
             .agent(&self.model)
             .preamble(system)
             .max_tokens(max_tokens as u64)
             .build();
-        let resp = agent.prompt(user).await.context("LLM completion")?;
-        Ok(resp.trim().to_string())
+        let resp = agent
+            .completion(user, Vec::<rig::completion::Message>::new())
+            .await
+            .context("LLM request")?
+            .send()
+            .await
+            .context("LLM completion")?;
+        self.input_tokens
+            .fetch_add(resp.usage.input_tokens, Ordering::Relaxed);
+        self.output_tokens
+            .fetch_add(resp.usage.output_tokens, Ordering::Relaxed);
+        let text: String = resp
+            .choice
+            .iter()
+            .filter_map(|c| match c {
+                AssistantContent::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        Ok(text.trim().to_string())
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.
