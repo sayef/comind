@@ -25,6 +25,12 @@ pub struct Config {
     /// Default output format when `--format` is not given. `search`: `md` | `table`;
     /// `serve`: `md` | `json`. Absent = `md`.
     pub format: Option<String>,
+    /// Default for `index`/`link` steps; `--x` / `--no-x` on the CLI override these.
+    /// Built-in defaults: embed on (local, cheap); enrich/flows/guide off (LLM cost + egress).
+    pub embed: Option<bool>,
+    pub enrich: Option<bool>,
+    pub flows: Option<bool>,
+    pub guide: Option<bool>,
 }
 
 impl Config {
@@ -99,6 +105,20 @@ impl Config {
             .or_else(|| self.format.clone())
             .unwrap_or_else(|| "md".to_string())
     }
+
+    /// Step defaults (file → built-in). Embed on; enrich/flows/guide off.
+    pub fn embed(&self) -> bool {
+        self.embed.unwrap_or(true)
+    }
+    pub fn enrich(&self) -> bool {
+        self.enrich.unwrap_or(false)
+    }
+    pub fn flows(&self) -> bool {
+        self.flows.unwrap_or(false)
+    }
+    pub fn guide(&self) -> bool {
+        self.guide.unwrap_or(false)
+    }
 }
 
 /// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
@@ -129,6 +149,12 @@ pub fn init(force: bool) -> Result<PathBuf> {
          embed_model = \"{}\"\n\
          format      = \"md\"   # default output when --format is absent (search: md|table, serve: md|json)\n\
          # llm_base_url = \"http://localhost:11434/v1\"  # Ollama / vLLM / LiteLLM proxy\n\n\
+         # index/link step defaults (CLI --x / --no-x override). enrich/flows/guide call an LLM\n\
+         # (cost + sends code); set true to run them by every index.\n\
+         embed  = true\n\
+         enrich = false\n\
+         flows  = false\n\
+         guide  = false\n\n\
          # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
          # max_enrich = 200   # max symbols enriched by --enrich\n\
          # max_flows  = 50    # max flows narrated by --flows\n",

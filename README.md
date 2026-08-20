@@ -194,6 +194,10 @@ index_dir   = "~/.local/share/comind"   # default --index-dir (local path or s3:
 llm_model   = "gpt-4o-mini"
 embed_model = "minishlab/potion-base-8M"
 format      = "md"    # default when --format is absent (search: md|table, serve: md|json)
+embed       = true    # index/link step defaults; CLI --x / --no-x override
+enrich      = false   # LLM per-symbol summaries + queries (cost + sends code)
+flows       = false   # LLM flow walkthroughs (cost + sends code)
+guide       = false   # evidence-based style guide (cost + sends code)
 # llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
 # max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
 # max_flows   = 50    # cap --flows narrations (omit = no cap)

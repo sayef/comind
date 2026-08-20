@@ -32,18 +32,26 @@ enum Cmd {
         /// Index directory — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Skip vector embeddings (faster; structural graph only, disables hybrid search)
-        #[arg(long = "no-embed")]
+        /// Vector embeddings for hybrid search (default on; config `embed`)
+        #[arg(long, overrides_with = "no_embed")]
+        embed: bool,
+        #[arg(long = "no-embed", overrides_with = "embed")]
         no_embed: bool,
-        /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
-        #[arg(long)]
+        /// LLM per-symbol summaries + queries (sends code; needs OPENAI_API_KEY; config `enrich`)
+        #[arg(long, overrides_with = "no_enrich")]
         enrich: bool,
-        /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
-        #[arg(long)]
+        #[arg(long = "no-enrich", overrides_with = "enrich")]
+        no_enrich: bool,
+        /// LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY; config `flows`)
+        #[arg(long, overrides_with = "no_flows")]
         flows: bool,
-        /// Generate an evidence-based coding style guide (sends code/config; needs OPENAI_API_KEY)
-        #[arg(long)]
+        #[arg(long = "no-flows", overrides_with = "flows")]
+        no_flows: bool,
+        /// Evidence-based style guide (sends code/config; needs OPENAI_API_KEY; config `guide`)
+        #[arg(long, overrides_with = "no_guide")]
         guide: bool,
+        #[arg(long = "no-guide", overrides_with = "guide")]
+        no_guide: bool,
         /// Reparse only files changed since the last indexed commit
         #[arg(long)]
         incremental: bool,
@@ -59,18 +67,26 @@ enum Cmd {
         /// Index directory — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Skip vector embeddings (faster; structural graph only, disables hybrid search)
-        #[arg(long = "no-embed")]
+        /// Vector embeddings for hybrid search (default on; config `embed`)
+        #[arg(long, overrides_with = "no_embed")]
+        embed: bool,
+        #[arg(long = "no-embed", overrides_with = "embed")]
         no_embed: bool,
-        /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
-        #[arg(long)]
+        /// LLM per-symbol summaries + queries (sends code; needs OPENAI_API_KEY; config `enrich`)
+        #[arg(long, overrides_with = "no_enrich")]
         enrich: bool,
-        /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
-        #[arg(long)]
+        #[arg(long = "no-enrich", overrides_with = "enrich")]
+        no_enrich: bool,
+        /// LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY; config `flows`)
+        #[arg(long, overrides_with = "no_flows")]
         flows: bool,
-        /// Generate an evidence-based coding style guide (sends code/config; needs OPENAI_API_KEY)
-        #[arg(long)]
+        #[arg(long = "no-flows", overrides_with = "flows")]
+        no_flows: bool,
+        /// Evidence-based style guide (sends code/config; needs OPENAI_API_KEY; config `guide`)
+        #[arg(long, overrides_with = "no_guide")]
         guide: bool,
+        #[arg(long = "no-guide", overrides_with = "guide")]
+        no_guide: bool,
         /// Recompute only symbols in files changed since the last index
         #[arg(long)]
         incremental: bool,
@@ -193,39 +209,51 @@ fn main() -> ExitCode {
         Cmd::Index {
             repo,
             index_dir,
+            embed,
             no_embed,
             enrich,
+            no_enrich,
             flows,
+            no_flows,
             guide,
+            no_guide,
             incremental,
             since,
-        } => cmd_index(
-            &repo,
-            index_dir.as_deref(),
-            !no_embed,
-            enrich,
-            flows,
-            guide,
-            incremental,
-            since.as_deref(),
-        ),
+        } => {
+            let cfg = comind::config::Config::load();
+            cmd_index(
+                &repo,
+                index_dir.as_deref(),
+                tri(embed, no_embed).unwrap_or(cfg.embed()),
+                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                tri(flows, no_flows).unwrap_or(cfg.flows()),
+                tri(guide, no_guide).unwrap_or(cfg.guide()),
+                incremental,
+                since.as_deref(),
+            )
+        }
         Cmd::Link {
             repos,
             index_dir,
+            embed,
             no_embed,
             enrich,
+            no_enrich,
             flows,
+            no_flows,
             guide,
+            no_guide,
             incremental,
         } => {
+            let cfg = comind::config::Config::load();
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
-                !no_embed,
-                enrich,
-                flows,
-                guide,
+                tri(embed, no_embed).unwrap_or(cfg.embed()),
+                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                tri(flows, no_flows).unwrap_or(cfg.flows()),
+                tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
             )
         }
@@ -290,6 +318,18 @@ fn main() -> ExitCode {
             cmd_serve(index_dir.as_deref(), markdown)
         }
         Cmd::Config { action } => cmd_config(action),
+    }
+}
+
+/// Resolve a `--x` / `--no-x` flag pair to an explicit choice, or `None` to fall back to config.
+/// clap's `overrides_with` guarantees at most one is set.
+fn tri(on: bool, off: bool) -> Option<bool> {
+    if on {
+        Some(true)
+    } else if off {
+        Some(false)
+    } else {
+        None
     }
 }
 
