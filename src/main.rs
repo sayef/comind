@@ -139,11 +139,14 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Index statistics: symbols, edges, kinds, repos, enrichment coverage
+    /// Index statistics per repo: symbols, edges, kinds, enrichment coverage
     Stats {
         /// Index directory to read — root; default: configured index dir
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
+        /// Limit to one or more repos (repeatable: --repo x --repo y). Omit for all repos.
+        #[arg(long)]
+        repo: Vec<String>,
     },
     /// Print the repo's inferred coding style guide (built with --enrich)
     Guide {
@@ -235,7 +238,10 @@ fn main() -> ExitCode {
         }
         Cmd::Find { query, index_dir } => cmd_find(&query, index_dir.as_deref()),
         Cmd::Repos { index_dir } => cmd_repos(index_dir.as_deref()),
-        Cmd::Stats { index_dir } => cmd_stats(index_dir.as_deref()),
+        Cmd::Stats { index_dir, repo } => {
+            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
+            cmd_stats(&repos, index_dir.as_deref())
+        }
         Cmd::Guide { index_dir } => cmd_guide(index_dir.as_deref()),
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
         Cmd::Flow { focus, index_dir } => cmd_flow(&focus, index_dir.as_deref()),
@@ -527,48 +533,72 @@ fn cmd_repos(from: Option<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `comind stats` — symbols, edges, kinds, repos, enrichment coverage.
-fn cmd_stats(from: Option<&str>) -> ExitCode {
+/// `comind stats [--repo x --repo y]` — per-repo symbols, edges, kinds, enrichment coverage.
+/// With no `--repo`, reports every indexed repo separately.
+fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
-    let g = comind::graph::CodeGraph::build(&symbols, &edges);
-    comind::ui::header("Index stats");
-    comind::ui::field("symbols", &symbols.len().to_string());
-    comind::ui::field("edges", &edges.len().to_string());
-    comind::ui::field("repos", &g.repos().len().to_string());
-    let enriched = comind::config::Config::load().graph_dir(from);
-    let enriched = comind::index::read_enrichment_blocking(&enriched)
+    // Ids of enriched symbols, to compute per-repo coverage.
+    let uri = comind::config::Config::load().graph_dir(from);
+    let enriched: HashSet<String> = comind::index::read_enrichment_blocking(&uri)
         .ok()
         .flatten()
-        .map(|v| v.len())
-        .unwrap_or(0);
-    comind::ui::field(
-        "enriched",
-        &format!("{enriched} / {} symbols", symbols.len()),
-    );
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, _, _)| id.render())
+        .collect();
 
-    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
-    for s in &symbols {
-        *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
+    // All repos present, sorted.
+    let all: BTreeSet<String> = symbols.iter().map(|s| s.id.package.clone()).collect();
+    // Which repos to report: the requested ones (warn on unknown) or all.
+    let repos: Vec<String> = if want.is_empty() {
+        all.iter().cloned().collect()
+    } else {
+        for r in want {
+            if !all.contains(*r) {
+                comind::ui::warn(&format!("no such repo in the index: {r}"));
+            }
+        }
+        want.iter()
+            .filter(|r| all.contains(**r))
+            .map(|r| r.to_string())
+            .collect()
+    };
+    if repos.is_empty() {
+        comind::ui::err("no matching repos");
+        return ExitCode::FAILURE;
     }
-    let mut kt = comind::ui::table(&["kind", "count"]);
-    for (k, n) in &by_kind {
-        kt.add_row(vec![k.clone(), n.to_string()]);
-    }
-    comind::ui::right_align(&mut kt, &[1]);
-    println!("{kt}");
 
-    let mut by_edge: BTreeMap<String, usize> = BTreeMap::new();
-    for e in &edges {
-        *by_edge.entry(e.kind.as_str().to_string()).or_default() += 1;
+    comind::ui::header(&format!(
+        "Index stats — {} across {}",
+        plural(symbols.len(), "symbol"),
+        plural(all.len(), "repo")
+    ));
+
+    for repo in &repos {
+        let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
+        let redges = edges.iter().filter(|e| &e.src.package == repo).count();
+        let renr = rsyms
+            .iter()
+            .filter(|s| enriched.contains(&s.id.render()))
+            .count();
+        comind::ui::header(&format!("● {repo}"));
+        comind::ui::field("symbols", &rsyms.len().to_string());
+        comind::ui::field("edges", &redges.to_string());
+        comind::ui::field("enriched", &format!("{renr} / {}", rsyms.len()));
+
+        let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+        for s in &rsyms {
+            *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
+        }
+        let mut kt = comind::ui::table(&["kind", "count"]);
+        for (k, n) in &by_kind {
+            kt.add_row(vec![k.clone(), n.to_string()]);
+        }
+        comind::ui::right_align(&mut kt, &[1]);
+        println!("{kt}");
     }
-    let mut et = comind::ui::table(&["edge", "count"]);
-    for (k, n) in &by_edge {
-        et.add_row(vec![k.clone(), n.to_string()]);
-    }
-    comind::ui::right_align(&mut et, &[1]);
-    println!("{et}");
     ExitCode::SUCCESS
 }
 
