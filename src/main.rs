@@ -87,9 +87,9 @@ enum Cmd {
         /// Index directory to read — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Restrict results to one repo (by name)
+        /// Restrict results to one or more repos (repeatable: --repo x --repo y)
         #[arg(long)]
-        repo: Option<String>,
+        repo: Vec<String>,
         /// Output format: `md` or `table` (default from config, else `md`)
         #[arg(long)]
         format: Option<String>,
@@ -132,6 +132,9 @@ enum Cmd {
         /// Index directory to read — root; default: configured index dir
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
+        /// Limit to one or more repos (repeatable: --repo x --repo y)
+        #[arg(long)]
+        repo: Vec<String>,
     },
     /// List indexed repositories and their symbol counts
     Repos {
@@ -229,14 +232,17 @@ fn main() -> ExitCode {
             let fmt = if md { Some("md".to_string()) } else { format };
             let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            cmd_search(
-                &query.join(" "),
-                index_dir.as_deref(),
-                repo.as_deref(),
-                markdown,
-            )
+            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
+            cmd_search(&query.join(" "), index_dir.as_deref(), &repos, markdown)
         }
-        Cmd::Find { query, index_dir } => cmd_find(&query, index_dir.as_deref()),
+        Cmd::Find {
+            query,
+            index_dir,
+            repo,
+        } => {
+            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
+            cmd_find(&query, index_dir.as_deref(), &repos)
+        }
         Cmd::Repos { index_dir } => cmd_repos(index_dir.as_deref()),
         Cmd::Stats { index_dir, repo } => {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
@@ -397,7 +403,7 @@ fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
 
 /// `comind search <query...> --from <uri>` — semantic search reranked by graph centrality,
 /// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
-fn cmd_search(query: &str, from: Option<&str>, repo: Option<&str>, markdown: bool) -> ExitCode {
+fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -433,7 +439,7 @@ fn cmd_search(query: &str, from: Option<&str>, repo: Option<&str>, markdown: boo
     // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comind's code-aware boosts
     // and dependency-graph centrality — shared with the `search` MCP tool. When scoping to a
     // repo, over-fetch then filter so we still return a full page.
-    let limit = if repo.is_some() { 60 } else { 12 };
+    let limit = if repos.is_empty() { 12 } else { 60 };
     let mut hits =
         match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, query, limit) {
             Ok(h) => h,
@@ -444,8 +450,8 @@ fn cmd_search(query: &str, from: Option<&str>, repo: Option<&str>, markdown: boo
                 return ExitCode::FAILURE;
             }
         };
-    if let Some(r) = repo {
-        hits.retain(|h| h.repo.eq_ignore_ascii_case(r));
+    if !repos.is_empty() {
+        hits.retain(|h| repos.iter().any(|r| h.repo.eq_ignore_ascii_case(r)));
         hits.truncate(12);
     }
 
@@ -484,12 +490,17 @@ fn read_graph_or_err(from: Option<&str>) -> Result<(Vec<Symbol>, Vec<Edge>), ()>
 }
 
 /// `comind find <query>` — locate symbols by name/descriptor/path substring.
-fn cmd_find(query: &str, from: Option<&str>) -> ExitCode {
+fn cmd_find(query: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
     let g = comind::graph::CodeGraph::build(&symbols, &edges);
-    let hits = g.find(query, 30);
+    // Over-fetch when filtering by repo so a full page survives the filter.
+    let mut hits = g.find(query, if repos.is_empty() { 30 } else { 200 });
+    if !repos.is_empty() {
+        hits.retain(|n| repos.iter().any(|r| n.repo.eq_ignore_ascii_case(r)));
+        hits.truncate(30);
+    }
     comind::ui::header(&format!(
         "find: \"{query}\" ({})",
         plural(hits.len(), "match")
