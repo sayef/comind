@@ -115,10 +115,11 @@ pub fn default_index_dir() -> String {
     data_home().join("comind").to_string_lossy().into_owned()
 }
 
-/// Write a commented `config.toml` with the resolved defaults. Errors if one already exists.
-pub fn init() -> Result<PathBuf> {
+/// Write a commented `config.toml` with the resolved defaults. Without `force`, errors if one
+/// already exists (the caller handles confirmation).
+pub fn init(force: bool) -> Result<PathBuf> {
     let path = config_path();
-    if path.exists() {
+    if path.exists() && !force {
         anyhow::bail!("config already exists at {}", path.display());
     }
     if let Some(parent) = path.parent() {

@@ -133,7 +133,11 @@ enum ConfigAction {
     /// Print the config file location and resolved index dir
     Path,
     /// Write a commented config.toml with the current defaults
-    Init,
+    Init {
+        /// Overwrite an existing config file (discards its current contents)
+        #[arg(long)]
+        overwrite: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -481,17 +485,49 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
             comind::ui::field("index dir", &comind::config::default_index_dir());
             ExitCode::SUCCESS
         }
-        Some(ConfigAction::Init) => match comind::config::init() {
-            Ok(path) => {
-                comind::ui::ok(&format!("wrote {}", path.display()));
-                ExitCode::SUCCESS
+        Some(ConfigAction::Init { overwrite }) => {
+            use std::io::IsTerminal;
+            let path = comind::config::config_path();
+            if path.exists() && !overwrite {
+                // Can't prompt when piped/CI → refuse and point at --overwrite.
+                if !std::io::stdin().is_terminal() {
+                    comind::ui::err("config exists — re-run with --overwrite to replace it");
+                    return ExitCode::FAILURE;
+                }
+                // Deliberate interactive decline is a valid choice, not an error.
+                if !prompt_yes(&path) {
+                    comind::ui::note("kept existing config");
+                    return ExitCode::SUCCESS;
+                }
             }
-            Err(e) => {
-                comind::ui::err(&format!("{e:#}"));
-                ExitCode::FAILURE
+            match comind::config::init(true) {
+                Ok(path) => {
+                    comind::ui::ok(&format!("wrote {}", path.display()));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    comind::ui::err(&format!("{e:#}"));
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
     }
+}
+
+/// Interactive y/N prompt (caller guarantees a TTY). `y`/`yes` = overwrite; anything else = keep.
+fn prompt_yes(path: &Path) -> bool {
+    use std::io::Write;
+    comind::ui::warn(&format!(
+        "{} already exists; overwriting resets every value to its default.",
+        path.display()
+    ));
+    eprint!("Overwrite it? [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn repo_name(path: &str) -> String {
