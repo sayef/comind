@@ -71,19 +71,25 @@ pub fn markdown(query: &str, hits: &[SearchHit]) -> String {
     for (i, h) in hits.iter().enumerate() {
         let _ = write!(
             o,
-            "{}. **{}** _{}_  ·  score {:.3}  ·  `{}`  ·  {} deps",
+            "{}. **{}** _{}_  ·  score {:.3}  ·  `{}`",
             i + 1,
             h.name,
             h.kind,
             h.score,
             h.location,
-            h.deps
         );
+        if !h.repo.is_empty() {
+            let _ = write!(o, "  ·  {}", h.repo);
+        }
+        let _ = write!(o, "  ·  {} deps", h.deps);
         if let Some(s) = &h.summary {
             let _ = write!(o, "\n   ↳ {s}");
         }
+        // Stable handle for zoom/ripple/thread/flow/context_pack.
+        let _ = write!(o, "\n   id `{}`", h.id);
         o.push('\n');
     }
+    o.push_str("\n_Pass an `id` to `zoom`/`ripple`/`context_pack` to navigate from a hit._\n");
     o
 }
 

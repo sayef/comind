@@ -189,6 +189,8 @@ struct PackDto {
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct SearchHitDto {
+    /// Stable handle to pass to zoom/ripple/thread/flow/context_pack.
+    id: String,
     name: String,
     kind: String,
     repo: String,
@@ -255,6 +257,7 @@ struct FocusParam {
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct DepthParam {
+    /// A symbol name or SCIP descriptor (from `find`/`search`, e.g. `acme/const/Settings`).
     focus: String,
     /// Max hops to traverse (default 4).
     depth: Option<u32>,
@@ -262,6 +265,7 @@ struct DepthParam {
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct PackParam {
+    /// A symbol name or SCIP descriptor (from `find`/`search`, e.g. `acme/const/Settings`).
     focus: String,
     /// Token budget for the read-set (default 1500).
     token_budget: Option<u32>,
@@ -269,7 +273,15 @@ struct PackParam {
 
 // ---- tools ------------------------------------------------------------------------------
 
-#[tool_router(server_handler)]
+/// First-contact orientation shown to the agent as MCP server `instructions`.
+const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed codebase.\n\
+New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
+Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
+`ripple` (who breaks if I change this), `thread` (forward call trace), `context_pack` \
+(minimal safe edit read-set), or `flow` (narrated walkthrough). `search` needs an index \
+built with --embed; the graph tools work without it.";
+
+#[tool_router]
 impl ComindServer {
     #[tool(
         name = "search",
@@ -368,7 +380,7 @@ impl ComindServer {
 
     #[tool(
         name = "find",
-        description = "Find code symbols by name or path substring"
+        description = "Find symbols by name or path substring. Returns each match with its `id` and `file:line` — the entry point to the graph tools: pass an `id` to zoom/ripple/thread/context_pack/flow."
     )]
     fn find(&self, Parameters(p): Parameters<FindParam>) -> CallToolResult {
         let limit = p.limit.unwrap_or(20) as usize;
@@ -386,7 +398,7 @@ impl ComindServer {
 
     #[tool(
         name = "zoom",
-        description = "360° view of a symbol: definition, container, callers, callees, importers, members"
+        description = "360° view of one symbol — definition, container, callers, callees, importers, members. Use to understand a symbol before changing it. Takes a symbol id/name from find/search."
     )]
     fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
         let dto = match self.graph.lookup(&p.focus) {
@@ -418,7 +430,7 @@ impl ComindServer {
 
     #[tool(
         name = "ripple",
-        description = "Blast radius: who transitively depends on this symbol (cross-repo), grouped by repo"
+        description = "Blast radius (reverse deps): who transitively depends on this symbol, cross-repo, grouped by repo. Use to gauge the impact of changing it. This is the reverse direction of `thread`. Returns dependents with depth + repo counts."
     )]
     fn ripple(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
         let depth = p.depth.unwrap_or(4) as usize;
@@ -468,7 +480,7 @@ impl ComindServer {
 
     #[tool(
         name = "thread",
-        description = "Forward call trace from an entry-point symbol"
+        description = "Forward call trace from an entry point: what this symbol calls, transitively, with depth + edge kind. Use to follow execution downstream. `flow` = this trace plus a narrated explanation; `ripple` = the reverse (who calls in)."
     )]
     fn thread(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
         let depth = p.depth.unwrap_or(4) as usize;
@@ -531,7 +543,7 @@ impl ComindServer {
 
     #[tool(
         name = "context_pack",
-        description = "The minimal token-budgeted set of symbols to read in order to change the focus symbol safely"
+        description = "The minimal token-budgeted set of symbols to read before editing the focus symbol safely. Use to assemble just-enough context for a change. Returns ranked symbols with locations + token estimates within the budget."
     )]
     fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
         let budget = p.token_budget.unwrap_or(1500) as usize;
@@ -568,6 +580,19 @@ impl ComindServer {
     }
 }
 
+#[rmcp::tool_handler(router = Self::tool_router())]
+impl rmcp::ServerHandler for ComindServer {
+    fn get_info(&self) -> rmcp::model::ServerInfo {
+        rmcp::model::ServerInfo::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::from_build_env())
+        .with_instructions(INSTRUCTIONS)
+    }
+}
+
 fn hop_dto(h: crate::graph::Hop) -> HopDto {
     HopDto {
         name: h.node.name,
@@ -581,6 +606,7 @@ fn hop_dto(h: crate::graph::Hop) -> HopDto {
 
 fn hit_dto(h: &crate::search::SearchHit) -> SearchHitDto {
     SearchHitDto {
+        id: h.id.clone(),
         name: h.name.clone(),
         kind: h.kind.clone(),
         repo: h.repo.clone(),
@@ -596,9 +622,14 @@ fn hit_dto(h: &crate::search::SearchHit) -> SearchHitDto {
 
 fn node_bullet(o: &mut String, n: &NodeDto) {
     let _ = write!(o, "- **{}** _{}_ — `{}`", n.name, n.kind, n.location);
+    if !n.repo.is_empty() {
+        let _ = write!(o, " · {}", n.repo);
+    }
     if let Some(s) = &n.summary {
         let _ = write!(o, " — {s}");
     }
+    // Stable handle to pass back to zoom/ripple/thread/flow/context_pack.
+    let _ = write!(o, "  ·  id `{}`", n.id);
     o.push('\n');
 }
 
@@ -624,7 +655,15 @@ fn md_repos(d: &ReposDto) -> String {
 }
 
 fn md_suggest(d: &SuggestDto) -> String {
-    let mut o = format!("## Suggested questions ({} shown)\n\n", d.suggestions.len());
+    let shown = d.suggestions.len();
+    let mut o = if d.total > shown {
+        format!(
+            "## Suggested questions ({shown} of {} — pass `about` to filter)\n\n",
+            d.total
+        )
+    } else {
+        format!("## Suggested questions ({shown})\n\n")
+    };
     if d.suggestions.is_empty() {
         return o + "_none — index was built without `--enrich`, or no match_\n";
     }
@@ -652,7 +691,7 @@ fn md_find(query: &str, d: &FindDto) -> String {
 
 fn md_zoom(focus: &str, d: &ZoomDto) -> String {
     if !d.found {
-        return format!("## zoom `{focus}`\n\n_no symbol matched_\n");
+        return format!("## zoom `{focus}`\n\n_no symbol matched — call `find` with the name to get its id, then retry._\n");
     }
     let mut o = String::new();
     if let Some(f) = &d.focus {
@@ -692,7 +731,7 @@ fn md_hop_lines(o: &mut String, hops: &[HopDto]) {
 
 fn md_ripple(d: &RippleDto) -> String {
     if !d.found {
-        return format!("## Blast radius: `{}`\n\n_no symbol matched_\n", d.focus);
+        return format!("## Blast radius: `{}`\n\n_no symbol matched — call `find` with the name to get its id, then retry._\n", d.focus);
     }
     let mut o = format!(
         "## Blast radius: `{}`\n\n**{} dependent(s)**",
@@ -726,7 +765,7 @@ fn md_thread(d: &ThreadDto) -> String {
 
 fn md_flow(d: &FlowDto) -> String {
     if !d.found {
-        return format!("## Flow: `{}`\n\n_no symbol matched_\n", d.focus);
+        return format!("## Flow: `{}`\n\n_no symbol matched — call `find` with the name to get its id, then retry._\n", d.focus);
     }
     let mut o = format!("## Flow: `{}`\n\n", d.focus);
     match &d.narration {
@@ -750,7 +789,7 @@ fn md_flow(d: &FlowDto) -> String {
 
 fn md_pack(d: &PackDto) -> String {
     if !d.found {
-        return format!("## Context pack: `{}`\n\n_no symbol matched_\n", d.focus);
+        return format!("## Context pack: `{}`\n\n_no symbol matched — call `find` with the name to get its id, then retry._\n", d.focus);
     }
     let mut o = format!(
         "## Context to change `{}`\n\n_~{} of {} token budget · {} symbols_\n\n",
