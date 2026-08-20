@@ -187,13 +187,14 @@ file → built-in default**.
 index_dir   = "~/.local/share/comind"   # default --to / --from (local path or s3://…)
 llm_model   = "gpt-4o-mini"
 embed_model = "minishlab/potion-base-8M"
+format      = "md"    # default when --format is absent (search: md|table, serve: md|json)
 # llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
 # max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
 # max_flows   = 50    # cap --flows narrations (omit = no cap)
 ```
 
 Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`,
-`COMIND_LLM_BASE_URL`.
+`COMIND_LLM_BASE_URL`, `COMIND_FORMAT`.
 
 **Secrets stay in the environment**, never the file: `--enrich`/`--flows` use an LLM via Rig
 (default OpenAI, `OPENAI_API_KEY`; any OpenAI-compatible endpoint via `COMIND_LLM_BASE_URL`). For an

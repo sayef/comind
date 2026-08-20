@@ -86,7 +86,7 @@ enum Cmd {
         /// Prebuilt index to read (default: configured <index>/_graph)
         #[arg(long)]
         from: Option<String>,
-        /// Output format: `md` for markdown
+        /// Output format: `md` or `table` (default from config, else `md`)
         #[arg(long)]
         format: Option<String>,
         /// Shortcut for `--format md`
@@ -176,13 +176,23 @@ fn main() -> ExitCode {
             format,
             md,
         } => {
-            let markdown = md || matches!(format.as_deref(), Some("md" | "markdown"));
+            // CLI flag → config → default. `md`/`markdown` = markdown; anything else = table.
+            let fmt = if md { Some("md".to_string()) } else { format };
+            let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
+            let markdown = matches!(fmt.as_str(), "md" | "markdown");
             cmd_search(&query.join(" "), from.as_deref(), markdown)
         }
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
         Cmd::Flow { focus, from } => cmd_flow(&focus, from.as_deref()),
         Cmd::Serve { from, format, json } => {
-            let markdown = !json && !matches!(format.as_deref(), Some("json"));
+            // CLI flag → config → default. `json` = raw JSON; anything else = markdown.
+            let fmt = if json {
+                Some("json".to_string())
+            } else {
+                format
+            };
+            let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
+            let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(from.as_deref(), markdown)
         }
         Cmd::Config { action } => cmd_config(action),
