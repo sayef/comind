@@ -1,6 +1,7 @@
 //! Comind CLI — the single distributable binary.
 //!
-//! Subcommands: `index`, `link`, `explore`, `search`, `flow`, `changed`, `serve`.
+//! Subcommands: `index`, `link`, `explore`, `search`, `find`, `repos`, `stats`, `guide`,
+//! `flow`, `changed`, `serve`, `config`.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -86,6 +87,9 @@ enum Cmd {
         /// Index directory to read — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
+        /// Restrict results to one repo (by name)
+        #[arg(long)]
+        repo: Option<String>,
         /// Output format: `md` or `table` (default from config, else `md`)
         #[arg(long)]
         format: Option<String>,
@@ -120,6 +124,32 @@ enum Cmd {
         /// Shortcut for `--format json`
         #[arg(long)]
         json: bool,
+    },
+    /// Find symbols by name or path substring
+    Find {
+        /// Name or descriptor/path substring
+        query: String,
+        /// Index directory to read — root; default: configured index dir
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// List indexed repositories and their symbol counts
+    Repos {
+        /// Index directory to read — root; default: configured index dir
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Index statistics: symbols, edges, kinds, repos, enrichment coverage
+    Stats {
+        /// Index directory to read — root; default: configured index dir
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Print the repo's inferred coding style guide (built with --enrich)
+    Guide {
+        /// Index directory to read — root; default: configured index dir
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
     },
     /// Show or scaffold the config file
     Config {
@@ -188,6 +218,7 @@ fn main() -> ExitCode {
         Cmd::Search {
             query,
             index_dir,
+            repo,
             format,
             md,
         } => {
@@ -195,8 +226,17 @@ fn main() -> ExitCode {
             let fmt = if md { Some("md".to_string()) } else { format };
             let fmt = fmt.unwrap_or_else(|| comind::config::Config::load().format());
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            cmd_search(&query.join(" "), index_dir.as_deref(), markdown)
+            cmd_search(
+                &query.join(" "),
+                index_dir.as_deref(),
+                repo.as_deref(),
+                markdown,
+            )
         }
+        Cmd::Find { query, index_dir } => cmd_find(&query, index_dir.as_deref()),
+        Cmd::Repos { index_dir } => cmd_repos(index_dir.as_deref()),
+        Cmd::Stats { index_dir } => cmd_stats(index_dir.as_deref()),
+        Cmd::Guide { index_dir } => cmd_guide(index_dir.as_deref()),
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
         Cmd::Flow { focus, index_dir } => cmd_flow(&focus, index_dir.as_deref()),
         Cmd::Serve {
@@ -351,7 +391,7 @@ fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
 
 /// `comind search <query...> --from <uri>` — semantic search reranked by graph centrality,
 /// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
-fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
+fn cmd_search(query: &str, from: Option<&str>, repo: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -385,17 +425,23 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
             .collect();
 
     // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comind's code-aware boosts
-    // and dependency-graph centrality — shared with the `search` MCP tool.
-    let hits = match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, query, 12)
-    {
-        Ok(h) => h,
-        Err(e) => {
-            comind::ui::err(&format!(
-                "hybrid search failed (was the index built with --no-embed?): {e:#}"
-            ));
-            return ExitCode::FAILURE;
-        }
-    };
+    // and dependency-graph centrality — shared with the `search` MCP tool. When scoping to a
+    // repo, over-fetch then filter so we still return a full page.
+    let limit = if repo.is_some() { 60 } else { 12 };
+    let mut hits =
+        match comind::search::hybrid_blocking(uri, &by_id, &g, &enrich, &embedder, query, limit) {
+            Ok(h) => h,
+            Err(e) => {
+                comind::ui::err(&format!(
+                    "hybrid search failed (was the index built with --no-embed?): {e:#}"
+                ));
+                return ExitCode::FAILURE;
+            }
+        };
+    if let Some(r) = repo {
+        hits.retain(|h| h.repo.eq_ignore_ascii_case(r));
+        hits.truncate(12);
+    }
 
     if markdown {
         print!("{}", comind::search::markdown(query, &hits));
@@ -422,6 +468,128 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
         println!("{t}");
     }
     ExitCode::SUCCESS
+}
+
+/// Load the prebuilt graph for a read-only command, with a friendly missing-index error.
+fn read_graph_or_err(from: Option<&str>) -> Result<(Vec<Symbol>, Vec<Edge>), ()> {
+    let uri = comind::config::Config::load().graph_dir(from);
+    comind::index::read_graph_blocking(&uri)
+        .map_err(|e| comind::ui::err(&friendly_load_err(&uri, &e)))
+}
+
+/// `comind find <query>` — locate symbols by name/descriptor/path substring.
+fn cmd_find(query: &str, from: Option<&str>) -> ExitCode {
+    let Ok((symbols, edges)) = read_graph_or_err(from) else {
+        return ExitCode::FAILURE;
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let hits = g.find(query, 30);
+    comind::ui::header(&format!(
+        "find: \"{query}\" ({})",
+        plural(hits.len(), "match")
+    ));
+    if hits.is_empty() {
+        comind::ui::note("no symbols matched");
+        return ExitCode::SUCCESS;
+    }
+    let mut t = comind::ui::table(&["symbol", "kind", "repo", "location", "id"]);
+    for n in &hits {
+        t.add_row(vec![
+            n.name.clone(),
+            n.kind.clone(),
+            n.repo.clone(),
+            n.location.clone(),
+            n.id.clone(),
+        ]);
+    }
+    println!("{t}");
+    ExitCode::SUCCESS
+}
+
+/// `comind repos` — list indexed repositories and their symbol counts.
+fn cmd_repos(from: Option<&str>) -> ExitCode {
+    let Ok((symbols, edges)) = read_graph_or_err(from) else {
+        return ExitCode::FAILURE;
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let repos = g.repos();
+    comind::ui::header(&format!("Indexed repositories ({})", repos.len()));
+    if repos.is_empty() {
+        comind::ui::note("none");
+        return ExitCode::SUCCESS;
+    }
+    let mut t = comind::ui::table(&["repo", "symbols"]);
+    for (r, n) in &repos {
+        t.add_row(vec![r.clone(), n.to_string()]);
+    }
+    comind::ui::right_align(&mut t, &[1]);
+    println!("{t}");
+    ExitCode::SUCCESS
+}
+
+/// `comind stats` — symbols, edges, kinds, repos, enrichment coverage.
+fn cmd_stats(from: Option<&str>) -> ExitCode {
+    let Ok((symbols, edges)) = read_graph_or_err(from) else {
+        return ExitCode::FAILURE;
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    comind::ui::header("Index stats");
+    comind::ui::field("symbols", &symbols.len().to_string());
+    comind::ui::field("edges", &edges.len().to_string());
+    comind::ui::field("repos", &g.repos().len().to_string());
+    let enriched = comind::config::Config::load().graph_dir(from);
+    let enriched = comind::index::read_enrichment_blocking(&enriched)
+        .ok()
+        .flatten()
+        .map(|v| v.len())
+        .unwrap_or(0);
+    comind::ui::field(
+        "enriched",
+        &format!("{enriched} / {} symbols", symbols.len()),
+    );
+
+    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+    for s in &symbols {
+        *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
+    }
+    let mut kt = comind::ui::table(&["kind", "count"]);
+    for (k, n) in &by_kind {
+        kt.add_row(vec![k.clone(), n.to_string()]);
+    }
+    comind::ui::right_align(&mut kt, &[1]);
+    println!("{kt}");
+
+    let mut by_edge: BTreeMap<String, usize> = BTreeMap::new();
+    for e in &edges {
+        *by_edge.entry(e.kind.as_str().to_string()).or_default() += 1;
+    }
+    let mut et = comind::ui::table(&["edge", "count"]);
+    for (k, n) in &by_edge {
+        et.add_row(vec![k.clone(), n.to_string()]);
+    }
+    comind::ui::right_align(&mut et, &[1]);
+    println!("{et}");
+    ExitCode::SUCCESS
+}
+
+/// `comind guide` — the repo's inferred coding style guide (built with --enrich).
+fn cmd_guide(from: Option<&str>) -> ExitCode {
+    let uri = comind::config::Config::load().graph_dir(from);
+    match comind::index::read_style_guide_blocking(&uri) {
+        Ok(Some(guide)) => {
+            comind::ui::header("Style guide");
+            println!("{guide}");
+            ExitCode::SUCCESS
+        }
+        Ok(None) => {
+            comind::ui::note("no style guide yet — build the index with --enrich");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&friendly_load_err(&uri, &e));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn truncate(s: &str, n: usize) -> String {

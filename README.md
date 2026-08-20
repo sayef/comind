@@ -112,7 +112,11 @@ is also attached; use `serve --format json` for raw JSON).
 | `comind index <repo> [--enrich] [--flows] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
 | `comind link <repos…> [--enrich] [--flows] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
 | `comind explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
-| `comind search <query…> [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
+| `comind search <query…> [--repo <name>] [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
+| `comind find <query> [--index-dir <dir>]` | Locate symbols by name/path substring |
+| `comind repos [--index-dir <dir>]` | List indexed repositories + symbol counts |
+| `comind stats [--index-dir <dir>]` | Index stats: symbols, edges, kinds, repos, enrichment coverage |
+| `comind guide [--index-dir <dir>]` | The repo's inferred coding style guide (needs `--enrich`) |
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
