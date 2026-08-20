@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="comind" width="88">
+    <img src="assets/logo.svg" alt="comind" width="104">
   </picture>
 </p>
 
@@ -11,8 +11,8 @@
 
 <p align="center">
   <a href="https://github.com/sayef/comind/actions/workflows/ci.yml"><img src="https://github.com/sayef/comind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3f7e78" alt="MIT license"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94%2B-3f7e78" alt="Rust 1.94+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A34A" alt="MIT license"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94%2B-16A34A" alt="Rust 1.94+"></a>
   <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comind"><img src="https://img.shields.io/crates/v/comind.svg" alt="crates.io"></a> -->
 </p>
 
@@ -235,4 +235,10 @@ with `pre-commit install`, or the Rust-native `prek install` (both read the same
 
 MIT.
 
-The logo mark is adapted from the [Phosphor Icons](https://phosphoricons.com) `graph` glyph (MIT).
+## Brand
+
+Logo/icon assets live in [`assets/`](assets/) — mark (`logo.svg` / `logo-dark.svg`), self-contained
+icon (`icon.svg`), wordmark + slogan lockups, and a social card (`og.svg`). They're generated from
+[`scripts/gen_brand.py`](scripts/gen_brand.py) (edit palette/geometry there); rasterize to PNG with
+[`scripts/render_pngs.sh`](scripts/render_pngs.sh). The graph glyph is adapted from the
+[Phosphor Icons](https://phosphoricons.com) `graph` glyph (MIT).
