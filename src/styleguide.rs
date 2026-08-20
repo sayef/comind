@@ -1,598 +1,317 @@
-//! Evidence-based style-guide inputs.
+//! Evidence for the LLM style-guide synthesis.
 //!
-//! Produces a compact, deterministic **evidence pack** for one repo — measured naming/size stats
-//! from the parsed symbols plus a light source line-scan for idioms/docstrings/typing — and
-//! extracts **enforced-convention facts** from the repo's tooling config (editorconfig, ruff/black,
-//! pre-commit, prettier, tsconfig, Cargo/rustfmt, version pins). The rendered markdown grounds the
-//! LLM synthesis in counts + `file:line` examples rather than generic guesses.
+//! Surface stats (naming casing, docstring style, idiom counts) can be *computed*, but the valuable
+//! conventions — how the repo uses its libraries, AWS/DB/HTTP I/O, its own shared modules — cannot
+//! be derived from statistics; the model has to read real code. So this assembles a bounded
+//! **evidence payload**: the dependency stack, an import-frequency histogram, and real code
+//! excerpts (a representative call-site per top dependency, plus entrypoint/config/test files),
+//! alongside the surface stats. `COMIND_DEBUG_EVIDENCE=1` prints the payload to stderr.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::model::{Symbol, SymbolKind};
+use crate::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
-/// Build the full evidence block (measured stats + enforced-config facts) for `repo`, whose files
-/// live under `root`. `symbols` are that repo's symbols. Returns markdown to feed the LLM.
-pub fn evidence_block(root: &Path, symbols: &[&Symbol]) -> String {
+const MAX_EXCERPTS: usize = 12;
+const EXCERPT_LINES: usize = 20;
+const CHAR_BUDGET: usize = 16000; // rough cap on the whole payload
+
+pub fn evidence_block(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> String {
     let mut o = String::new();
-    naming_section(&mut o, symbols);
-    size_section(&mut o, symbols);
-    scan_section(&mut o, root, symbols);
-    config_section(&mut o, root);
+    file_tree(&mut o, symbols);
+    stack(&mut o, root);
+    let hist = import_histogram(&mut o, symbols, edges);
+    surface(&mut o, symbols, root);
+    excerpts(&mut o, root, symbols, &hist);
+    if o.len() > CHAR_BUDGET {
+        o.truncate(CHAR_BUDGET);
+        o.push_str("\n…(truncated)\n");
+    }
+    if std::env::var("COMIND_DEBUG_EVIDENCE").is_ok() {
+        eprintln!("\n----- evidence payload -----\n{o}\n----- end evidence -----\n");
+    }
     o
 }
 
-// ---- naming ---------------------------------------------------------------------------------
+// ---- file tree -----------------------------------------------------------------------------
+fn file_tree(o: &mut String, symbols: &[&Symbol]) {
+    let mut dirs: BTreeMap<String, usize> = BTreeMap::new();
+    for s in symbols
+        .iter()
+        .filter(|s| matches!(s.kind, SymbolKind::File))
+    {
+        let top = s.file_path.split('/').next().unwrap_or(".").to_string();
+        let key = if s.file_path.contains('/') {
+            format!("{top}/")
+        } else {
+            "(root)".into()
+        };
+        *dirs.entry(key).or_default() += 1;
+    }
+    let _ = writeln!(o, "## Layout (top-level dirs → file count)");
+    for (d, n) in dirs.iter() {
+        let _ = writeln!(o, "- {d}  {n}");
+    }
+    o.push('\n');
+}
 
-fn kind_label(k: &SymbolKind) -> Option<&'static str> {
-    match k {
-        SymbolKind::Function => Some("functions"),
-        SymbolKind::Method => Some("methods"),
-        SymbolKind::Class => Some("classes"),
-        SymbolKind::Interface => Some("interfaces"),
-        _ => None,
+// ---- dependency stack ----------------------------------------------------------------------
+fn stack(o: &mut String, root: &Path) {
+    let read = |n: &str| std::fs::read_to_string(root.join(n)).ok();
+    let mut deps: Vec<String> = Vec::new();
+
+    if let Some(txt) = read("pyproject.toml") {
+        if let Ok(v) = txt.parse::<toml::Value>() {
+            if let Some(arr) = v
+                .get("project")
+                .and_then(|p| p.get("dependencies"))
+                .and_then(|d| d.as_array())
+            {
+                for d in arr {
+                    if let Some(s) = d.as_str() {
+                        deps.push(s.to_string());
+                    }
+                }
+            }
+            if let Some(tbl) = v
+                .get("tool")
+                .and_then(|t| t.get("poetry"))
+                .and_then(|p| p.get("dependencies"))
+                .and_then(|d| d.as_table())
+            {
+                for (k, val) in tbl {
+                    if k != "python" {
+                        deps.push(format!("{k} {}", val.as_str().unwrap_or("")));
+                    }
+                }
+            }
+        }
+    }
+    if deps.is_empty() {
+        if let Some(txt) = read("requirements.txt") {
+            for l in txt.lines() {
+                let l = l.trim();
+                if !l.is_empty() && !l.starts_with('#') {
+                    deps.push(l.to_string());
+                }
+            }
+        }
+    }
+    if let Some(txt) = read("package.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+            if let Some(obj) = v.get("dependencies").and_then(|d| d.as_object()) {
+                for (k, ver) in obj {
+                    deps.push(format!("{k} {}", ver.as_str().unwrap_or("")));
+                }
+            }
+        }
+    }
+    if !deps.is_empty() {
+        let _ = writeln!(o, "## Declared dependencies");
+        for d in deps.iter().take(40) {
+            let _ = writeln!(o, "- {}", d.trim());
+        }
+        o.push('\n');
     }
 }
 
+// ---- import histogram + call-site targets --------------------------------------------------
+/// Returns ranked `(module, importing_file_paths)` for third-party imports, most-used first.
+fn import_histogram(
+    o: &mut String,
+    symbols: &[&Symbol],
+    edges: &[Edge],
+) -> Vec<(String, Vec<String>)> {
+    let id2file: BTreeMap<String, String> = symbols
+        .iter()
+        .map(|s| (s.id.render(), s.file_path.clone()))
+        .collect();
+    // module -> set of importing files
+    let mut mods: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for e in edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
+        let module = e.dst.descriptor.split('/').next().unwrap_or("").to_string();
+        if module.is_empty() {
+            continue;
+        }
+        let file = id2file.get(&e.src.render()).cloned().unwrap_or_default();
+        mods.entry(module).or_default().insert(file);
+    }
+    let mut ranked: Vec<(String, Vec<String>)> = mods
+        .into_iter()
+        .map(|(m, fs)| {
+            (
+                m,
+                fs.into_iter().filter(|f| !f.is_empty()).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
+    if !ranked.is_empty() {
+        let _ = writeln!(o, "## Most-used imports (module → #files)");
+        for (m, fs) in ranked.iter().take(18) {
+            let _ = writeln!(o, "- {m}  ({} files)", fs.len());
+        }
+        o.push('\n');
+    }
+    ranked
+}
+
+// ---- surface stats (condensed) -------------------------------------------------------------
 fn casing(name: &str) -> &'static str {
     let core = name.trim_matches('_');
     if core.is_empty() {
         return "other";
     }
-    if core.contains('-') {
-        return "kebab-case";
-    }
-    let has_upper = core.chars().any(|c| c.is_ascii_uppercase());
-    let has_lower = core.chars().any(|c| c.is_ascii_lowercase());
-    let has_us = core.contains('_');
-    if !has_lower && has_upper {
+    let up = core.chars().any(|c| c.is_ascii_uppercase());
+    let lo = core.chars().any(|c| c.is_ascii_lowercase());
+    let us = core.contains('_');
+    if !lo && up {
         return "SCREAMING_SNAKE";
     }
-    if has_us && has_lower {
+    if us && lo {
         return "snake_case";
     }
-    let first = core.chars().next().unwrap();
-    if first.is_ascii_uppercase() && has_lower {
+    let f = core.chars().next().unwrap();
+    if f.is_ascii_uppercase() && lo {
         return "PascalCase";
     }
-    if first.is_ascii_lowercase() && has_upper {
+    if f.is_ascii_lowercase() && up {
         return "camelCase";
     }
-    if !has_upper {
-        return "snake_case"; // single lowercase word
-    }
-    "other"
+    "snake_case"
 }
 
-fn naming_section(o: &mut String, symbols: &[&Symbol]) {
-    let _ = writeln!(o, "## Naming (measured)");
-    let mut groups: BTreeMap<&str, Vec<&Symbol>> = BTreeMap::new();
-    for s in symbols {
-        if let Some(label) = kind_label(&s.kind) {
-            groups.entry(label).or_default().push(s);
+fn surface(o: &mut String, symbols: &[&Symbol], root: &Path) {
+    let dom = |kinds: &[SymbolKind]| -> Option<(String, usize, usize)> {
+        let mut h: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut n = 0;
+        for s in symbols.iter().filter(|s| kinds.contains(&s.kind)) {
+            *h.entry(casing(&s.name)).or_default() += 1;
+            n += 1;
         }
+        h.into_iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(k, c)| (k.to_string(), c, n))
+    };
+    let _ = writeln!(o, "## Surface stats (measured)");
+    if let Some((k, c, n)) = dom(&[SymbolKind::Function, SymbolKind::Method]) {
+        let _ = writeln!(o, "- functions/methods: {k} {}/{n}", c);
     }
-    if groups.is_empty() {
-        let _ = writeln!(o, "- (no named symbols)\n");
-        return;
+    if let Some((k, c, n)) = dom(&[SymbolKind::Class, SymbolKind::Interface]) {
+        let _ = writeln!(o, "- classes: {k} {}/{n}", c);
     }
-    for (label, syms) in &groups {
-        let mut hist: BTreeMap<&str, usize> = BTreeMap::new();
-        for s in syms {
-            *hist.entry(casing(&s.name)).or_default() += 1;
-        }
-        let total = syms.len();
-        let (dom, dom_n) = hist
-            .iter()
-            .max_by_key(|(_, n)| **n)
-            .map(|(k, n)| (*k, *n))
-            .unwrap_or(("other", 0));
-        let pct = (dom_n as f64 / total as f64 * 100.0).round() as u64;
-        // Private prefix ratio (leading underscore).
-        let priv_n = syms.iter().filter(|s| s.name.starts_with('_')).count();
-        let counter: Vec<String> = syms
-            .iter()
-            .filter(|s| casing(&s.name) != dom)
-            .take(4)
-            .map(|s| format!("{}@{}:{}", s.name, s.file_path, s.range.start.line))
-            .collect();
-        let _ = write!(o, "- {label}: {dom} {pct}% ({dom_n}/{total})");
-        if priv_n > 0 {
-            let _ = write!(o, "; leading-underscore {priv_n}/{total}");
-        }
-        if !counter.is_empty() {
-            let _ = write!(o, "; counter: {}", counter.join(", "));
-        }
-        o.push('\n');
-    }
-    o.push('\n');
-}
-
-// ---- size -----------------------------------------------------------------------------------
-
-fn pct(mut v: Vec<u32>, p: f64) -> u32 {
-    if v.is_empty() {
-        return 0;
-    }
-    v.sort_unstable();
-    let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
-    v[idx]
-}
-
-fn size_section(o: &mut String, symbols: &[&Symbol]) {
-    let fn_lens: Vec<u32> = symbols
-        .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
-        .map(|s| s.range.end.line.saturating_sub(s.range.start.line) + 1)
-        .collect();
-    let file_lens: Vec<u32> = symbols
+    // one cheap idiom + docstring scan over a sample of files
+    let mut files: Vec<&str> = symbols
         .iter()
         .filter(|s| matches!(s.kind, SymbolKind::File))
-        .map(|s| s.range.end.line)
+        .map(|s| s.file_path.as_str())
         .collect();
-    let _ = writeln!(o, "## Size (measured)");
-    if !fn_lens.is_empty() {
-        let _ = writeln!(
-            o,
-            "- function length (lines): median {}, p95 {}",
-            pct(fn_lens.clone(), 0.5),
-            pct(fn_lens, 0.95)
-        );
-    }
-    if !file_lens.is_empty() {
-        let _ = writeln!(
-            o,
-            "- file length (lines): median {}, p95 {}",
-            pct(file_lens.clone(), 0.5),
-            pct(file_lens, 0.95)
-        );
-    }
-    o.push('\n');
-}
-
-// ---- source line-scan (docstrings, typing, idioms) ------------------------------------------
-
-#[derive(Default)]
-struct Scan {
-    // docstrings
-    doc_public: usize,
-    doc_documented: usize,
-    doc_google: usize,
-    doc_numpy: usize,
-    doc_rest: usize,
-    doc_jsdoc: usize,
-    // python typing (single-line signatures)
-    py_sig: usize,
-    py_ret_annot: usize,
-    // idiom counts
-    bare_except: usize,
-    except_exception: usize,
-    print_calls: usize,
-    logger: usize,
-    fstring: usize,
-    format_call: usize,
-    async_def: usize,
-    dataclass: usize,
-    pydantic: usize,
-    // ts idioms
-    ts_interface: usize,
-    ts_type_alias: usize,
-    ts_enum: usize,
-    console_log: usize,
-    any_type: usize,
-}
-
-fn is_py(path: &str) -> bool {
-    path.ends_with(".py")
-}
-fn is_ts(path: &str) -> bool {
-    path.ends_with(".ts")
-        || path.ends_with(".tsx")
-        || path.ends_with(".js")
-        || path.ends_with(".jsx")
-}
-
-fn scan_section(o: &mut String, root: &Path, symbols: &[&Symbol]) {
-    // Unique files with their symbols.
-    let mut by_file: BTreeMap<&str, Vec<&Symbol>> = BTreeMap::new();
-    for s in symbols {
-        by_file.entry(s.file_path.as_str()).or_default().push(s);
-    }
-    let mut sc = Scan::default();
-    for (path, syms) in &by_file {
-        let Ok(src) = std::fs::read_to_string(root.join(path)) else {
-            continue;
-        };
-        let lines: Vec<&str> = src.lines().collect();
-        // idiom counts over the file
-        for l in &lines {
-            let t = l.trim_start();
-            if is_py(path) {
-                if t.starts_with("except:") || t == "except:" {
-                    sc.bare_except += 1;
-                } else if t.starts_with("except Exception") {
-                    sc.except_exception += 1;
-                }
-                if t.starts_with("print(") {
-                    sc.print_calls += 1;
-                }
-                if t.contains("logging.") || t.contains("logger.") || t.contains("getLogger") {
-                    sc.logger += 1;
-                }
-                if t.contains("f\"") || t.contains("f'") {
-                    sc.fstring += 1;
-                }
-                if t.contains(".format(") {
-                    sc.format_call += 1;
-                }
-                if t.starts_with("async def") {
-                    sc.async_def += 1;
-                }
-                if t.starts_with("@dataclass") {
-                    sc.dataclass += 1;
-                }
-                if t.contains("BaseModel") {
-                    sc.pydantic += 1;
-                }
-            } else if is_ts(path) {
-                if t.starts_with("interface ") {
-                    sc.ts_interface += 1;
-                }
-                if t.starts_with("type ") && t.contains('=') {
-                    sc.ts_type_alias += 1;
-                }
-                if t.starts_with("enum ") || t.starts_with("export enum ") {
-                    sc.ts_enum += 1;
-                }
-                if t.contains("console.log") {
-                    sc.console_log += 1;
-                }
-                if t.contains(": any") {
-                    sc.any_type += 1;
-                }
+    files.sort();
+    files.dedup();
+    let (mut logger, mut prints, mut fstr, mut fmt, mut bare_exc, mut broad_exc) =
+        (0, 0, 0, 0, 0, 0);
+    let (mut g, mut numpy, mut rest) = (0, 0, 0);
+    for f in files.iter().take(400) {
+        if let Ok(src) = std::fs::read_to_string(root.join(f)) {
+            logger += src.matches("logger.").count() + src.matches("getLogger").count();
+            prints += src.matches("print(").count();
+            fstr += src.matches("f\"").count() + src.matches("f'").count();
+            fmt += src.matches(".format(").count();
+            bare_exc += src.matches("except:").count();
+            broad_exc += src.matches("except Exception").count();
+            if src.contains("Args:") || src.contains("Returns:") {
+                g += 1;
+            }
+            if src.contains("Parameters\n") {
+                numpy += 1;
+            }
+            if src.contains(":param ") {
+                rest += 1;
             }
         }
-        // per-symbol docstrings + python typing
-        for s in syms {
-            match s.kind {
-                SymbolKind::Function | SymbolKind::Method | SymbolKind::Class => {}
-                _ => continue,
-            }
-            let public = !s.name.starts_with('_');
-            if public {
-                sc.doc_public += 1;
-            }
-            let start = s.range.start.line as usize; // 1-based
-            if is_py(path) {
-                // docstring = one of the ~3 lines after the def/class header starts with a quote
-                let mut documented = false;
-                for l in lines.iter().skip(start).take(3) {
-                    let t = l.trim_start();
-                    if t.starts_with("\"\"\"") || t.starts_with("'''") || t.starts_with("r\"\"\"") {
-                        documented = true;
-                        break;
-                    }
-                    if !t.is_empty() && !t.starts_with('#') {
-                        break;
-                    }
-                }
-                if documented && public {
-                    sc.doc_documented += 1;
-                }
-                // typing from single-line signature
-                if let Some(sig) = &s.signature {
-                    if sig.contains('(') && sig.trim_end().ends_with(':') {
-                        sc.py_sig += 1;
-                        if sig.contains("->") {
-                            sc.py_ret_annot += 1;
-                        }
-                    }
-                }
-            } else if is_ts(path) && start >= 1 {
-                // JSDoc block ends on the line above the symbol
-                if let Some(prev) = lines.get(start - 2) {
-                    if prev.trim_start().starts_with("*/") || prev.trim_start().starts_with("/**") {
-                        if public {
-                            sc.doc_documented += 1;
-                        }
-                        sc.doc_jsdoc += 1;
-                    }
-                }
-            }
-        }
-        // docstring style detection over the whole file
-        if src.contains("Args:") || src.contains("Returns:") || src.contains("Raises:") {
-            sc.doc_google += 1;
-        }
-        if src.contains("Parameters\n") && src.contains("----------") {
-            sc.doc_numpy += 1;
-        }
-        if src.contains(":param ") || src.contains(":returns:") {
-            sc.doc_rest += 1;
-        }
     }
-
-    let _ = writeln!(o, "## Docstrings & typing (measured)");
-    if sc.doc_public > 0 {
-        let dpct = (sc.doc_documented as f64 / sc.doc_public as f64 * 100.0).round() as u64;
-        let style = [
-            ("Google", sc.doc_google),
-            ("NumPy", sc.doc_numpy),
-            ("reST", sc.doc_rest),
-            ("JSDoc", sc.doc_jsdoc),
-        ]
+    let style = [("Google", g), ("NumPy", numpy), ("reST", rest)]
         .into_iter()
         .max_by_key(|(_, n)| *n)
         .filter(|(_, n)| *n > 0)
         .map(|(k, _)| k)
-        .unwrap_or("none");
-        let _ = writeln!(
-            o,
-            "- public symbols documented: {dpct}% ({}/{}); dominant style: {style}",
-            sc.doc_documented, sc.doc_public
-        );
-    }
-    if sc.py_sig > 0 {
-        let rpct = (sc.py_ret_annot as f64 / sc.py_sig as f64 * 100.0).round() as u64;
-        let _ = writeln!(
-            o,
-            "- python return-type annotations: {rpct}% ({}/{} single-line sigs)",
-            sc.py_ret_annot, sc.py_sig
-        );
-    }
-    o.push('\n');
-
-    let _ = writeln!(o, "## Idioms (measured counts)");
-    let py = [
-        ("bare `except:`", sc.bare_except),
-        ("`except Exception`", sc.except_exception),
-        ("`print(`", sc.print_calls),
-        ("logger", sc.logger),
-        ("f-strings", sc.fstring),
-        ("`.format(`", sc.format_call),
-        ("`async def`", sc.async_def),
-        ("`@dataclass`", sc.dataclass),
-        ("pydantic `BaseModel`", sc.pydantic),
-    ];
-    let ts = [
-        ("`interface`", sc.ts_interface),
-        ("`type` alias", sc.ts_type_alias),
-        ("`enum`", sc.ts_enum),
-        ("`console.log`", sc.console_log),
-        ("`: any`", sc.any_type),
-    ];
-    let mut any = false;
-    for (label, n) in py.into_iter().chain(ts) {
-        if n > 0 {
-            let _ = writeln!(o, "- {label}: {n}");
-            any = true;
-        }
-    }
-    if !any {
-        let _ = writeln!(o, "- (none detected)");
-    }
+        .unwrap_or("none/mixed");
+    let _ = writeln!(o, "- docstring style (dominant): {style}");
+    let _ = writeln!(o, "- logging: logger×{logger} vs print×{prints}; strings: f-string×{fstr} vs .format×{fmt}; except: bare×{bare_exc}, broad×{broad_exc}");
     o.push('\n');
 }
 
-// ---- enforced-config facts ------------------------------------------------------------------
+// ---- real code excerpts --------------------------------------------------------------------
+fn read_excerpt(root: &Path, file: &str, lines: usize) -> Option<String> {
+    let src = std::fs::read_to_string(root.join(file)).ok()?;
+    let head: Vec<&str> = src.lines().take(lines).collect();
+    if head.iter().all(|l| l.trim().is_empty()) {
+        return None;
+    }
+    Some(head.join("\n"))
+}
 
-fn config_section(o: &mut String, root: &Path) {
-    let mut facts: Vec<String> = Vec::new();
-    let read = |name: &str| std::fs::read_to_string(root.join(name)).ok();
+fn excerpts(o: &mut String, root: &Path, symbols: &[&Symbol], hist: &[(String, Vec<String>)]) {
+    let mut picked: Vec<String> = Vec::new();
+    let push_file = |picked: &mut Vec<String>, f: &str| {
+        if !f.is_empty() && !picked.iter().any(|p| p == f) && picked.len() < MAX_EXCERPTS {
+            picked.push(f.to_string());
+        }
+    };
 
-    // .editorconfig (INI)
-    if let Some(txt) = read(".editorconfig") {
-        for line in txt.lines() {
-            let l = line.trim();
-            for key in [
-                "indent_style",
-                "indent_size",
-                "max_line_length",
-                "end_of_line",
-                "insert_final_newline",
-            ] {
-                if let Some(v) = l
-                    .strip_prefix(key)
-                    .and_then(|r| r.trim_start().strip_prefix('='))
-                {
-                    facts.push(format!("{key} = {} (.editorconfig)", v.trim()));
-                }
-            }
+    // 1) one representative call-site file per top third-party module
+    for (_m, files) in hist.iter().take(8) {
+        if let Some(f) = files.first() {
+            push_file(&mut picked, f);
         }
     }
-
-    // pyproject.toml
-    if let Some(txt) = read("pyproject.toml") {
-        if let Ok(v) = txt.parse::<toml::Value>() {
-            let g = |path: &[&str]| dig_toml(&v, path);
-            if let Some(x) = g(&["tool", "ruff", "line-length"]) {
-                facts.push(format!("ruff line-length = {x} (pyproject.toml)"));
-            }
-            if let Some(x) = g(&["tool", "ruff", "lint", "select"]) {
-                facts.push(format!("ruff lint select = {x} (pyproject.toml)"));
-            }
-            if let Some(x) = g(&["tool", "ruff", "format", "quote-style"]) {
-                facts.push(format!("ruff quote-style = {x} (pyproject.toml)"));
-            }
-            if let Some(x) = g(&["tool", "black", "line-length"]) {
-                facts.push(format!("black line-length = {x} (pyproject.toml)"));
-            }
-            if let Some(x) = g(&["tool", "mypy", "strict"]) {
-                facts.push(format!("mypy strict = {x} (pyproject.toml)"));
-            }
-            if g(&["tool", "pytest", "ini_options"]).is_some() {
-                facts.push("test framework: pytest (pyproject.toml)".into());
-            }
-            if let Some(x) = g(&["project", "requires-python"]) {
-                facts.push(format!("requires-python = {x} (pyproject.toml)"));
-            }
+    // 2) notable files by name (entrypoints / infra / config / layers)
+    let all_files: BTreeSet<&str> = symbols
+        .iter()
+        .filter(|s| matches!(s.kind, SymbolKind::File))
+        .map(|s| s.file_path.as_str())
+        .collect();
+    let hints = [
+        "main.py",
+        "app.py",
+        "cli.py",
+        "settings.py",
+        "config.py",
+        "client",
+        "handler",
+        "service",
+        "repository",
+        "conftest.py",
+    ];
+    for f in &all_files {
+        let low = f.to_lowercase();
+        if hints
+            .iter()
+            .any(|h| low.ends_with(h) || low.contains(&format!("/{h}")) || low.contains(h))
+        {
+            push_file(&mut picked, f);
         }
     }
-
-    // .pre-commit-config.yaml — light grep for hook ids (enforced toolchain).
-    if let Some(txt) = read(".pre-commit-config.yaml") {
-        let ids: Vec<&str> = txt
-            .lines()
-            .filter_map(|l| {
-                l.trim()
-                    .strip_prefix("- id:")
-                    .or_else(|| l.trim().strip_prefix("id:"))
-            })
-            .map(|s| s.trim())
-            .collect();
-        if !ids.is_empty() {
-            facts.push(format!("pre-commit hooks (ENFORCED): {}", ids.join(", ")));
-        }
+    // 3) one test file
+    if let Some(t) = all_files.iter().find(|f| {
+        let l = f.to_lowercase();
+        l.contains("test_") || l.ends_with("_test.py") || l.contains("/tests/")
+    }) {
+        push_file(&mut picked, t);
     }
 
-    // package.json / tsconfig.json / prettier (JSON)
-    if let Some(txt) = read("package.json") {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-            if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
-                facts.push(format!("package type = {t} (package.json)"));
-            }
-            if let Some(n) = v.pointer("/engines/node").and_then(|x| x.as_str()) {
-                facts.push(format!("node engine = {n} (package.json)"));
-            }
-        }
-    }
-    if let Some(txt) = read("tsconfig.json") {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(&txt)) {
-            if let Some(s) = v.pointer("/compilerOptions/strict") {
-                facts.push(format!("tsconfig strict = {s} (tsconfig.json)"));
-            }
-            if let Some(t) = v
-                .pointer("/compilerOptions/target")
-                .and_then(|x| x.as_str())
-            {
-                facts.push(format!("tsconfig target = {t} (tsconfig.json)"));
-            }
-        }
-    }
-    for pf in [".prettierrc", ".prettierrc.json"] {
-        if let Some(txt) = read(pf) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-                for k in ["printWidth", "semi", "singleQuote", "trailingComma"] {
-                    if let Some(x) = v.get(k) {
-                        facts.push(format!("prettier {k} = {x} ({pf})"));
-                    }
-                }
-            }
-        }
-    }
-
-    // Cargo.toml / rustfmt.toml
-    if let Some(txt) = read("Cargo.toml") {
-        if let Ok(v) = txt.parse::<toml::Value>() {
-            if let Some(x) = dig_toml(&v, &["package", "edition"]) {
-                facts.push(format!("rust edition = {x} (Cargo.toml)"));
-            }
-            if let Some(x) = dig_toml(&v, &["package", "rust-version"]) {
-                facts.push(format!("rust MSRV = {x} (Cargo.toml)"));
-            }
-            if dig_toml(&v, &["lints", "clippy"]).is_some() {
-                facts.push("clippy lints configured in [lints.clippy] (Cargo.toml)".into());
-            }
-        }
-    }
-    if let Some(txt) = read("rustfmt.toml").or_else(|| read(".rustfmt.toml")) {
-        if let Ok(v) = txt.parse::<toml::Value>() {
-            for k in [
-                "max_width",
-                "edition",
-                "imports_granularity",
-                "group_imports",
-            ] {
-                if let Some(x) = dig_toml(&v, &[k]) {
-                    facts.push(format!("rustfmt {k} = {x} (rustfmt.toml)"));
-                }
-            }
-        }
-    }
-
-    // version pins
-    for (name, label) in [
-        (".python-version", "python"),
-        (".nvmrc", "node"),
-        (".tool-versions", "tool-versions"),
-    ] {
-        if let Some(txt) = read(name) {
-            let v = txt.trim();
-            if !v.is_empty() {
-                facts.push(format!("{label} pin: {} ({name})", v.replace('\n', "; ")));
-            }
-        }
-    }
-
-    let _ = writeln!(o, "## Enforced config (ground truth)");
-    if facts.is_empty() {
-        let _ = writeln!(o, "- (no tooling config detected)\n");
+    if picked.is_empty() {
         return;
     }
-    for f in &facts {
-        let _ = writeln!(o, "- {f}");
+    let _ = writeln!(
+        o,
+        "## Representative code excerpts (infer library/infra/architecture conventions from these)"
+    );
+    for f in &picked {
+        if let Some(ex) = read_excerpt(root, f, EXCERPT_LINES) {
+            let _ = writeln!(o, "\n### {f}\n```\n{ex}\n```");
+        }
     }
     o.push('\n');
-}
-
-/// Navigate nested TOML tables; return a scalar's display string if present.
-fn dig_toml(v: &toml::Value, path: &[&str]) -> Option<String> {
-    let mut cur = v;
-    for (i, k) in path.iter().enumerate() {
-        cur = cur.get(k)?;
-        if i == path.len() - 1 {
-            return Some(match cur {
-                toml::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            });
-        }
-    }
-    None
-}
-
-/// Strip `//` and `/* */` comments from JSONC (tsconfig) so serde_json can parse it.
-fn strip_jsonc(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    let (mut in_str, mut esc) = (false, false);
-    while let Some(c) = chars.next() {
-        if in_str {
-            out.push(c);
-            if esc {
-                esc = false;
-            } else if c == '\\' {
-                esc = true;
-            } else if c == '"' {
-                in_str = false;
-            }
-            continue;
-        }
-        match c {
-            '"' => {
-                in_str = true;
-                out.push(c);
-            }
-            '/' if chars.peek() == Some(&'/') => {
-                for n in chars.by_ref() {
-                    if n == '\n' {
-                        out.push('\n');
-                        break;
-                    }
-                }
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                chars.next();
-                let mut prev = ' ';
-                for n in chars.by_ref() {
-                    if prev == '*' && n == '/' {
-                        break;
-                    }
-                    prev = n;
-                }
-            }
-            _ => out.push(c),
-        }
-    }
-    out
 }

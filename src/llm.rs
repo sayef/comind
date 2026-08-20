@@ -145,29 +145,32 @@ impl LlmClient {
     /// (naming/size/idiom stats + enforced-config facts). The prompt forbids generic advice and
     /// requires every rule to cite the evidence.
     pub async fn style_guide(&self, repo: &str, evidence: &str) -> Result<String> {
-        let system = "You document the ACTUAL, OBSERVED conventions of one specific codebase so an \
-            AI coding agent writes code indistinguishable from the existing code. You are given \
-            MEASURED statistics and ENFORCED tooling-config facts — not your prior beliefs about \
-            'good code'.\n\
-            Rules:\n\
-            - Ground every rule in the provided evidence and cite the count/percentage or config source.\n\
-            - NEVER output generic advice ('use meaningful names', 'write tests', 'handle errors', \
-            'follow best practices'). If a rule would apply to any codebase, DROP it.\n\
-            - Include a rule only when the evidence shows a dominant pattern (>~70%) or a clear \
-            repo-specific idiom or an enforced config. State the dominant pattern and note \
-            counterexamples where the evidence lists them.\n\
-            - Phrase each rule as an imperative instruction the agent follows verbatim; hard bans \
-            name the approved replacement. Mark each rule [required] (enforced/near-universal) or \
-            [preferred] (dominant but not universal).\n\
-            - An ENFORCED config fact (pre-commit/CI) outranks measured code; if code disagrees with \
-            an enforced config, say the rule holds and the code is being cleaned up.\n\
-            - If evidence for a section is insufficient, write 'No dominant convention observed' and \
-            move on. Be concise and specific. Markdown with `##` sections and one-line bulleted rules \
-            plus a short real example where useful.\n\
-            Sections: Stack & versions, Naming, Typing, Error handling, Imports, Logging, Docstrings, \
-            Testing, Anti-patterns.";
+        let system = "You are a senior engineer writing the house-style guide a new hire (and an AI \
+            coding agent) must follow to write code INDISTINGUISHABLE from this repository's. You are \
+            given real evidence: the dependency stack, an import-frequency table, measured stats, and \
+            REPRESENTATIVE CODE EXCERPTS. Read the excerpts carefully — the valuable conventions \
+            (how they use each library, AWS/DB/HTTP I/O, their own shared modules, architecture) live \
+            in the code, not in the stats.\n\
+            Hard rules:\n\
+            - Cite a real FILE PATH (and symbol when possible) for every non-trivial claim. If you \
+            can't point to evidence, don't say it.\n\
+            - Prefer the repo's OWN wrapper/abstraction over the raw library wherever the excerpts \
+            show one (e.g. 'AWS I/O goes through <module>.<fn>(), never raw boto3.client'). Name it.\n\
+            - NEVER output generic advice ('use meaningful names', 'write tests', 'handle errors \
+            gracefully', 'follow best practices'). If a line would apply to ANY codebase, delete it.\n\
+            - Strength: MUST/NEVER for patterns seen across ≥3 files or enforced by config; 'prefer' \
+            for weaker signals. If there's no consistent pattern for a section, write \
+            'No consistent convention observed' — do NOT invent one.\n\
+            - Each rule: a bold imperative + a short real snippet or file:path reference. Terse.\n\
+            Use these `##` sections, dropping any with no evidence:\n\
+            1. Stack & dependencies  2. Project layout & architecture (layers, entry points)  \
+            3. Library usage (a subsection per KEY dependency: the idiomatic call pattern + a real \
+            call-site + what NOT to do)  4. External I/O & infra (AWS/DB/HTTP: wrappers, creds, \
+            retries, pagination)  5. Configuration & secrets  6. Error handling & logging  \
+            7. API / DTO / validation patterns  8. Testing  9. Naming / typing / docstrings.\n\
+            End with a one-line note that this is AI-generated and should be reviewed.";
         let user = format!("Repository: {repo}\n\n# Evidence\n\n{evidence}");
-        self.complete(system, &user, 1200).await
+        self.complete(system, &user, 2400).await
     }
 
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a

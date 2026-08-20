@@ -1064,7 +1064,9 @@ fn cmd_link(
             }
         }
         if guide {
-            if let ExitCode::FAILURE = run_style_guides(&dst, &symbols, &repo_roots) {
+            if let ExitCode::FAILURE =
+                run_style_guides(&dst, &symbols, &resolved.edges, &repo_roots)
+            {
                 return ExitCode::FAILURE;
             }
         }
@@ -1526,6 +1528,7 @@ fn run_enrich(
 fn run_style_guides(
     dst: &str,
     symbols: &[Symbol],
+    edges: &[Edge],
     repo_roots: &[(String, std::path::PathBuf)],
 ) -> ExitCode {
     let client = match comind::llm::LlmClient::from_env() {
@@ -1554,7 +1557,12 @@ fn run_style_guides(
         if rsyms.is_empty() {
             continue;
         }
-        let evidence = comind::styleguide::evidence_block(root, &rsyms);
+        let redges: Vec<Edge> = edges
+            .iter()
+            .filter(|e| &e.src.package == repo)
+            .cloned()
+            .collect();
+        let evidence = comind::styleguide::evidence_block(root, &rsyms, &redges);
         match rt.block_on(client.style_guide(repo, &evidence)) {
             Ok(guide) => {
                 comind::ui::ok(&format!("{repo}: style guide"));
@@ -1708,7 +1716,7 @@ fn cmd_index(
         }
     }
     if guide {
-        if let ExitCode::FAILURE = run_style_guides(&dst, &out.symbols, &repo_roots) {
+        if let ExitCode::FAILURE = run_style_guides(&dst, &out.symbols, &out.edges, &repo_roots) {
             return ExitCode::FAILURE;
         }
     }
