@@ -109,14 +109,14 @@ is also attached; use `serve --format json` for raw JSON).
 
 | Command | Purpose |
 |---|---|
-| `comind index <repo> [--enrich] [--flows] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
-| `comind link <repos…> [--enrich] [--flows] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
+| `comind index <repo> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
+| `comind link <repos…> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
 | `comind explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
 | `comind search <query…> [--repo <name>] [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
 | `comind find <query> [--repo <name>…] [--index-dir <dir>]` | Locate symbols by name/path substring |
 | `comind repos [--index-dir <dir>]` | List indexed repositories + symbol counts |
 | `comind stats [--repo <name>…] [--index-dir <dir>]` | Per-repo stats: symbols, edges, kinds, enrichment coverage |
-| `comind guide [--repo <name>…] [-o <file>] [--index-dir <dir>]` | Per-repo inferred coding style guides (needs `--enrich`) |
+| `comind guide [--repo <name>…] [-o <file>] [--index-dir <dir>]` | Per-repo inferred coding style guides (built with `--guide`) |
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
@@ -126,7 +126,7 @@ Run `comind <command> --help` for the full flags of any subcommand.
 
 `--index-dir` is a local directory or an `s3://…` path; it is optional and defaults to the
 configured index location. **Embeddings are built by default** (search works out of the box); pass
-`--no-embed` for a faster structural-only index. `--enrich`/`--flows` are opt-in and send code
+`--no-embed` for a faster structural-only index. `--enrich`/`--flows`/`--guide` are opt-in and send code
 signatures to the configured LLM provider (see below); everything else stays local. Both cover the
 **whole codebase** by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
 

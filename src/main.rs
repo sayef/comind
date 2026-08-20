@@ -41,6 +41,9 @@ enum Cmd {
         /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
         #[arg(long)]
         flows: bool,
+        /// Generate an evidence-based coding style guide (sends code/config; needs OPENAI_API_KEY)
+        #[arg(long)]
+        guide: bool,
         /// Reparse only files changed since the last indexed commit
         #[arg(long)]
         incremental: bool,
@@ -65,6 +68,9 @@ enum Cmd {
         /// Pre-generate LLM flow walkthroughs (sends call traces; needs OPENAI_API_KEY)
         #[arg(long)]
         flows: bool,
+        /// Generate an evidence-based coding style guide (sends code/config; needs OPENAI_API_KEY)
+        #[arg(long)]
+        guide: bool,
         /// Recompute only symbols in files changed since the last index
         #[arg(long)]
         incremental: bool,
@@ -190,6 +196,7 @@ fn main() -> ExitCode {
             no_embed,
             enrich,
             flows,
+            guide,
             incremental,
             since,
         } => cmd_index(
@@ -198,6 +205,7 @@ fn main() -> ExitCode {
             !no_embed,
             enrich,
             flows,
+            guide,
             incremental,
             since.as_deref(),
         ),
@@ -207,6 +215,7 @@ fn main() -> ExitCode {
             no_embed,
             enrich,
             flows,
+            guide,
             incremental,
         } => {
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
@@ -216,6 +225,7 @@ fn main() -> ExitCode {
                 !no_embed,
                 enrich,
                 flows,
+                guide,
                 incremental,
             )
         }
@@ -835,6 +845,7 @@ fn cmd_link(
     embed: bool,
     enrich: bool,
     flows: bool,
+    guide: bool,
     incremental: bool,
 ) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
@@ -994,8 +1005,12 @@ fn cmd_link(
                 cfg.max_enrich(),
                 &stale_ids,
                 incremental,
-                &repo_roots,
             ) {
+                return ExitCode::FAILURE;
+            }
+        }
+        if guide {
+            if let ExitCode::FAILURE = run_style_guides(&dst, &symbols, &repo_roots) {
                 return ExitCode::FAILURE;
             }
         }
@@ -1303,7 +1318,6 @@ fn run_enrich(
     top: usize,
     stale_ids: &HashSet<String>,
     incremental: bool,
-    repo_roots: &[(String, std::path::PathBuf)],
 ) -> ExitCode {
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
@@ -1448,30 +1462,55 @@ fn run_enrich(
             comind::ui::note(&format!("  e.g. \"{q}\""));
         }
     }
-    if !items.is_empty() && !repo_roots.is_empty() {
-        // One evidence-based style guide per repo: measured stats + enforced-config facts → LLM.
-        comind::ui::header("Style guides (per repo)");
-        let mut guide_rows: Vec<(String, String)> = Vec::new();
-        for (repo, root) in repo_roots {
-            let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
-            if rsyms.is_empty() {
-                continue;
-            }
-            let evidence = comind::styleguide::evidence_block(root, &rsyms);
-            match rt.block_on(client.style_guide(repo, &evidence)) {
-                Ok(guide) => {
-                    comind::ui::ok(&format!("{repo}: style guide"));
-                    guide_rows.push((repo.clone(), guide));
-                }
-                Err(e) => {
-                    comind::ui::warn(&format!("{repo}: style guide failed (non-fatal): {e:#}"))
-                }
-            }
+    ExitCode::SUCCESS
+}
+
+/// Evidence-based style guide per repo (opt-in `--guide`): measured stats + enforced-config facts
+/// → citation-required LLM synthesis. Independent of `--enrich`. Sends code/config to the LLM.
+fn run_style_guides(
+    dst: &str,
+    symbols: &[Symbol],
+    repo_roots: &[(String, std::path::PathBuf)],
+) -> ExitCode {
+    let client = match comind::llm::LlmClient::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
         }
-        if !guide_rows.is_empty() {
-            let _ = comind::index::write_style_guide_blocking(dst, &guide_rows);
+    };
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            comind::ui::err(&format!("runtime: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    comind::ui::header("Style guides (per repo)");
+    comind::ui::warn("--guide sends code samples + config to the LLM — opt-in egress.");
+    let mut guide_rows: Vec<(String, String)> = Vec::new();
+    for (repo, root) in repo_roots {
+        let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
+        if rsyms.is_empty() {
+            continue;
+        }
+        let evidence = comind::styleguide::evidence_block(root, &rsyms);
+        match rt.block_on(client.style_guide(repo, &evidence)) {
+            Ok(guide) => {
+                comind::ui::ok(&format!("{repo}: style guide"));
+                guide_rows.push((repo.clone(), guide));
+            }
+            Err(e) => comind::ui::warn(&format!("{repo}: style guide failed (non-fatal): {e:#}")),
         }
     }
+    if !guide_rows.is_empty() {
+        let _ = comind::index::write_style_guide_blocking(dst, &guide_rows);
+    }
+    let (i, o) = client.token_usage();
+    comind::ui::note(&format!("tokens: {} in / {} out", kfmt(i), kfmt(o)));
     ExitCode::SUCCESS
 }
 
@@ -1504,12 +1543,14 @@ fn friendly_load_err(uri: &str, e: &anyhow::Error) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
 fn cmd_index(
     repo: &str,
     to: Option<&str>,
     embed: bool,
     enrich: bool,
     flows: bool,
+    guide: bool,
     incremental: bool,
     since: Option<&str>,
 ) -> ExitCode {
@@ -1595,8 +1636,8 @@ fn cmd_index(
             return ExitCode::FAILURE;
         }
     }
+    let repo_roots = vec![(repo_name.clone(), root.to_path_buf())];
     if enrich {
-        let repo_roots = vec![(repo_name.clone(), root.to_path_buf())];
         if let ExitCode::FAILURE = run_enrich(
             &dst,
             &out.symbols,
@@ -1604,8 +1645,12 @@ fn cmd_index(
             cfg.max_enrich(),
             &all,
             false,
-            &repo_roots,
         ) {
+            return ExitCode::FAILURE;
+        }
+    }
+    if guide {
+        if let ExitCode::FAILURE = run_style_guides(&dst, &out.symbols, &repo_roots) {
             return ExitCode::FAILURE;
         }
     }
