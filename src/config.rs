@@ -106,18 +106,19 @@ impl Config {
             .unwrap_or_else(|| "md".to_string())
     }
 
-    /// Step defaults (file → built-in). Embed on; enrich/flows/guide off.
+    /// Step defaults (file → built-in). All on by default; the LLM steps skip gracefully with a
+    /// warning when `OPENAI_API_KEY` is missing, so a keyless `index` still succeeds.
     pub fn embed(&self) -> bool {
         self.embed.unwrap_or(true)
     }
     pub fn enrich(&self) -> bool {
-        self.enrich.unwrap_or(false)
+        self.enrich.unwrap_or(true)
     }
     pub fn flows(&self) -> bool {
-        self.flows.unwrap_or(false)
+        self.flows.unwrap_or(true)
     }
     pub fn guide(&self) -> bool {
-        self.guide.unwrap_or(false)
+        self.guide.unwrap_or(true)
     }
 }
 
@@ -150,11 +151,12 @@ pub fn init(force: bool) -> Result<PathBuf> {
          format      = \"md\"   # default output when --format is absent (search: md|table, serve: md|json)\n\
          # llm_base_url = \"http://localhost:11434/v1\"  # Ollama / vLLM / LiteLLM proxy\n\n\
          # index/link step defaults (CLI --x / --no-x override). enrich/flows/guide call an LLM\n\
-         # (cost + sends code); set true to run them by every index.\n\
+         # (cost + sends code; need OPENAI_API_KEY). Set false to skip; they also skip with a\n\
+         # warning if no key is set.\n\
          embed  = true\n\
-         enrich = false\n\
-         flows  = false\n\
-         guide  = false\n\n\
+         enrich = true\n\
+         flows  = true\n\
+         guide  = true\n\n\
          # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
          # max_enrich = 200   # max symbols enriched by --enrich\n\
          # max_flows  = 50    # max flows narrated by --flows\n",

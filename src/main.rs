@@ -321,6 +321,19 @@ fn main() -> ExitCode {
     }
 }
 
+/// If any LLM step is requested but no LLM client is configured, warn once and disable them all —
+/// so a keyless `index`/`link` still builds the graph + embeddings and exits 0.
+fn gate_llm_steps(enrich: bool, flows: bool, guide: bool) -> (bool, bool, bool) {
+    if (enrich || flows || guide) && comind::llm::LlmClient::from_env().is_err() {
+        comind::ui::warn(
+            "enrich/flows/guide skipped — set OPENAI_API_KEY (or COMIND_LLM_BASE_URL) to enable",
+        );
+        (false, false, false)
+    } else {
+        (enrich, flows, guide)
+    }
+}
+
 /// Resolve a `--x` / `--no-x` flag pair to an explicit choice, or `None` to fall back to config.
 /// clap's `overrides_with` guarantees at most one is set.
 fn tri(on: bool, off: bool) -> Option<bool> {
@@ -1037,6 +1050,7 @@ fn cmd_link(
             .iter()
             .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
             .collect();
+        let (enrich, flows, guide) = gate_llm_steps(enrich, flows, guide);
         if enrich {
             if let ExitCode::FAILURE = run_enrich(
                 &dst,
@@ -1075,8 +1089,9 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
+            // No/invalid LLM key: skip this step rather than failing the whole index.
+            comind::ui::warn(&format!("skipping (no LLM client): {e:#}"));
+            return ExitCode::SUCCESS;
         }
     };
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -1362,8 +1377,9 @@ fn run_enrich(
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
+            // No/invalid LLM key: skip this step rather than failing the whole index.
+            comind::ui::warn(&format!("skipping (no LLM client): {e:#}"));
+            return ExitCode::SUCCESS;
         }
     };
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -1515,8 +1531,9 @@ fn run_style_guides(
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
+            // No/invalid LLM key: skip this step rather than failing the whole index.
+            comind::ui::warn(&format!("skipping (no LLM client): {e:#}"));
+            return ExitCode::SUCCESS;
         }
     };
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -1677,6 +1694,7 @@ fn cmd_index(
         }
     }
     let repo_roots = vec![(repo_name.clone(), root.to_path_buf())];
+    let (enrich, flows, guide) = gate_llm_steps(enrich, flows, guide);
     if enrich {
         if let ExitCode::FAILURE = run_enrich(
             &dst,

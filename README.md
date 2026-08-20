@@ -76,8 +76,9 @@ Explicit location — a local dir or `s3://…`, shared across a team. The **sam
 builds and reads it (comind manages the internal dataset layout):
 
 ```bash
-# 1. Build the org index from several repos, with embeddings + full enrichment
-comind link ../pkg-common ../service-a --index-dir ./comind-index/org --enrich
+# 1. Build the org index from several repos (embeddings + LLM enrichment/flows/guide run by
+#    default when OPENAI_API_KEY is set; add --no-enrich / --no-flows / --no-guide to skip)
+comind link ../pkg-common ../service-a --index-dir ./comind-index/org
 
 # 2. Explore / search the prebuilt index (instant, no re-parse)
 comind explore Settings --index-dir ./comind-index/org        # zoom + ripple + context pack
@@ -125,10 +126,11 @@ is also attached; use `serve --format json` for raw JSON).
 Run `comind <command> --help` for the full flags of any subcommand.
 
 `--index-dir` is a local directory or an `s3://…` path; it is optional and defaults to the
-configured index location. **Embeddings are built by default** (search works out of the box); pass
-`--no-embed` for a faster structural-only index. `--enrich`/`--flows`/`--guide` are opt-in and send code
-signatures to the configured LLM provider (see below); everything else stays local. Both cover the
-**whole codebase** by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
+configured index location. **All build steps default on** (`embed`, `enrich`, `flows`, `guide`);
+each has a `config.toml` default and a `--x` / `--no-x` override (CLI wins). Embeddings are local;
+`enrich`/`flows`/`guide` call an LLM (cost + send code, need `OPENAI_API_KEY`) — they **skip
+automatically with a warning when no key is set**, so a keyless `index` still builds the graph +
+search. Cap LLM cost with `max_enrich` / `max_flows` in `config.toml`.
 
 ## How it works
 
@@ -195,9 +197,9 @@ llm_model   = "gpt-4o-mini"
 embed_model = "minishlab/potion-base-8M"
 format      = "md"    # default when --format is absent (search: md|table, serve: md|json)
 embed       = true    # index/link step defaults; CLI --x / --no-x override
-enrich      = false   # LLM per-symbol summaries + queries (cost + sends code)
-flows       = false   # LLM flow walkthroughs (cost + sends code)
-guide       = false   # evidence-based style guide (cost + sends code)
+enrich      = true    # LLM per-symbol summaries + queries (cost + sends code)
+flows       = true    # LLM flow walkthroughs (cost + sends code)
+guide       = true    # evidence-based style guide (cost + sends code)
 # llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
 # max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
 # max_flows   = 50    # cap --flows narrations (omit = no cap)
