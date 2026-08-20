@@ -800,15 +800,20 @@ pub fn read_flows_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
 }
 
 /// Persist the inferred repo style guide (single-row `style_guide` table).
-pub async fn write_style_guide(uri: &str, content: &str) -> Result<()> {
-    let schema = Arc::new(Schema::new(vec![Field::new(
-        "content",
-        DataType::Utf8,
-        false,
-    )]));
+/// Persist one style guide per repo as `(repo, content)` rows.
+pub async fn write_style_guide(uri: &str, rows: &[(String, String)]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("content", DataType::Utf8, false),
+    ]));
+    let repos: Vec<&str> = rows.iter().map(|(r, _)| r.as_str()).collect();
+    let contents: Vec<&str> = rows.iter().map(|(_, c)| c.as_str()).collect();
     let batch = RecordBatch::try_new(
         schema,
-        vec![Arc::new(StringArray::from(vec![content])) as ArrayRef],
+        vec![
+            Arc::new(StringArray::from(repos)) as ArrayRef,
+            Arc::new(StringArray::from(contents)) as ArrayRef,
+        ],
     )
     .context("build style_guide batch")?;
     let db = lancedb::connect(uri).execute().await?;
@@ -816,28 +821,31 @@ pub async fn write_style_guide(uri: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Read the persisted style guide, if any.
-pub async fn read_style_guide(uri: &str) -> Result<Option<String>> {
+/// Read the persisted per-repo style guides as `(repo, content)` pairs.
+pub async fn read_style_guide(uri: &str) -> Result<Vec<(String, String)>> {
     let db = lancedb::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("style_guide").execute().await else {
-        return Ok(None);
+        return Ok(vec![]);
     };
     let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
     while let Some(b) = st.try_next().await? {
-        if b.num_rows() > 0 {
-            return Ok(Some(str_col(&b, "content")?.value(0).to_string()));
+        let repo = str_col(&b, "repo")?;
+        let content = str_col(&b, "content")?;
+        for i in 0..b.num_rows() {
+            out.push((repo.value(i).to_string(), content.value(i).to_string()));
         }
     }
-    Ok(None)
+    Ok(out)
 }
 
 /// Blocking wrapper for [`write_style_guide`].
-pub fn write_style_guide_blocking(uri: &str, content: &str) -> Result<()> {
-    runtime()?.block_on(write_style_guide(uri, content))
+pub fn write_style_guide_blocking(uri: &str, rows: &[(String, String)]) -> Result<()> {
+    runtime()?.block_on(write_style_guide(uri, rows))
 }
 
 /// Blocking wrapper for [`read_style_guide`].
-pub fn read_style_guide_blocking(uri: &str) -> Result<Option<String>> {
+pub fn read_style_guide_blocking(uri: &str) -> Result<Vec<(String, String)>> {
     runtime()?.block_on(read_style_guide(uri))
 }
 

@@ -840,7 +840,17 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         .map(|(id, s, q)| (id.render(), (s, q)))
         .collect();
 
-    let style_guide = crate::index::read_style_guide(uri).await.ok().flatten();
+    // Per-repo style guides, combined into one markdown doc with a section per repo.
+    let guides = crate::index::read_style_guide(uri)
+        .await
+        .unwrap_or_default();
+    let style_guide = (!guides.is_empty()).then(|| {
+        guides
+            .iter()
+            .map(|(r, g)| format!("## {r}\n\n{g}"))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    });
 
     let flows: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(uri)
         .await

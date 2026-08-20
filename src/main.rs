@@ -151,11 +151,14 @@ enum Cmd {
         #[arg(long)]
         repo: Vec<String>,
     },
-    /// Print the repo's inferred coding style guide (built with --enrich)
+    /// Print per-repo inferred coding style guides (built with --enrich)
     Guide {
         /// Index directory to read — root; default: configured index dir
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
+        /// Limit to one or more repos (repeatable: --repo x --repo y)
+        #[arg(long)]
+        repo: Vec<String>,
     },
     /// Show or scaffold the config file
     Config {
@@ -248,7 +251,10 @@ fn main() -> ExitCode {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
             cmd_stats(&repos, index_dir.as_deref())
         }
-        Cmd::Guide { index_dir } => cmd_guide(index_dir.as_deref()),
+        Cmd::Guide { index_dir, repo } => {
+            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
+            cmd_guide(&repos, index_dir.as_deref())
+        }
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
         Cmd::Flow { focus, index_dir } => cmd_flow(&focus, index_dir.as_deref()),
         Cmd::Serve {
@@ -613,24 +619,39 @@ fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `comind guide` — the repo's inferred coding style guide (built with --enrich).
-fn cmd_guide(from: Option<&str>) -> ExitCode {
+/// `comind guide [--repo x --repo y]` — per-repo inferred coding style guides (built with
+/// `--enrich`). With no `--repo`, prints every repo's guide.
+fn cmd_guide(want: &[&str], from: Option<&str>) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
-    match comind::index::read_style_guide_blocking(&uri) {
-        Ok(Some(guide)) => {
-            comind::ui::header("Style guide");
-            println!("{guide}");
-            ExitCode::SUCCESS
-        }
-        Ok(None) => {
-            comind::ui::note("no style guide yet — build the index with --enrich");
-            ExitCode::SUCCESS
-        }
+    let guides = match comind::index::read_style_guide_blocking(&uri) {
+        Ok(g) => g,
         Err(e) => {
             comind::ui::err(&friendly_load_err(&uri, &e));
-            ExitCode::FAILURE
+            return ExitCode::FAILURE;
+        }
+    };
+    if guides.is_empty() {
+        comind::ui::note("no style guide yet — build the index with --enrich");
+        return ExitCode::SUCCESS;
+    }
+    for r in want {
+        if !guides.iter().any(|(repo, _)| repo.eq_ignore_ascii_case(r)) {
+            comind::ui::warn(&format!("no style guide for repo: {r}"));
         }
     }
+    let selected: Vec<&(String, String)> = guides
+        .iter()
+        .filter(|(repo, _)| want.is_empty() || want.iter().any(|r| repo.eq_ignore_ascii_case(r)))
+        .collect();
+    if selected.is_empty() {
+        comind::ui::err("no matching repos");
+        return ExitCode::FAILURE;
+    }
+    for (repo, guide) in selected {
+        comind::ui::header(&format!("Style guide — {repo}"));
+        println!("{guide}");
+    }
+    ExitCode::SUCCESS
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -1396,25 +1417,34 @@ fn run_enrich(
         }
     }
     if !items.is_empty() {
-        let samples: Vec<String> = items
-            .iter()
-            .take(20)
-            .map(|(_, sig, _)| sig.clone())
-            .collect();
-        match rt.block_on(client.style_guide(&samples)) {
-            Ok(guide) => {
-                let _ = comind::index::write_style_guide_blocking(dst, &guide);
-                comind::ui::header("Style guide (persisted; preview)");
-                println!("{}", truncate_lines(&guide, 8));
+        // One style guide per repo, inferred from that repo's own signatures.
+        let mut per_repo: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for s in symbols {
+            if let Some(sig) = &s.signature {
+                let v = per_repo.entry(s.id.package.clone()).or_default();
+                if v.len() < 15 {
+                    v.push(sig.clone());
+                }
             }
-            Err(e) => comind::ui::warn(&format!("style guide failed (non-fatal): {e:#}")),
+        }
+        comind::ui::header("Style guides (per repo)");
+        let mut guide_rows: Vec<(String, String)> = Vec::new();
+        for (repo, samples) in &per_repo {
+            match rt.block_on(client.style_guide(samples)) {
+                Ok(guide) => {
+                    comind::ui::ok(&format!("{repo}: style guide"));
+                    guide_rows.push((repo.clone(), guide));
+                }
+                Err(e) => {
+                    comind::ui::warn(&format!("{repo}: style guide failed (non-fatal): {e:#}"))
+                }
+            }
+        }
+        if !guide_rows.is_empty() {
+            let _ = comind::index::write_style_guide_blocking(dst, &guide_rows);
         }
     }
     ExitCode::SUCCESS
-}
-
-fn truncate_lines(s: &str, n: usize) -> String {
-    s.lines().take(n).collect::<Vec<_>>().join("\n")
 }
 
 /// Compact `1.2k`-style formatting for token counts.
