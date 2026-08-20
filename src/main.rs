@@ -159,6 +159,9 @@ enum Cmd {
         /// Limit to one or more repos (repeatable: --repo x --repo y)
         #[arg(long)]
         repo: Vec<String>,
+        /// Write the guide(s) to a file instead of the terminal
+        #[arg(long, short = 'o')]
+        output: Option<String>,
     },
     /// Show or scaffold the config file
     Config {
@@ -251,9 +254,13 @@ fn main() -> ExitCode {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
             cmd_stats(&repos, index_dir.as_deref())
         }
-        Cmd::Guide { index_dir, repo } => {
+        Cmd::Guide {
+            index_dir,
+            repo,
+            output,
+        } => {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_guide(&repos, index_dir.as_deref())
+            cmd_guide(&repos, index_dir.as_deref(), output.as_deref())
         }
         Cmd::Changed { repo, since } => cmd_changed(&repo, since.as_deref()),
         Cmd::Flow { focus, index_dir } => cmd_flow(&focus, index_dir.as_deref()),
@@ -619,9 +626,10 @@ fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `comind guide [--repo x --repo y]` — per-repo inferred coding style guides (built with
-/// `--enrich`). With no `--repo`, prints every repo's guide.
-fn cmd_guide(want: &[&str], from: Option<&str>) -> ExitCode {
+/// `comind guide [--repo x --repo y] [--output f]` — per-repo inferred coding style guides
+/// (built with `--enrich`). With no `--repo`, prints every repo's guide; `--output` writes to a
+/// file instead of the terminal.
+fn cmd_guide(want: &[&str], from: Option<&str>, output: Option<&str>) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let guides = match comind::index::read_style_guide_blocking(&uri) {
         Ok(g) => g,
@@ -647,9 +655,27 @@ fn cmd_guide(want: &[&str], from: Option<&str>) -> ExitCode {
         comind::ui::err("no matching repos");
         return ExitCode::FAILURE;
     }
-    for (repo, guide) in selected {
-        comind::ui::header(&format!("Style guide — {repo}"));
-        println!("{guide}");
+    if let Some(path) = output {
+        let doc: String = selected
+            .iter()
+            .map(|(repo, guide)| format!("# Style guide — {repo}\n\n{guide}\n"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        match std::fs::write(path, doc) {
+            Ok(()) => comind::ui::ok(&format!(
+                "style guide{} written to {path}",
+                if selected.len() > 1 { "s" } else { "" }
+            )),
+            Err(e) => {
+                comind::ui::err(&format!("write {path} failed: {e}"));
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        for (repo, guide) in selected {
+            comind::ui::header(&format!("Style guide — {repo}"));
+            println!("{guide}");
+        }
     }
     ExitCode::SUCCESS
 }

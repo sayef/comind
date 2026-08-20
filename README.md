@@ -116,7 +116,7 @@ is also attached; use `serve --format json` for raw JSON).
 | `comind find <query> [--repo <name>…] [--index-dir <dir>]` | Locate symbols by name/path substring |
 | `comind repos [--index-dir <dir>]` | List indexed repositories + symbol counts |
 | `comind stats [--repo <name>…] [--index-dir <dir>]` | Per-repo stats: symbols, edges, kinds, enrichment coverage |
-| `comind guide [--repo <name>…] [--index-dir <dir>]` | Per-repo inferred coding style guides (needs `--enrich`) |
+| `comind guide [--repo <name>…] [-o <file>] [--index-dir <dir>]` | Per-repo inferred coding style guides (needs `--enrich`) |
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
