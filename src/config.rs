@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// Non-secret preferences, all optional. Read from `config.toml` if present.
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
-    /// Default LanceDB location for `--to` / `--from` (local path or `s3://…`).
+    /// Default index directory for `--index-dir` (local path or `s3://…`).
     pub index_dir: Option<String>,
     /// Default LLM model for `--enrich` / `--flows`.
     pub llm_model: Option<String>,

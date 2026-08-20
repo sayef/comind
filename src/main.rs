@@ -447,6 +447,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
     comind::ui::field("HEAD", &head);
 
     let Some(base) = since else {
+        comind::ui::note("pass --since <commit> to list changed files");
         return ExitCode::SUCCESS;
     };
     match comind::git::changed_files(path, base) {
@@ -528,6 +529,7 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
             match comind::config::init(true) {
                 Ok(path) => {
                     comind::ui::ok(&format!("wrote {}", path.display()));
+                    comind::ui::note("edit it to set index_dir / llm_model / format, or run: comind index . --embed");
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1313,6 +1315,11 @@ fn cmd_index(
         if let ExitCode::FAILURE = run_flows(&dst, &out.symbols, &out.edges, cfg.max_flows()) {
             return ExitCode::FAILURE;
         }
+    }
+    if embed {
+        comind::ui::note("next: comind search \"<question>\"  ·  comind serve");
+    } else {
+        comind::ui::note("next: re-run with --embed to enable search, or comind explore <symbol>");
     }
     ExitCode::SUCCESS
 }

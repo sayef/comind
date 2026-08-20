@@ -95,9 +95,11 @@ src/
   graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
   embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
   llm.rs      wiki / style-guide / query-association generation via Rig (provider-agnostic).
-  mcp.rs      rmcp server exposing find/zoom/ripple/thread/context_pack/guide.
+  mcp.rs      rmcp server: search/suggest/repos/find/zoom/ripple/thread/flow/context_pack/guide.
+  ui.rs       styled stderr output (indicatif progress + console + comfy-table tables).
+  config.rs   config.toml + defaults (index dir, models, format, caps); precedence resolver.
   git.rs      git2 change detection for incremental indexing.
-  main.rs     clap binary: `comind index|link|explore|search|flow|changed|serve`. The single distributable.
+  main.rs     clap binary: `comind index|link|explore|search|flow|changed|serve|config`. The single distributable.
 ```
 
 One crate, one module per stage; `main.rs` uses the library as `comind::<module>`. (Earlier phases

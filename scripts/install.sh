@@ -57,3 +57,4 @@ case ":$PATH:" in
   *) echo "comind: add $BIN_DIR to your PATH (e.g. echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.profile)" ;;
 esac
 "$BIN_DIR/comind" --version
+echo "comind: next → cd <your-repo> && comind index . --embed && comind search \"how does X work\""
