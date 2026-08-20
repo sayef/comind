@@ -45,3 +45,6 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+# generated brand PNGs (recreate: python3 scripts/render_pngs.py)
+assets/png/
