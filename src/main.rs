@@ -982,6 +982,10 @@ fn cmd_link(
         }
 
         let cfg = comind::config::Config::load();
+        let repo_roots: Vec<(String, std::path::PathBuf)> = repos
+            .iter()
+            .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
+            .collect();
         if enrich {
             if let ExitCode::FAILURE = run_enrich(
                 &dst,
@@ -990,6 +994,7 @@ fn cmd_link(
                 cfg.max_enrich(),
                 &stale_ids,
                 incremental,
+                &repo_roots,
             ) {
                 return ExitCode::FAILURE;
             }
@@ -1298,6 +1303,7 @@ fn run_enrich(
     top: usize,
     stale_ids: &HashSet<String>,
     incremental: bool,
+    repo_roots: &[(String, std::path::PathBuf)],
 ) -> ExitCode {
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
@@ -1442,21 +1448,17 @@ fn run_enrich(
             comind::ui::note(&format!("  e.g. \"{q}\""));
         }
     }
-    if !items.is_empty() {
-        // One style guide per repo, inferred from that repo's own signatures.
-        let mut per_repo: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for s in symbols {
-            if let Some(sig) = &s.signature {
-                let v = per_repo.entry(s.id.package.clone()).or_default();
-                if v.len() < 15 {
-                    v.push(sig.clone());
-                }
-            }
-        }
+    if !items.is_empty() && !repo_roots.is_empty() {
+        // One evidence-based style guide per repo: measured stats + enforced-config facts → LLM.
         comind::ui::header("Style guides (per repo)");
         let mut guide_rows: Vec<(String, String)> = Vec::new();
-        for (repo, samples) in &per_repo {
-            match rt.block_on(client.style_guide(samples)) {
+        for (repo, root) in repo_roots {
+            let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
+            if rsyms.is_empty() {
+                continue;
+            }
+            let evidence = comind::styleguide::evidence_block(root, &rsyms);
+            match rt.block_on(client.style_guide(repo, &evidence)) {
                 Ok(guide) => {
                     comind::ui::ok(&format!("{repo}: style guide"));
                     guide_rows.push((repo.clone(), guide));
@@ -1594,6 +1596,7 @@ fn cmd_index(
         }
     }
     if enrich {
+        let repo_roots = vec![(repo_name.clone(), root.to_path_buf())];
         if let ExitCode::FAILURE = run_enrich(
             &dst,
             &out.symbols,
@@ -1601,6 +1604,7 @@ fn cmd_index(
             cfg.max_enrich(),
             &all,
             false,
+            &repo_roots,
         ) {
             return ExitCode::FAILURE;
         }

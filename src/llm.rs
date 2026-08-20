@@ -141,14 +141,33 @@ impl LlmClient {
             .await
     }
 
-    /// Infer a short coding style guide from a sample of signatures/snippets.
-    pub async fn style_guide(&self, samples: &[String]) -> Result<String> {
-        let system = "You are a senior engineer. From these code samples, infer a concise, \
-             practical coding style guide (naming, structure, error handling, typing). \
-             Use terse markdown bullets. No preamble.";
-        let joined = samples.join("\n---\n");
-        let user = format!("Samples:\n{joined}");
-        self.complete(system, &user, 500).await
+    /// Synthesize an evidence-based coding style guide for one repo from a measured evidence pack
+    /// (naming/size/idiom stats + enforced-config facts). The prompt forbids generic advice and
+    /// requires every rule to cite the evidence.
+    pub async fn style_guide(&self, repo: &str, evidence: &str) -> Result<String> {
+        let system = "You document the ACTUAL, OBSERVED conventions of one specific codebase so an \
+            AI coding agent writes code indistinguishable from the existing code. You are given \
+            MEASURED statistics and ENFORCED tooling-config facts — not your prior beliefs about \
+            'good code'.\n\
+            Rules:\n\
+            - Ground every rule in the provided evidence and cite the count/percentage or config source.\n\
+            - NEVER output generic advice ('use meaningful names', 'write tests', 'handle errors', \
+            'follow best practices'). If a rule would apply to any codebase, DROP it.\n\
+            - Include a rule only when the evidence shows a dominant pattern (>~70%) or a clear \
+            repo-specific idiom or an enforced config. State the dominant pattern and note \
+            counterexamples where the evidence lists them.\n\
+            - Phrase each rule as an imperative instruction the agent follows verbatim; hard bans \
+            name the approved replacement. Mark each rule [required] (enforced/near-universal) or \
+            [preferred] (dominant but not universal).\n\
+            - An ENFORCED config fact (pre-commit/CI) outranks measured code; if code disagrees with \
+            an enforced config, say the rule holds and the code is being cleaned up.\n\
+            - If evidence for a section is insufficient, write 'No dominant convention observed' and \
+            move on. Be concise and specific. Markdown with `##` sections and one-line bulleted rules \
+            plus a short real example where useful.\n\
+            Sections: Stack & versions, Naming, Typing, Error handling, Imports, Logging, Docstrings, \
+            Testing, Anti-patterns.";
+        let user = format!("Repository: {repo}\n\n# Evidence\n\n{evidence}");
+        self.complete(system, &user, 1200).await
     }
 
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a

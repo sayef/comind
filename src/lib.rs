@@ -21,6 +21,8 @@ pub mod graph;
 
 pub mod llm;
 
+pub mod styleguide;
+
 pub mod mcp;
 
 pub mod ui;
