@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" width="760" height="180" role="img" aria-label="comind — deterministic, cross-repo code intelligence for agents">
+  <title>comind</title>
+  
+  <g transform="translate(20 30) scale(0.47)"><g><ellipse cx="128.0" cy="24.0" rx="10" ry="21" transform="rotate(0.0 128.0 24.0)" fill="none" stroke="#0d9488" stroke-width="4"/>
+    <ellipse cx="189.1" cy="43.9" rx="10" ry="21" transform="rotate(36.0 189.1 43.9)" fill="none" stroke="#0f977a" stroke-width="4"/>
+    <ellipse cx="226.9" cy="95.9" rx="10" ry="21" transform="rotate(72.0 226.9 95.9)" fill="none" stroke="#119b6c" stroke-width="4"/>
+    <ellipse cx="226.9" cy="160.1" rx="10" ry="21" transform="rotate(108.0 226.9 160.1)" fill="none" stroke="#139e5f" stroke-width="4"/>
+    <ellipse cx="189.1" cy="212.1" rx="10" ry="21" transform="rotate(144.0 189.1 212.1)" fill="none" stroke="#15a151" stroke-width="4"/>
+    <ellipse cx="128.0" cy="232.0" rx="10" ry="21" transform="rotate(180.0 128.0 232.0)" fill="none" stroke="#1fa343" stroke-width="4"/>
+    <ellipse cx="66.9" cy="212.1" rx="10" ry="21" transform="rotate(216.0 66.9 212.1)" fill="none" stroke="#30a336" stroke-width="4"/>
+    <ellipse cx="29.1" cy="160.1" rx="10" ry="21" transform="rotate(252.0 29.1 160.1)" fill="none" stroke="#42a328" stroke-width="4"/>
+    <ellipse cx="29.1" cy="95.9" rx="10" ry="21" transform="rotate(288.0 29.1 95.9)" fill="none" stroke="#53a31b" stroke-width="4"/>
+    <ellipse cx="66.9" cy="43.9" rx="10" ry="21" transform="rotate(324.0 66.9 43.9)" fill="none" stroke="#65a30d" stroke-width="4"/></g><g transform="translate(128 128) scale(0.46) translate(-128 -124)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="17"><line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#16202E"/><line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#16202E"/><line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#16202E"/><line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#16202E"/><circle cx="128" cy="128" r="24" stroke="#16202E"/><circle cx="200" cy="104" r="24" stroke="#16202E"/><circle cx="200" cy="184" r="24" stroke="#16202E"/><circle cx="56" cy="192" r="24" stroke="#16202E"/><circle cx="96" cy="56" r="24" stroke="#16202E"/></g></g>
+  <text x="186" y="82" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="700" font-size="62" letter-spacing="-2" fill="#16202E">comind</text>
+  <text x="188" y="120" font-family="ui-sans-serif, system-ui, sans-serif" font-size="21" letter-spacing=".2" fill="#8092a8">deterministic, cross-repo code intelligence for agents</text>
+</svg>

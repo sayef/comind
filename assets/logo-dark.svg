@@ -1,18 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="comind">
   <title>comind</title>
-  <!-- Graph mark adapted from Phosphor Icons "graph" (MIT, https://github.com/phosphor-icons/core) -->
-  <path d="M128 18 L222 72 L222 184 L128 238 L34 184 L34 72 Z"
-        fill="#ffffff" stroke="#FB7185" stroke-width="6" stroke-linejoin="round"/>
-  <g transform="translate(128 124) scale(0.58) translate(-128 -124)"
-     fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="16">
-    <line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#16202E"/>
-    <line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#16202E"/>
-    <line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#16202E"/>
-    <line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#FB7185"/>
-    <circle cx="128" cy="128" r="24" stroke="#16202E"/>
-    <circle cx="200" cy="104" r="24" stroke="#16202E"/>
-    <circle cx="200" cy="184" r="24" stroke="#16202E"/>
-    <circle cx="56" cy="192" r="24" stroke="#16202E"/>
-    <circle cx="96" cy="56" r="24" stroke="#FB7185"/>
+  <!-- Botanical petal ring; graph mark adapted from Phosphor Icons "graph" (MIT) -->
+  <g>
+    <ellipse cx="128.0" cy="24.0" rx="10" ry="21" transform="rotate(0.0 128.0 24.0)" fill="none" stroke="#2dd4bf" stroke-width="4"/>
+    <ellipse cx="189.1" cy="43.9" rx="10" ry="21" transform="rotate(36.0 189.1 43.9)" fill="none" stroke="#33d6b1" stroke-width="4"/>
+    <ellipse cx="226.9" cy="95.9" rx="10" ry="21" transform="rotate(72.0 226.9 95.9)" fill="none" stroke="#3ad8a3" stroke-width="4"/>
+    <ellipse cx="226.9" cy="160.1" rx="10" ry="21" transform="rotate(108.0 226.9 160.1)" fill="none" stroke="#40db95" stroke-width="4"/>
+    <ellipse cx="189.1" cy="212.1" rx="10" ry="21" transform="rotate(144.0 189.1 212.1)" fill="none" stroke="#47dd87" stroke-width="4"/>
+    <ellipse cx="128.0" cy="232.0" rx="10" ry="21" transform="rotate(180.0 128.0 232.0)" fill="none" stroke="#54df78" stroke-width="4"/>
+    <ellipse cx="66.9" cy="212.1" rx="10" ry="21" transform="rotate(216.0 66.9 212.1)" fill="none" stroke="#68e167" stroke-width="4"/>
+    <ellipse cx="29.1" cy="160.1" rx="10" ry="21" transform="rotate(252.0 29.1 160.1)" fill="none" stroke="#7be256" stroke-width="4"/>
+    <ellipse cx="29.1" cy="95.9" rx="10" ry="21" transform="rotate(288.0 29.1 95.9)" fill="none" stroke="#8fe446" stroke-width="4"/>
+    <ellipse cx="66.9" cy="43.9" rx="10" ry="21" transform="rotate(324.0 66.9 43.9)" fill="none" stroke="#a3e635" stroke-width="4"/>
   </g>
+  <g transform="translate(128 128) scale(0.46) translate(-128 -124)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="17"><line x1="177.23" y1="111.59" x2="150.77" y2="120.41" stroke="#EEF2F7"/><line x1="181.06" y1="169.27" x2="146.94" y2="142.73" stroke="#EEF2F7"/><line x1="110.06" y1="143.94" x2="73.94" y2="176.06" stroke="#EEF2F7"/><line x1="118.25" y1="106.07" x2="105.75" y2="77.93" stroke="#EEF2F7"/><circle cx="128" cy="128" r="24" stroke="#EEF2F7"/><circle cx="200" cy="104" r="24" stroke="#EEF2F7"/><circle cx="200" cy="184" r="24" stroke="#EEF2F7"/><circle cx="56" cy="192" r="24" stroke="#EEF2F7"/><circle cx="96" cy="56" r="24" stroke="#EEF2F7"/></g>
 </svg>
