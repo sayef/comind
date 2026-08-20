@@ -66,7 +66,7 @@ pub fn markdown(query: &str, hits: &[SearchHit]) -> String {
     use std::fmt::Write as _;
     let mut o = format!("## Search: \"{query}\" — {} result(s)\n\n", hits.len());
     if hits.is_empty() {
-        return o + "_no results (was the index built with `--embed`?)_\n";
+        return o + "_no results (or the index was built with `--no-embed`)_\n";
     }
     for (i, h) in hits.iter().enumerate() {
         let _ = write!(

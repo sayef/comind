@@ -67,7 +67,7 @@ Zero-config: with no `--index-dir`, comind reads and writes a default index loca
 (`~/.local/share/comind`, XDG-aware — see `comind config path`).
 
 ```bash
-comind index . --embed                  # index this repo → default index dir
+comind index .                          # index this repo → default index dir (embeds by default)
 comind search "how do we connect to postgres"   # search it, no path needed
 comind serve                            # MCP server over the default index
 ```
@@ -77,7 +77,7 @@ builds and reads it (comind manages the internal dataset layout):
 
 ```bash
 # 1. Build the org index from several repos, with embeddings + full enrichment
-comind link ../pkg-common ../service-a --index-dir ./comind-index/org --embed --enrich
+comind link ../pkg-common ../service-a --index-dir ./comind-index/org --enrich
 
 # 2. Explore / search the prebuilt index (instant, no re-parse)
 comind explore Settings --index-dir ./comind-index/org        # zoom + ripple + context pack
@@ -109,8 +109,8 @@ is also attached; use `serve --format json` for raw JSON).
 
 | Command | Purpose |
 |---|---|
-| `comind index <repo> [--embed] [--enrich] [--flows] [--incremental]` | Index a single repo |
-| `comind link <repos…> [--embed] [--enrich] [--flows] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
+| `comind index <repo> [--enrich] [--flows] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
+| `comind link <repos…> [--enrich] [--flows] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
 | `comind explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
 | `comind search <query…> [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
@@ -121,9 +121,10 @@ is also attached; use `serve --format json` for raw JSON).
 Run `comind <command> --help` for the full flags of any subcommand.
 
 `--index-dir` is a local directory or an `s3://…` path; it is optional and defaults to the
-configured index location. `--enrich`/`--flows` are opt-in and send code signatures to the
-configured LLM provider (see below); everything else stays local. Both cover the **whole codebase**
-by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
+configured index location. **Embeddings are built by default** (search works out of the box); pass
+`--no-embed` for a faster structural-only index. `--enrich`/`--flows` are opt-in and send code
+signatures to the configured LLM provider (see below); everything else stays local. Both cover the
+**whole codebase** by default — set `max_enrich` / `max_flows` in `config.toml` to bound LLM cost.
 
 ## How it works
 
@@ -174,7 +175,7 @@ src/main.rs    the comind binary (CLI)
 
 [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) (and
 [`docs/CI.md`](docs/CI.md), with a GitLab variant) builds the shared index on a schedule: it clones
-the listed repos and runs `comind link … --embed [--enrich] [--incremental]`, publishing the result
+the listed repos and runs `comind link … [--enrich] [--incremental]`, publishing the result
 as a downloadable artifact (or to S3). Lance's version manifest is the atomic "latest" pointer every
 consumer reads.
 

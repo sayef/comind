@@ -24,16 +24,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Index a single repo into the default index dir (add --embed to enable search)
+    /// Index a single repo into the default index dir (searchable by default)
     Index {
         /// Repository path
         repo: String,
         /// Index directory — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Compute vector embeddings (enables hybrid search)
-        #[arg(long)]
-        embed: bool,
+        /// Skip vector embeddings (faster; structural graph only, disables hybrid search)
+        #[arg(long = "no-embed")]
+        no_embed: bool,
         /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
         #[arg(long)]
         enrich: bool,
@@ -55,9 +55,9 @@ enum Cmd {
         /// Index directory — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Compute vector embeddings (enables hybrid search)
-        #[arg(long)]
-        embed: bool,
+        /// Skip vector embeddings (faster; structural graph only, disables hybrid search)
+        #[arg(long = "no-embed")]
+        no_embed: bool,
         /// LLM summaries + suggested queries per symbol (sends code; needs OPENAI_API_KEY)
         #[arg(long)]
         enrich: bool,
@@ -145,7 +145,7 @@ fn main() -> ExitCode {
         Cmd::Index {
             repo,
             index_dir,
-            embed,
+            no_embed,
             enrich,
             flows,
             incremental,
@@ -153,7 +153,7 @@ fn main() -> ExitCode {
         } => cmd_index(
             &repo,
             index_dir.as_deref(),
-            embed,
+            !no_embed,
             enrich,
             flows,
             incremental,
@@ -162,7 +162,7 @@ fn main() -> ExitCode {
         Cmd::Link {
             repos,
             index_dir,
-            embed,
+            no_embed,
             enrich,
             flows,
             incremental,
@@ -171,7 +171,7 @@ fn main() -> ExitCode {
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
-                embed,
+                !no_embed,
                 enrich,
                 flows,
                 incremental,
@@ -391,7 +391,7 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
         Ok(h) => h,
         Err(e) => {
             comind::ui::err(&format!(
-                "hybrid search failed (did you run `index/link --embed`?): {e:#}"
+                "hybrid search failed (was the index built with --no-embed?): {e:#}"
             ));
             return ExitCode::FAILURE;
         }
@@ -402,7 +402,9 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     } else {
         comind::ui::header(&format!("search: \"{query}\""));
         if hits.is_empty() {
-            comind::ui::note("no matches — try a broader query, or build the index with --embed");
+            comind::ui::note(
+                "no matches — try a broader query (or the index was built with --no-embed)",
+            );
             return ExitCode::SUCCESS;
         }
         let mut t = comind::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
@@ -1202,7 +1204,7 @@ fn plural(n: usize, word: &str) -> String {
 fn friendly_load_err(uri: &str, e: &anyhow::Error) -> String {
     let root = uri.trim_end_matches("/_graph");
     if e.to_string().contains("not found") {
-        format!("no index at {root} — build one first: comind index <repo> --embed")
+        format!("no index at {root} — build one first: comind index <repo>")
     } else {
         format!("load from {root} failed: {e:#}")
     }
@@ -1319,7 +1321,9 @@ fn cmd_index(
     if embed {
         comind::ui::note("next: comind search \"<question>\"  ·  comind serve");
     } else {
-        comind::ui::note("next: re-run with --embed to enable search, or comind explore <symbol>");
+        comind::ui::note(
+            "next: comind explore <symbol> (search needs embeddings — drop --no-embed)",
+        );
     }
     ExitCode::SUCCESS
 }

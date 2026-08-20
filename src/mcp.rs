@@ -278,8 +278,8 @@ const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed code
 New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
 Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
 `ripple` (who breaks if I change this), `thread` (forward call trace), `context_pack` \
-(minimal safe edit read-set), or `flow` (narrated walkthrough). `search` needs an index \
-built with --embed; the graph tools work without it.";
+(minimal safe edit read-set), or `flow` (narrated walkthrough). `search` needs embeddings \
+(on by default unless the index was built with --no-embed); the graph tools always work.";
 
 #[tool_router]
 impl ComindServer {
