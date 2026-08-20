@@ -216,47 +216,50 @@ fn cmd_explore(focus: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
         Some(uri) => match comind::index::read_graph_blocking(uri) {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("comind explore: load from {uri} failed: {e:#}");
+                comind::ui::err(&format!("load from {uri} failed: {e:#}"));
                 return ExitCode::FAILURE;
             }
         },
         None => {
             if repos.is_empty() {
-                eprintln!("comind explore: give --from <uri> or one or more <repo-path>");
+                comind::ui::err("give --from <uri> or one or more <repo-path>");
                 return ExitCode::FAILURE;
             }
             match parse_and_resolve(repos) {
                 Ok(x) => x,
                 Err(e) => {
-                    eprintln!("{e}");
+                    comind::ui::err(&e);
                     return ExitCode::FAILURE;
                 }
             }
         }
     };
     let g = comind::graph::CodeGraph::build(&symbols, &edges);
-    eprintln!(
-        "(graph: {} symbols, {} edges, {} dangling)",
+    comind::ui::note(&format!(
+        "graph: {} symbols, {} edges, {} dangling",
         g.node_count(),
         g.edge_count(),
         g.dangling_edges
-    );
+    ));
 
     let Some(idx) = g.lookup(focus) else {
-        eprintln!("comind explore: no symbol matching `{focus}`");
+        comind::ui::err(&format!("no symbol matching `{focus}`"));
         return ExitCode::FAILURE;
     };
 
     // zoom
     let z = g.zoom(idx);
     if let Some(f) = &z.focus {
-        println!("● {} [{}]  {}  {}", f.name, f.kind, f.repo, f.location);
+        comind::ui::header(&format!(
+            "● {} [{}]  {}  {}",
+            f.name, f.kind, f.repo, f.location
+        ));
         if let Some(sig) = &f.signature {
-            println!("  {sig}");
+            comind::ui::note(sig);
         }
     }
     if let Some(c) = &z.container {
-        println!("  in: {}  ({})", c.name, c.location);
+        comind::ui::field("in", &format!("{}  ({})", c.name, c.location));
     }
     print_group("calls", &z.callees, 8);
     print_group("called by", &z.callers, 8);
@@ -269,25 +272,33 @@ fn cmd_explore(focus: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
     for h in &hits {
         *by_repo.entry(h.node.repo.clone()).or_default() += 1;
     }
-    println!(
-        "\nripple (blast radius, ≤4 hops): {} dependents",
+    comind::ui::header(&format!(
+        "ripple (blast radius, ≤4 hops): {} dependents",
         hits.len()
-    );
-    for (repo, n) in &by_repo {
-        println!("  {repo:<16} {n}");
+    ));
+    if !by_repo.is_empty() {
+        let mut t = comind::ui::table(&["repo", "dependents"]);
+        for (repo, n) in &by_repo {
+            t.add_row(vec![repo.clone(), n.to_string()]);
+        }
+        println!("{t}");
     }
 
     // context pack — the minimal correct read-set within a token budget
     const BUDGET: usize = 1500;
     let pack = g.context_pack(idx, BUDGET);
     let total: usize = pack.iter().map(|(_, t)| t).sum();
-    println!(
-        "\ncontext pack for changing `{}` (~{total} tokens, budget {BUDGET}): {} symbols",
+    comind::ui::header(&format!(
+        "context pack for changing `{}` (~{total} tokens, budget {BUDGET}): {} symbols",
         z.focus.as_ref().map_or("?", |f| f.name.as_str()),
         pack.len()
-    );
-    for (node, _) in pack.iter().take(15) {
-        println!("  {:<28} {}", node.name, node.location);
+    ));
+    if !pack.is_empty() {
+        let mut t = comind::ui::table(&["symbol", "location"]);
+        for (node, _) in pack.iter().take(15) {
+            t.add_row(vec![node.name.clone(), node.location.clone()]);
+        }
+        println!("{t}");
     }
     ExitCode::SUCCESS
 }
@@ -303,7 +314,7 @@ fn print_group(label: &str, nodes: &[comind::graph::Node], limit: usize) {
     } else {
         String::new()
     };
-    println!("  {label}: {}{suffix}", names.join(", "));
+    comind::ui::field(label, &format!("{}{suffix}", names.join(", ")));
 }
 
 /// `comind search <query...> --from <uri>` — semantic search reranked by graph centrality,
@@ -315,7 +326,7 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
-            eprintln!("comind search: load from {uri} failed: {e:#}");
+            comind::ui::err(&format!("load from {uri} failed: {e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -326,7 +337,7 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     let embedder = match comind::embed::Embedder::load_default() {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("comind search: embedding model: {e:#}");
+            comind::ui::err(&format!("embedding model: {e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -347,7 +358,9 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("comind search: hybrid search failed (did you run `link --embed`?): {e:#}");
+            comind::ui::err(&format!(
+                "hybrid search failed (did you run `index/link --embed`?): {e:#}"
+            ));
             return ExitCode::FAILURE;
         }
     };
@@ -355,20 +368,19 @@ fn cmd_search(query: &str, from: Option<&str>, markdown: bool) -> ExitCode {
     if markdown {
         print!("{}", comind::search::markdown(query, &hits));
     } else {
-        println!("search: {query:?}\n");
+        comind::ui::header(&format!("search: {query:?}"));
+        let mut t = comind::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
         for h in &hits {
-            println!(
-                "  {:>6.3}  {:<26} {:<9} deps={:<3} {}",
-                h.score,
-                truncate(&h.name, 26),
-                h.kind,
-                h.deps,
-                h.location
-            );
-            if let Some(s) = &h.summary {
-                println!("          ↳ {s}");
-            }
+            t.add_row(vec![
+                format!("{:.3}", h.score),
+                h.name.clone(),
+                h.kind.to_string(),
+                h.deps.to_string(),
+                h.location.clone(),
+                h.summary.clone().unwrap_or_default(),
+            ]);
         }
+        println!("{t}");
     }
     ExitCode::SUCCESS
 }
@@ -389,37 +401,37 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
     let head = match comind::git::head_commit(path) {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("comind changed: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
-    println!("HEAD: {head}");
+    comind::ui::field("HEAD", &head);
 
     let Some(base) = since else {
         return ExitCode::SUCCESS;
     };
     match comind::git::changed_files(path, base) {
         Ok(cs) => {
-            println!(
+            comind::ui::header(&format!(
                 "changed since {base}: {} files ({} added, {} modified, {} deleted)",
                 cs.total(),
                 cs.added.len(),
                 cs.modified.len(),
                 cs.deleted.len()
-            );
+            ));
             for p in cs.added.iter().take(10) {
-                println!("  + {p}");
+                comind::ui::note(&format!("+ {p}"));
             }
             for p in cs.modified.iter().take(10) {
-                println!("  ~ {p}");
+                comind::ui::note(&format!("~ {p}"));
             }
             for p in cs.deleted.iter().take(10) {
-                println!("  - {p}");
+                comind::ui::note(&format!("- {p}"));
             }
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("comind changed: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             ExitCode::FAILURE
         }
     }
@@ -430,21 +442,21 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
 fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
-    eprintln!("comind serve: loading graph from {uri} ...");
+    comind::ui::step(&format!("loading graph from {uri}"));
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
     {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("comind serve: runtime: {e}");
+            comind::ui::err(&format!("runtime: {e}"));
             return ExitCode::FAILURE;
         }
     };
     match rt.block_on(comind::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("comind serve: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             ExitCode::FAILURE
         }
     }
@@ -454,8 +466,9 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
     match action {
         None | Some(ConfigAction::Path) => {
+            // Path stays plain on stdout so `$(comind config path)` is scriptable.
             println!("{}", comind::config::config_path().display());
-            println!("index dir: {}", comind::config::default_index_dir());
+            comind::ui::field("index dir", &comind::config::default_index_dir());
             ExitCode::SUCCESS
         }
         Some(ConfigAction::Init) => match comind::config::init() {
@@ -464,7 +477,7 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("comind config: {e:#}");
+                comind::ui::err(&format!("{e:#}"));
                 ExitCode::FAILURE
             }
         },
@@ -659,7 +672,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("comind link: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -669,7 +682,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("comind link: runtime: {e}");
+            comind::ui::err(&format!("runtime: {e}"));
             return ExitCode::FAILURE;
         }
     };
@@ -768,13 +781,13 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     let (symbols, edges) = match comind::index::read_graph_blocking(uri) {
         Ok(x) => x,
         Err(e) => {
-            eprintln!("comind flow: load from {uri} failed: {e:#}");
+            comind::ui::err(&format!("load from {uri} failed: {e:#}"));
             return ExitCode::FAILURE;
         }
     };
     let g = comind::graph::CodeGraph::build(&symbols, &edges);
     let Some(idx) = g.lookup(focus) else {
-        eprintln!("comind flow: no symbol matching `{focus}`");
+        comind::ui::err(&format!("no symbol matching `{focus}`"));
         return ExitCode::FAILURE;
     };
     let fid = g.zoom(idx).focus.map(|n| n.id);
@@ -789,28 +802,32 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
             .find(|(id, _, _)| &id.render() == fid);
         match stored {
             Some((_, narr, queries)) => {
+                comind::ui::header(&format!("flow: {focus}"));
                 println!("{narr}\n");
                 if !queries.is_empty() {
-                    println!("Ask: {}\n", queries.join(" · "));
+                    comind::ui::field("Ask", &queries.join(" · "));
                 }
             }
-            None => eprintln!(
-                "(no pre-generated narration for `{focus}` — showing the raw trace; run `link --flows` to narrate)\n"
-            ),
+            None => comind::ui::note(&format!(
+                "no pre-generated narration for `{focus}` — showing the raw trace; run `index/link --flows` to narrate"
+            )),
         }
     }
 
     // Live forward call trace.
     let hops = g.thread(idx, 4);
-    println!("flow trace from `{focus}` ({} steps):", hops.len());
-    for h in &hops {
-        println!(
-            "  d{} {:<8} {:<28} {}",
-            h.depth,
-            format!("{:?}", h.via),
-            truncate(&h.node.name, 28),
-            h.node.location
-        );
+    comind::ui::header(&format!("flow trace from `{focus}` ({} steps)", hops.len()));
+    if !hops.is_empty() {
+        let mut t = comind::ui::table(&["depth", "via", "symbol", "location"]);
+        for h in &hops {
+            t.add_row(vec![
+                format!("d{}", h.depth),
+                format!("{:?}", h.via),
+                h.node.name.clone(),
+                h.node.location.clone(),
+            ]);
+        }
+        println!("{t}");
     }
     ExitCode::SUCCESS
 }
@@ -857,7 +874,7 @@ fn run_embed(
     let embedder = match comind::embed::Embedder::load_default() {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("comind link: embedding model: {e:#}");
+            comind::ui::err(&format!("embedding model: {e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -935,7 +952,7 @@ fn run_enrich(
     let client = match comind::llm::LlmClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("comind link: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -945,7 +962,7 @@ fn run_enrich(
     {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("comind link: runtime: {e}");
+            comind::ui::err(&format!("runtime: {e}"));
             return ExitCode::FAILURE;
         }
     };
@@ -1052,9 +1069,9 @@ fn run_enrich(
 
     // Preview a few. Regenerate the style guide only when something changed.
     for (_, summary, queries) in rows.iter().take(3) {
-        println!("  • {summary}");
+        comind::ui::note(&format!("• {summary}"));
         if let Some(q) = queries.first() {
-            println!("    e.g. \"{q}\"");
+            comind::ui::note(&format!("  e.g. \"{q}\""));
         }
     }
     if !items.is_empty() {
@@ -1066,12 +1083,10 @@ fn run_enrich(
         match rt.block_on(client.style_guide(&samples)) {
             Ok(guide) => {
                 let _ = comind::index::write_style_guide_blocking(dst, &guide);
-                println!(
-                    "\nstyle guide (persisted; preview):\n{}",
-                    truncate_lines(&guide, 8)
-                );
+                comind::ui::header("Style guide (persisted; preview)");
+                println!("{}", truncate_lines(&guide, 8));
             }
-            Err(e) => eprintln!("comind link: style guide failed (non-fatal): {e:#}"),
+            Err(e) => comind::ui::warn(&format!("style guide failed (non-fatal): {e:#}")),
         }
     }
     ExitCode::SUCCESS
@@ -1198,36 +1213,38 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let head = match comind::git::head_commit(root) {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("comind index: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
     let cs = match comind::git::changed_files(root, base) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("comind index: {e:#}");
+            comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
-    println!(
-        "incremental {} → {}: {} changed ({}+ {}~ {}-)",
+    comind::ui::header(&format!(
+        "Incremental {} → {}: {} changed ({}+ {}~ {}-)",
         short(base),
         short(&head),
         cs.total(),
         cs.added.len(),
         cs.modified.len(),
         cs.deleted.len()
-    );
+    ));
     if cs.total() == 0 {
         let _ = comind::index::write_repo_meta_blocking(dst, repo_name, &head);
-        println!("index already up to date");
+        comind::ui::ok("index already up to date");
         return ExitCode::SUCCESS;
     }
 
     let (prior_syms, prior_edges) = match comind::index::read_graph_blocking(dst) {
         Ok(x) => x,
         Err(e) => {
-            eprintln!("comind index: no prior index at {dst} ({e:#}); run a full index first");
+            comind::ui::err(&format!(
+                "no prior index at {dst} ({e:#}); run a full index first"
+            ));
             return ExitCode::FAILURE;
         }
     };
@@ -1259,15 +1276,15 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     edges.extend(newout.edges);
 
     if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges) {
-        eprintln!("comind index: write failed: {e:#}");
+        comind::ui::err(&format!("write failed: {e:#}"));
         return ExitCode::FAILURE;
     }
     let _ = comind::index::write_repo_meta_blocking(dst, repo_name, &head);
-    println!(
+    comind::ui::ok(&format!(
         "reparsed {} files → symbols {before}→{}, edges {}",
         to_parse.len(),
         symbols.len(),
         edges.len()
-    );
+    ));
     ExitCode::SUCCESS
 }
