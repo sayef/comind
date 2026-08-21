@@ -1684,13 +1684,15 @@ fn cmd_index(
     }
 
     comind::ui::header(&format!("Indexing {repo_name}"));
-    let out = match comind::parse::parse_repo(root, &repo_name) {
+    let mut out = match comind::parse::parse_repo(root, &repo_name) {
         Ok(o) => o,
         Err(e) => {
             comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
+    // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
+    out.edges = comind::resolve::resolve(&out.symbols, &out.edges).edges;
 
     let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
     for s in &out.symbols {
@@ -1844,6 +1846,8 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         .collect();
     symbols.extend(newout.symbols);
     edges.extend(newout.edges);
+    // Re-resolve so merged call edges bind to definitions (ripple/thread/context_pack).
+    let edges = comind::resolve::resolve(&symbols, &edges).edges;
 
     if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges) {
         comind::ui::err(&format!("write failed: {e:#}"));
