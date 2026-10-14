@@ -104,9 +104,12 @@ Add to your MCP client (e.g. Claude Code):
 }
 ```
 
-**MCP tools:** `search`, `suggest`, `repos`, `find`, `zoom`, `ripple`, `thread`, `flow`,
-`context_pack`, `guide`. Results are handed to the agent as **markdown by default** (structured JSON
-is also attached; use `serve --format json` for raw JSON).
+**MCP tools (15):**
+- **Navigate:** `search`, `find`, `zoom`, `thread`, `flow`, `repos`, `suggest`.
+- **Before a change:** `ripple` (blast radius, across repos and service contracts), `context_pack` (minimal read-set + known constraints), `preflight` (constraints, dead ends, contracts, missing companions for a planned edit), `contracts` (HTTP routes, queues, buckets, tables and who uses them), `guide` (measured conventions and recipes).
+- **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
+
+Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). `comind init-hooks claude` prints Claude Code hooks that inject relevant ledger records at session start and just before an edit.
 
 ## Commands
 
@@ -123,6 +126,17 @@ is also attached; use `serve --format json` for raw JSON).
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
+| `comind contracts [--type http\|sqs\|sns\|s3\|table] [--dangling]` | Service contracts with providers and consumers |
+| `comind packages [--skew]` | Internal packages: publisher, consumers, version skew |
+| `comind conventions [--repo <name>]` | Measured conventions, org baseline, recipes from history |
+| `comind preflight [repo] [--base <rev>]` | Before committing: constraints, dead ends, contracts, blast radius, missing companions |
+| `comind remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
+| `comind why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
+| `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
+| `comind ledger [--inbox]` | All ledger records, or only those needing review |
+| `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
+| `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
+| `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for the full flags of any subcommand.
@@ -155,7 +169,7 @@ flowchart LR
         EN["enrichment<br/>summaries · queries · flows"]
     end
     subgraph USE["Consume — instant"]
-        MCP["comind serve<br/>MCP · 10 tools"]
+        MCP["comind serve<br/>MCP · 15 tools"]
         CLI["comind search / explore / flow"]
     end
     SRC --> IDX --> ART --> USE
@@ -181,7 +195,7 @@ src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack
 src/embed.rs   Model2Vec embeddings + code-aware hybrid ranking
 src/search.rs  hybrid retrieval (BM25 + vector + graph centrality)
 src/llm.rs     LLM summaries / questions / flow walkthroughs (opt-in, provider-agnostic via Rig)
-src/mcp.rs     MCP server (10 tools)
+src/mcp.rs     MCP server (15 tools)
 src/main.rs    the comind binary (CLI)
 ```
 
