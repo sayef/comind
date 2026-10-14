@@ -934,6 +934,56 @@ pub async fn read_facts(uri: &str) -> Result<Option<Vec<FileFacts>>> {
     Ok(Some(out))
 }
 
+/// Persist manifest/lockfile package rows (JSON per row).
+pub async fn write_packages(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("row", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = rows
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize packages")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build packages batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "packages", batch).await?;
+    Ok(())
+}
+
+pub async fn read_packages(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("packages").execute().await else {
+        return Ok(Vec::new());
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "row")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse package row")?);
+        }
+    }
+    Ok(out)
+}
+
+pub fn write_packages_blocking(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
+    runtime()?.block_on(write_packages(uri, rows))
+}
+
+pub fn read_packages_blocking(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
+    runtime()?.block_on(read_packages(uri))
+}
+
 pub fn write_facts_blocking(uri: &str, facts: &[FileFacts]) -> Result<()> {
     runtime()?.block_on(write_facts(uri, facts))
 }

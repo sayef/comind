@@ -46,6 +46,8 @@ pub struct ComindServer {
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
     embedder: Arc<Option<Embedder>>,
     uri: Arc<String>,
+    /// Manifest/lockfile rows for internal-dependency answers.
+    packages: Arc<Vec<crate::manifests::PackageRow>>,
     /// Hand results back as markdown text (default). `false` → raw JSON text.
     markdown: bool,
 }
@@ -116,6 +118,19 @@ struct HopDto {
 struct RepoCount {
     repo: String,
     symbols: usize,
+    /// Packages published by other indexed repos that this repo depends on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    depends_on: Vec<DepDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct DepDto {
+    package: String,
+    publisher: String,
+    published: Option<String>,
+    locked: Option<String>,
+    /// Pinned to a different version than the publisher's source.
+    skew: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -367,7 +382,11 @@ impl ComindServer {
                 .graph
                 .repos()
                 .into_iter()
-                .map(|(repo, symbols)| RepoCount { repo, symbols })
+                .map(|(repo, symbols)| RepoCount {
+                    depends_on: comind_deps(&self.packages, &repo),
+                    repo,
+                    symbols,
+                })
                 .collect(),
         };
         let md = md_repos(&dto);
@@ -540,7 +559,11 @@ impl ComindServer {
                     total_dependents: hops.len(),
                     by_repo: by_repo
                         .into_iter()
-                        .map(|(repo, symbols)| RepoCount { repo, symbols })
+                        .map(|(repo, symbols)| RepoCount {
+                            repo,
+                            symbols,
+                            depends_on: Vec::new(),
+                        })
                         .collect(),
                     dependents: hops.into_iter().map(hop_dto).collect(),
                 }
@@ -735,8 +758,33 @@ fn md_repos(d: &ReposDto) -> String {
     }
     for r in &d.repos {
         let _ = writeln!(o, "- **{}** — {} symbols", r.repo, r.symbols);
+        for dep in &r.depends_on {
+            let _ = writeln!(
+                o,
+                "  - uses `{}` from **{}** — locked {} vs published {}{}",
+                dep.package,
+                dep.publisher,
+                dep.locked.as_deref().unwrap_or("?"),
+                dep.published.as_deref().unwrap_or("?"),
+                if dep.skew { " ⚠ skew" } else { "" }
+            );
+        }
     }
     o
+}
+
+fn comind_deps(rows: &[crate::manifests::PackageRow], repo: &str) -> Vec<DepDto> {
+    crate::manifests::internal(rows)
+        .into_iter()
+        .filter(|d| d.consumer == repo)
+        .map(|d| DepDto {
+            skew: d.skewed(),
+            package: d.name,
+            publisher: d.publisher,
+            published: d.published,
+            locked: d.locked,
+        })
+        .collect()
 }
 
 fn md_suggest(d: &SuggestDto) -> String {
@@ -992,6 +1040,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
+        packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
         markdown,
     };
     let service = server.serve(rmcp::transport::io::stdio()).await?;

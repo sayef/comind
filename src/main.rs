@@ -191,6 +191,15 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Internal packages: who publishes each, who depends on it, and at which version
+    Packages {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only consumers pinned to a version other than the publisher's
+        #[arg(long)]
+        skew: bool,
+    },
     /// Service contracts (HTTP routes, queues, topics, buckets, tables) and who uses them
     Contracts {
         /// Index directory to read — root; default: configured index dir (local path or s3://…)
@@ -374,6 +383,7 @@ fn main() -> ExitCode {
             kind,
             dangling,
         } => cmd_contracts(index_dir.as_deref(), kind.as_deref(), dangling),
+        Cmd::Packages { index_dir, skew } => cmd_packages(index_dir.as_deref(), skew),
         Cmd::Eval {
             what:
                 EvalWhat::Graph {
@@ -924,6 +934,65 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let rows = match comind::index::read_packages_blocking(&dir) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let deps: Vec<_> = comind::manifests::internal(&rows)
+        .into_iter()
+        .filter(|d| !skew || d.skewed())
+        .collect();
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec![
+            "package",
+            "published by",
+            "consumer",
+            "requires",
+            "locked",
+        ]);
+    let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
+    for d in &deps {
+        let locked = match (&d.locked, d.skewed()) {
+            (Some(l), true) => format!("{l}  ≠"),
+            _ => opt(&d.locked),
+        };
+        table.add_row(vec![
+            format!("{} ({})", d.name, d.ecosystem),
+            format!("{} @ {}", d.publisher, opt(&d.published)),
+            d.consumer.clone(),
+            opt(&d.requirement),
+            locked,
+        ]);
+    }
+    comind::ui::header(&format!("Internal dependencies — {}", deps.len()));
+    println!("{table}");
+    ExitCode::SUCCESS
+}
+
+/// Manifests and lockfiles of each repo, and a one-line internal-dependency summary.
+fn scan_packages(repos: &[(String, std::path::PathBuf)]) -> Vec<comind::manifests::PackageRow> {
+    let rows: Vec<_> = repos
+        .iter()
+        .flat_map(|(name, root)| comind::manifests::scan(root, name))
+        .collect();
+    let deps = comind::manifests::internal(&rows);
+    if !deps.is_empty() {
+        let skewed = deps.iter().filter(|d| d.skewed()).count();
+        comind::ui::ok(&format!(
+            "internal packages: {} dependency link(s), {skewed} pinned to a different version than their publisher",
+            deps.len()
+        ));
+    }
+    rows
+}
+
 fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> ExitCode {
     let dir = comind::config::Config::load().graph_dir(from);
     let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
@@ -1271,8 +1340,14 @@ fn cmd_link(
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
         comind::ui::header("Persisting");
         comind::ui::step(&format!("writing org graph to {dst}"));
+        let roots: Vec<(String, std::path::PathBuf)> = repos
+            .iter()
+            .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
+            .collect();
+        let packages = scan_packages(&roots);
         match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges)
             .and_then(|v| comind::index::write_facts_blocking(&dst, &facts).map(|_| v))
+            .and_then(|v| comind::index::write_packages_blocking(&dst, &packages).map(|_| v))
         {
             Ok((sv, ev)) => comind::ui::ok(&format!(
                 "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
@@ -2002,7 +2077,16 @@ fn cmd_index(
     comind::ui::step(&format!("writing graph to {dst}"));
     match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges)
         .and_then(|v| comind::index::write_facts_blocking(&dst, &out.facts).map(|_| v))
-    {
+        .and_then(|v| {
+            // Keep other repos' package rows already in a shared index dir.
+            let mut rows: Vec<_> = comind::index::read_packages_blocking(&dst)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.repo != repo_name)
+                .collect();
+            rows.extend(scan_packages(&[(repo_name.clone(), root.to_path_buf())]));
+            comind::index::write_packages_blocking(&dst, &rows).map(|_| v)
+        }) {
         Ok((sv, ev)) => comind::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
         Err(e) => {
             comind::ui::err(&format!("write failed: {e:#}"));

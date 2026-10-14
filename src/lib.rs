@@ -12,6 +12,7 @@ pub mod config;
 pub mod facts;
 pub mod git;
 pub mod lang;
+pub mod manifests;
 pub mod packages;
 pub mod parse;
 pub mod resolve;
