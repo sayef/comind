@@ -26,6 +26,8 @@ pub struct Data {
     pub entries: Vec<Entry>,
     pub conventions: Vec<Convention>,
     pub deps: Vec<InternalDep>,
+    /// Index root for writing ledger reviews; `None` makes the UI read-only.
+    pub root: Option<String>,
 }
 
 pub struct App {
@@ -38,6 +40,8 @@ pub struct App {
     typing: bool,
     query: String,
     found: Vec<Node>,
+    /// Last action's outcome, shown in the help line.
+    status: String,
     quit: bool,
 }
 
@@ -56,6 +60,7 @@ impl App {
             typing: false,
             query: String::new(),
             found: Vec::new(),
+            status: String::new(),
             quit: false,
         }
     }
@@ -110,10 +115,44 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.step(-1),
             KeyCode::PageDown => self.step(10),
             KeyCode::PageUp => self.step(-10),
+            KeyCode::Char('c') if self.tab == 2 => {
+                self.review(crate::ledger::RelationKind::Confirms)
+            }
+            KeyCode::Char('x') if self.tab == 2 => {
+                self.review(crate::ledger::RelationKind::Retracts)
+            }
             KeyCode::Char('J') => step(&mut self.inner, 1, usize::MAX),
             KeyCode::Char('K') => step(&mut self.inner, -1, usize::MAX),
             _ => {}
         }
+    }
+
+    /// Confirm or retract the selected ledger record as a human reviewer.
+    fn review(&mut self, kind: crate::ledger::RelationKind) {
+        let Some(root) = self.data.root.clone() else {
+            self.status = "read-only: no index root".into();
+            return;
+        };
+        let selected = self.lists[2].selected().unwrap_or(0);
+        let Some(target) = self.entries().get(selected).map(|e| e.record.clone()) else {
+            return;
+        };
+        let prov = crate::ledger::Provenance {
+            author: crate::ledger::AuthorKind::Human,
+            actor: crate::ledger::actor(),
+            source: "ui".into(),
+            agent: None,
+            session: None,
+        };
+        let rec = crate::ledger::Record::relation(kind, &target, "", prov);
+        self.status = match crate::ledger::put_blocking(&root, &rec) {
+            Ok(()) => {
+                let records = crate::ledger::all_blocking(&root).unwrap_or_default();
+                self.data.entries = crate::ledger::derive(&records, &self.data.symbols);
+                format!("{kind:?}: {}", target.title)
+            }
+            Err(e) => format!("not recorded: {e:#}"),
+        };
     }
 
     fn input(&mut self) -> &mut String {
@@ -225,7 +264,17 @@ impl App {
             } else {
                 format!("  filter: {}", self.filter)
             };
-            format!(" ←/→ tabs · ↑/↓ select · J/K inner · / search · Esc clear · q quit{filter}")
+            let actions = if self.tab == 2 {
+                " · c confirm · x retract"
+            } else {
+                ""
+            };
+            let status = if self.status.is_empty() {
+                String::new()
+            } else {
+                format!("  — {}", self.status)
+            };
+            format!(" ←/→ tabs · ↑/↓ select · J/K inner · / search · Esc clear · q quit{actions}{filter}{status}")
         };
         f.render_widget(
             Paragraph::new(help).style(Style::new().fg(Color::DarkGray)),
@@ -591,6 +640,7 @@ mod tests {
             conventions: crate::conventions::mine(&symbols, &r.edges, &facts),
             entries: Vec::new(),
             deps: Vec::new(),
+            root: None,
             graph,
             symbols,
             edges: r.edges,

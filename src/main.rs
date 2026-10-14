@@ -1251,6 +1251,7 @@ fn cmd_ui(from: Option<&str>) -> ExitCode {
         entries,
         conventions,
         deps,
+        root: Some(cfg.index_dir(from)),
     };
     match comind::tui::App::new(data).run() {
         Ok(()) => ExitCode::SUCCESS,
