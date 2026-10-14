@@ -97,6 +97,7 @@ src/
   conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
   recipes.rs  change recipes from commit history (what changes together when adding code).
   ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
+  preflight.rs before-change report: ledger, contracts, blast radius, missing companions.
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
   resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
   eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).

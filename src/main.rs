@@ -239,6 +239,18 @@ enum Cmd {
         #[arg(long)]
         inbox: bool,
     },
+    /// Before committing: recorded constraints/dead ends, contracts, blast radius and missing
+    /// companions for your uncommitted changes
+    Preflight {
+        /// Repository path (default: current directory)
+        #[arg(default_value = ".")]
+        repo: String,
+        /// Compare the working tree against this revision
+        #[arg(long, default_value = "HEAD")]
+        base: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
     /// Seed the ledger from git history: reverts → failed attempts, commit trailers → records
     Harvest {
         /// Repository paths (already indexed)
@@ -507,6 +519,11 @@ fn main() -> ExitCode {
             limit,
             index_dir,
         } => cmd_harvest(&repos, limit, index_dir.as_deref()),
+        Cmd::Preflight {
+            repo,
+            base,
+            index_dir,
+        } => cmd_preflight(&repo, &base, index_dir.as_deref()),
 
         Cmd::Eval {
             what:
@@ -1196,6 +1213,50 @@ fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
     let shown = comind::ledger::inbox(&entries, inbox);
     let title = if inbox { "Ledger inbox" } else { "Ledger" };
     println!("{}", comind::ledger::markdown(title, &shown));
+    ExitCode::SUCCESS
+}
+
+fn cmd_preflight(repo: &str, base: &str, from: Option<&str>) -> ExitCode {
+    let root = Path::new(repo);
+    let name = std::fs::canonicalize(root)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| repo_name(repo));
+    let raw = match comind::git::working_changes(root, base) {
+        Ok(c) => c,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    if raw.is_empty() {
+        comind::ui::ok("no changes against the base");
+        return ExitCode::SUCCESS;
+    }
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let changes: Vec<comind::preflight::Change> = raw
+        .into_iter()
+        .map(|(path, lines)| comind::preflight::Change {
+            repo: name.clone(),
+            path,
+            lines,
+        })
+        .collect();
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let recipes = comind::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    println!(
+        "{}",
+        comind::preflight::report(&g, &symbols, &edges, &entries, &recipes, &changes)
+    );
     ExitCode::SUCCESS
 }
 

@@ -50,6 +50,8 @@ pub struct ComindServer {
     packages: Arc<Vec<crate::manifests::PackageRow>>,
     /// Measured conventions (per repo + org baseline), computed at startup from stored facts.
     conventions: Arc<Vec<crate::conventions::Convention>>,
+    /// All edges (contracts and blast radius for `preflight`).
+    edges: Arc<Vec<crate::model::Edge>>,
     /// Hand results back as markdown text (default). `false` → raw JSON text.
     markdown: bool,
 }
@@ -384,6 +386,16 @@ struct RememberParam {
     /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.
     #[serde(default)]
     fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct PreflightParam {
+    /// Files you plan to change (repo-relative or absolute paths).
+    #[serde(default)]
+    files: Vec<String>,
+    /// Symbols you plan to change (ids or names).
+    #[serde(default)]
+    symbols: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -740,6 +752,68 @@ impl ComindServer {
         let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
         let dto = LedgerDto {
             ok: true,
+            message: md.clone(),
+        };
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "preflight",
+        description = "Before you change code: given the files and/or symbols you plan to edit, returns recorded constraints and failed attempts about them, contracts (routes, tables, queues) other services consume, blast radius across repos, and directories that usually change together but aren't in your plan. Run it on your plan before editing."
+    )]
+    async fn preflight(&self, Parameters(p): Parameters<PreflightParam>) -> CallToolResult {
+        let mut changes = Vec::new();
+        for f in &p.files {
+            if let Some(s) = self.symbols.values().find(|s| {
+                s.kind == crate::model::SymbolKind::File
+                    && (s.file_path == *f || f.ends_with(&format!("/{}", s.file_path)))
+            }) {
+                changes.push(crate::preflight::Change {
+                    repo: s.repo.0.clone(),
+                    path: s.file_path.clone(),
+                    lines: Vec::new(),
+                });
+            }
+        }
+        for focus in &p.symbols {
+            let Some(idx) = self.graph.lookup(focus) else {
+                continue;
+            };
+            if let Some(s) = self.symbols.get(&self.graph.node(idx).id) {
+                changes.push(crate::preflight::Change {
+                    repo: s.repo.0.clone(),
+                    path: s.file_path.clone(),
+                    lines: vec![(s.range.start.line, s.range.end.line)],
+                });
+            }
+        }
+        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
+            Ok(l) => l.all().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        let recipes: Vec<crate::conventions::Convention> = self
+            .conventions
+            .iter()
+            .filter(|c| c.dimension == "recipes")
+            .cloned()
+            .collect();
+        let md = if changes.is_empty() {
+            "_no indexed files or symbols matched — pass repo-relative paths or names from `find`._"
+                .to_string()
+        } else {
+            crate::preflight::report(
+                &self.graph,
+                &symbols,
+                &self.edges,
+                &entries,
+                &recipes,
+                &changes,
+            )
+        };
+        let dto = LedgerDto {
+            ok: !changes.is_empty(),
             message: md.clone(),
         };
         self.reply(&dto, md)
@@ -1355,6 +1429,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         uri: Arc::new(uri.to_string()),
         packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
         conventions: Arc::new(conventions),
+        edges: Arc::new(edges),
         markdown,
     };
     let service = server.serve(rmcp::transport::io::stdio()).await?;

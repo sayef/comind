@@ -16,6 +16,7 @@ pub mod lang;
 pub mod manifests;
 pub mod packages;
 pub mod parse;
+pub mod preflight;
 pub mod recipes;
 pub mod resolve;
 pub mod scip;

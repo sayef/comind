@@ -145,3 +145,35 @@ fn walk(repo_path: &Path, limit: usize, first_parent: bool) -> Result<Vec<Commit
     }
     Ok(out)
 }
+
+/// Uncommitted changes (staged and unstaged) against `base` as (path, changed new-side line ranges).
+pub fn working_changes(repo_path: &Path, base: &str) -> Result<Vec<(String, Vec<(u32, u32)>)>> {
+    let repo = Repository::open(repo_path)
+        .with_context(|| format!("open git repo at {}", repo_path.display()))?;
+    let tree = repo.revparse_single(base)?.peel_to_tree()?;
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    let diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut opts))?;
+    let out: std::cell::RefCell<Vec<(String, Vec<(u32, u32)>)>> = Default::default();
+    diff.foreach(
+        &mut |d, _| {
+            if let Some(p) = path_string(d.new_file().path()) {
+                out.borrow_mut().push((p, Vec::new()));
+            }
+            true
+        },
+        None,
+        Some(&mut |d, h| {
+            let mut v = out.borrow_mut();
+            if let (Some(p), Some(last)) = (path_string(d.new_file().path()), v.last_mut()) {
+                if last.0 == p {
+                    let start = h.new_start().max(1);
+                    last.1.push((start, start + h.new_lines().max(1) - 1));
+                }
+            }
+            true
+        }),
+        None,
+    )?;
+    Ok(out.into_inner())
+}
