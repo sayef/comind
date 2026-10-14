@@ -653,3 +653,70 @@ case = "contract-http-wrapper"
 kind = "consumes"
 src = "service-a:service_a/users.py::ping"
 dst = "contract:http:GET /ping"
+
+# ---- web-app: Next.js route, fetch, interface-typed HTTP wrapper (TS → Python) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "web-app:src/jobs.ts"
+dst = "web-app:src/lib/http.ts::ServiceClient"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "web-app:src/jobs.ts"
+dst = "web-app:src/lib/http.ts::services"
+
+[[edge]]
+case = "implements"
+kind = "implements"
+src = "web-app:src/lib/http.ts::UpstreamClient"
+dst = "web-app:src/lib/http.ts::ServiceClient"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "web-app:src/lib/http.ts"
+dst = "web-app:src/lib/http.ts::UpstreamClient"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.get"
+dst = "web-app:src/lib/http.ts::UpstreamClient.send"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.put"
+dst = "web-app:src/lib/http.ts::UpstreamClient.send"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.send"
+dst = "web-app:src/lib/http.ts::request"
+
+[[edge]]
+case = "interface-call"
+kind = "calls"
+src = "web-app:src/jobs.ts::loadSkill"
+dst = "web-app:src/lib/http.ts::ServiceClient.get"
+
+[[edge]]
+case = "contract-nextjs-route"
+kind = "serves"
+src = "web-app:src/app/api/jobs/[id]/route.ts::GET"
+dst = "contract:http:GET /api/jobs/{}"
+
+[[edge]]
+case = "contract-fetch"
+kind = "consumes"
+src = "web-app:src/jobs.ts::loadJob"
+dst = "contract:http:GET /api/jobs/{}"
+
+[[edge]]
+case = "contract-ts-wrapper"
+kind = "consumes"
+src = "web-app:src/jobs.ts::loadSkill"
+dst = "contract:http:GET /v1/skills/{}"

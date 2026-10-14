@@ -225,6 +225,7 @@ fn parse_file_with(
         in_class: false,
     };
     walk(tree.root_node(), &scope, &ctx, &mut out);
+    next_routes(&rel_str, &mut out);
     Ok(Some(out))
 }
 
@@ -543,6 +544,34 @@ fn type_hint(target: Target, source: TypeSource, scope: &Scope, ctx: &Ctx, out: 
         }
     };
     facts(out).types.push(hint);
+}
+
+/// Next.js app-router handlers: `route.ts` exporting `GET`/`POST`/… serve the file's path.
+fn next_routes(rel: &str, out: &mut ParseOutput) {
+    let Some(path) = crate::lang::typescript::next_route_path(rel) else {
+        return;
+    };
+    let handlers: Vec<(String, String, u32)> = out
+        .symbols
+        .iter()
+        .filter(|s| s.kind == SymbolKind::Function)
+        .filter(|s| {
+            matches!(
+                s.name.as_str(),
+                "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+            )
+        })
+        .map(|s| (s.id.render(), s.name.clone(), s.range.start.line))
+        .collect();
+    for (handler, method, line) in handlers {
+        facts(out).contracts.push(ContractFact::Route {
+            handler,
+            receiver: Vec::new(),
+            method,
+            path: crate::facts::ValueExpr::Lit(path.clone()),
+            line,
+        });
+    }
 }
 
 /// The single file's facts (a fresh `ParseOutput` from `parse_file_with` holds exactly one).
@@ -869,7 +898,7 @@ mod tests {
             .any(|i| i.module == "./button" && i.items == vec![crate::facts::ImportItem::All]));
 
         let app = parse_repo(Path::new("tests/fixtures/org/web-app"), "web-app").unwrap();
-        let f = &app.facts[0];
+        let f = app.facts.iter().find(|f| f.path == "src/app.ts").unwrap();
         assert!(f
             .refs
             .iter()

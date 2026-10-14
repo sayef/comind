@@ -20,7 +20,7 @@ const HTTP_CLIENTS: &[&str] = &[
     "requests.Session",
     "aiohttp.ClientSession",
 ];
-const HTTP_MODULES: &[&str] = &["httpx", "requests"];
+const HTTP_MODULES: &[&str] = &["httpx", "requests", "axios", "ky", "got"];
 const ROUTERS: &[&str] = &["fastapi.APIRouter", "fastapi.FastAPI"];
 const DB_READS: &[&str] = &["get", "query", "select", "scalars"];
 const DB_WRITES: &[&str] = &["add", "merge", "delete", "insert", "update"];
@@ -43,8 +43,9 @@ pub(super) struct Linked {
     pub edges: Vec<(String, String, EdgeKind)>,
 }
 
-pub(super) fn link(b: &Binder, facts: &[FileFacts]) -> Linked {
-    let cx = Cx::new(b, facts);
+pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) -> Linked {
+    let mut cx = Cx::new(b, facts);
+    cx.performing(facts, calls);
     let mut out = Linked {
         symbols: Vec::new(),
         edges: Vec::new(),
@@ -70,16 +71,21 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts]) -> Linked {
                     path,
                     ..
                 } => {
-                    let Some(router) = cx.var_of(receiver, &f.file_id, f) else {
-                        continue;
-                    };
-                    if !cx.routers.contains_key(&router) {
-                        continue;
-                    }
                     let Some(p) = cx.value(path, &f.file_id, 0) else {
                         continue;
                     };
-                    let full = format!("{}{p}", cx.prefix(&router, 0));
+                    // File-routed handlers (Next.js) carry their full path and no router.
+                    let full = if receiver.is_empty() {
+                        p
+                    } else {
+                        let Some(router) = cx.var_of(receiver, &f.file_id, f) else {
+                            continue;
+                        };
+                        if !cx.routers.contains_key(&router) {
+                            continue;
+                        }
+                        format!("{}{p}", cx.prefix(&router, 0))
+                    };
                     emit(
                         handler,
                         format!("http:{method} {}", http_path(&full)),
@@ -156,6 +162,8 @@ struct Cx<'b, 'a> {
     routers: HashMap<String, String>,
     /// Router variable id → (parent app/router id, include prefix).
     mounts: HashMap<String, (String, String)>,
+    /// Classes/interfaces whose methods (transitively) perform HTTP, plus their supertypes.
+    http_types: std::collections::HashSet<String>,
 }
 
 impl<'b, 'a> Cx<'b, 'a> {
@@ -166,6 +174,7 @@ impl<'b, 'a> Cx<'b, 'a> {
             clients: HashMap::new(),
             routers: HashMap::new(),
             mounts: HashMap::new(),
+            http_types: std::collections::HashSet::new(),
         };
         for f in facts {
             for v in &f.values {
@@ -241,6 +250,61 @@ impl<'b, 'a> Cx<'b, 'a> {
         cx
     }
 
+    /// Mark types whose methods reach `fetch`/`axios` through the call graph (TS/JS wrappers).
+    fn performing(&mut self, facts: &[FileFacts], calls: &[(String, String)]) {
+        let mut doing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for f in facts
+            .iter()
+            .filter(|f| matches!(f.language, Language::TypeScript | Language::JavaScript))
+        {
+            for c in &f.contracts {
+                if let ContractFact::Op {
+                    from,
+                    receiver,
+                    method,
+                    ..
+                } = c
+                {
+                    if (receiver.is_empty() && method == "fetch")
+                        || self.direct_http(receiver, from, f)
+                    {
+                        doing.insert(from.clone());
+                    }
+                }
+            }
+        }
+        let mut callers: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (src, dst) in calls {
+            callers.entry(dst.as_str()).or_default().push(src.as_str());
+        }
+        let mut queue: Vec<String> = doing.iter().cloned().collect();
+        while let Some(n) = queue.pop() {
+            for c in callers.get(n.as_str()).into_iter().flatten() {
+                if doing.len() < 100_000 && doing.insert(c.to_string()) {
+                    queue.push(c.to_string());
+                }
+            }
+        }
+        let mut types: Vec<String> = doing
+            .iter()
+            .filter_map(|m| self.b.parent.get(m))
+            .filter(|p| self.b.is_type(p))
+            .cloned()
+            .collect();
+        while let Some(t) = types.pop() {
+            if self.http_types.insert(t.clone()) {
+                types.extend(self.b.bases.borrow().get(&t).cloned().unwrap_or_default());
+            }
+        }
+    }
+
+    fn direct_http(&self, receiver: &[String], from: &str, f: &FileFacts) -> bool {
+        receiver.len() == 1
+            && self
+                .external(receiver, from, f)
+                .is_some_and(|m| HTTP_MODULES.contains(&m.as_str()))
+    }
+
     /// Full mount prefix of a router: parents' include prefixes, then its own prefix.
     fn prefix(&self, router: &str, depth: u32) -> String {
         let own = self.routers.get(router).cloned().unwrap_or_default();
@@ -266,6 +330,14 @@ impl<'b, 'a> Cx<'b, 'a> {
             // `from fastapi import APIRouter`: bound by an import the corpus can't resolve.
             None => f.imports.iter().find_map(|imp| {
                 imp.items.iter().find_map(|item| match item {
+                    // A default import names the module itself (`import axios from "axios"`).
+                    ImportItem::Name { name, alias }
+                        if imp.level == 0
+                            && name == "default"
+                            && alias.as_deref() == Some(head) =>
+                    {
+                        Some(imp.module.clone())
+                    }
                     ImportItem::Name { name, alias }
                         if imp.level == 0 && alias.as_deref().unwrap_or(name) == head =>
                     {
@@ -349,10 +421,25 @@ impl<'b, 'a> Cx<'b, 'a> {
                 return;
             }
         }
-        let direct_http = receiver.len() == 1
-            && self
-                .external(receiver, from, f)
-                .is_some_and(|m| HTTP_MODULES.contains(&m.as_str()));
+        if receiver.is_empty() && method == "fetch" {
+            let url = args.positional.first().and_then(Option::as_ref);
+            let verb = match args.positional.get(1).and_then(Option::as_ref) {
+                Some(init) => self
+                    .field(init, from, "method", 0)
+                    .and_then(|(v, at)| self.value(&v, &at, 0))
+                    .unwrap_or_else(|| "GET".into()),
+                None => "GET".into(),
+            };
+            if let Some(url) = url.and_then(|u| self.value(u, from, 0)) {
+                emit(
+                    from,
+                    format!("http:{} {}", verb.to_uppercase(), http_path(&url)),
+                    EdgeKind::Consumes,
+                );
+            }
+            return;
+        }
+        let direct_http = self.direct_http(receiver, from, f);
         let client = if direct_http {
             Some(Client::Http)
         } else {
@@ -400,6 +487,13 @@ impl<'b, 'a> Cx<'b, 'a> {
         }
         let mut full = receiver.to_vec();
         full.push(method.to_string());
+        if matches!(f.language, Language::TypeScript | Language::JavaScript) {
+            // The receiver's static type (often an interface) is implemented by an HTTP class.
+            let Value::Instance(t) = self.b.resolve_path(receiver, from, f, 0)? else {
+                return None;
+            };
+            return self.http_types.contains(&t).then_some(Client::Http);
+        }
         let Value::Sym(m) = self.b.resolve_path(&full, from, f, 0)? else {
             return None;
         };
@@ -676,7 +770,7 @@ pub fn http_path(url: &str) -> String {
         p = p.find('}').map_or("", |i| &p[i + 1..]);
     }
     let p = p.split(['?', '#']).next().unwrap_or_default();
-    let segs: Vec<String> = p
+    let mut segs: Vec<String> = p
         .split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -687,6 +781,12 @@ pub fn http_path(url: &str) -> String {
             }
         })
         .collect();
+    // `/docs${query}`: a placeholder glued to the last segment is a query string.
+    if let Some(last) = segs.last_mut() {
+        if last.len() > 2 && last.ends_with("{}") {
+            last.truncate(last.len() - 2);
+        }
+    }
     format!("/{}", segs.join("/"))
 }
 
@@ -813,6 +913,7 @@ mod tests {
         );
         assert_eq!(http_path("{}/v1/a//b/"), "/v1/a/b");
         assert_eq!(http_path("{env:BASE}/x"), "/x");
+        assert_eq!(http_path("/api/documents{}"), "/api/documents");
     }
 
     #[test]

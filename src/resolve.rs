@@ -175,7 +175,12 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
         }
     }
 
-    let linked = contracts::link(&b, facts);
+    let calls: Vec<(String, String)> = new_edges
+        .iter()
+        .filter(|(_, _, k, _)| *k == EdgeKind::Calls)
+        .map(|(s, d, _, _)| (s.clone(), d.clone()))
+        .collect();
+    let linked = contracts::link(&b, facts, &calls);
     for (src, dst, kind) in linked.edges {
         let Some(s) = b.sym(&src) else {
             continue;
@@ -269,6 +274,8 @@ struct Binder<'a> {
     packages: HashSet<(Family, String)>,
     by_path: HashMap<(&'a str, &'a str), &'a FileFacts>,
     types: HashMap<(&'a str, &'a str), &'a TypeSource>,
+    /// Statically known values of module/class names (object literals act as namespaces).
+    values: HashMap<(&'a str, &'a str), &'a crate::facts::ValueExpr>,
     bases: RefCell<HashMap<String, Vec<String>>>,
     /// SCIP symbol → our id, for every definition SCIP mapped.
     scip_defs: HashMap<&'a str, &'a str>,
@@ -300,6 +307,7 @@ impl<'a> Binder<'a> {
             packages: HashSet::new(),
             by_path: HashMap::new(),
             types: HashMap::new(),
+            values: HashMap::new(),
             bases: RefCell::new(HashMap::new()),
             scip_defs: HashMap::new(),
             scip_refs: HashMap::new(),
@@ -327,6 +335,10 @@ impl<'a> Binder<'a> {
                 b.types
                     .entry((t.scope.as_str(), t.name.as_str()))
                     .or_insert(&t.source);
+            }
+            for v in &f.values {
+                b.values
+                    .insert((v.scope.as_str(), v.name.as_str()), &v.value);
             }
             if let Some(sf) = &f.scip {
                 for (sym, id) in &sf.defs {
@@ -532,12 +544,25 @@ impl<'a> Binder<'a> {
                     })
             }
             Value::Sym(id) if self.is_type(id) => self.class_member(id, name, depth + 1),
-            // A module variable: its members come from its inferred type.
+            // A module variable: an object literal's field, else a member of its inferred type.
             Value::Sym(id) => {
                 let var = self
                     .sym(id)
                     .filter(|s| matches!(s.kind, SymbolKind::Variable | SymbolKind::Constant))?;
                 let scope = self.parent.get(id)?;
+                if let Some(crate::facts::ValueExpr::Record(fields)) =
+                    self.values.get(&(scope.as_str(), var.name.as_str()))
+                {
+                    if let Some((_, v)) = fields.iter().find(|(k, _)| k == name) {
+                        return match v {
+                            crate::facts::ValueExpr::Name(p) => {
+                                let f = self.file_facts_of(scope)?;
+                                self.resolve_path(p, scope, f, depth + 1)
+                            }
+                            _ => None,
+                        };
+                    }
+                }
                 let src = self.types.get(&(scope.as_str(), var.name.as_str()))?;
                 let inst = self.type_of(src, scope, depth + 1)?;
                 self.member(&inst, name, depth + 1)
@@ -546,7 +571,17 @@ impl<'a> Binder<'a> {
                 for recv in ["self", "this"] {
                     let attr = format!("{recv}.{name}");
                     if let Some(src) = self.types.get(&(c.as_str(), attr.as_str())) {
-                        return self.type_of(src, c, depth + 1);
+                        if let Some(v) = self.type_of(src, c, depth + 1) {
+                            return Some(v);
+                        }
+                        // A field holding a function reference (`readonly fetch = _fetch`).
+                        if let TypeSource::Alias { name: n, scope: s } = src {
+                            let f = self.file_facts_of(s)?;
+                            if let Some(v @ Value::Sym(_)) = self.resolve_name(n, s, f, depth + 1) {
+                                return Some(v);
+                            }
+                        }
+                        return None;
                     }
                 }
                 self.class_member(c, name, depth + 1)

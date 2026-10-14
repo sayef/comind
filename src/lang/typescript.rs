@@ -2,8 +2,8 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, text, LangSpec, RawContract, Target};
+use crate::facts::{Args, Import, ImportItem, RefKind, TemplatePart, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct TypeScript;
@@ -16,7 +16,7 @@ impl LangSpec for TypeScript {
     fn def(&self, node: Node, src: &[u8], _in_class: bool) -> Option<(SymbolKind, String)> {
         let kind = match node.kind() {
             "function_declaration" | "generator_function_declaration" => SymbolKind::Function,
-            "method_definition" => SymbolKind::Method,
+            "method_definition" | "method_signature" => SymbolKind::Method,
             "class_declaration" | "abstract_class_declaration" => SymbolKind::Class,
             "interface_declaration" => SymbolKind::Interface,
             "type_alias_declaration" => SymbolKind::TypeAlias,
@@ -43,6 +43,41 @@ impl LangSpec for TypeScript {
         let name =
             (node.kind() == "variable_declarator").then(|| node.child_by_field_name("name"))??;
         (name.kind() == "identifier").then(|| text(name, src).to_string())
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if node.kind() != "variable_declarator" {
+            return None;
+        }
+        let name = node.child_by_field_name("name")?;
+        if name.kind() != "identifier" {
+            return None;
+        }
+        let v = value_expr(node.child_by_field_name("value")?, src)?;
+        Some((text(name, src).to_string(), v))
+    }
+
+    fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let f = node.child_by_field_name("function")?;
+        let (receiver, method) = match f.kind() {
+            "identifier" => (Vec::new(), text(f, src).to_string()),
+            "member_expression" => (
+                path(f.child_by_field_name("object")?, src).unwrap_or_default(),
+                field_text(f, "property", src)?.to_string(),
+            ),
+            _ => return None,
+        };
+        if !HTTP_OPS.contains(&method.as_str()) {
+            return None;
+        }
+        Some(RawContract::Op {
+            receiver,
+            method,
+            args: args(node.child_by_field_name("arguments")?, src),
+        })
     }
 
     fn import(&self, node: Node, src: &[u8]) -> Option<Vec<Import>> {
@@ -288,4 +323,106 @@ fn type_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
         "predefined_type" | "literal_type" => None,
         _ => path(node, src),
     }
+}
+
+// ---- contracts ----------------------------------------------------------------------
+
+/// Calls that may be HTTP operations; receivers decide at resolve time.
+const HTTP_OPS: &[&str] = &[
+    "fetch", "get", "post", "put", "patch", "delete", "head", "options", "request",
+];
+
+fn args(list: Node, src: &[u8]) -> Args {
+    let mut out = Args::default();
+    for a in named_children(list) {
+        if a.kind() == "comment" {
+            continue;
+        }
+        if a.kind() == "call_expression" {
+            if let Some(p) = a.child_by_field_name("function").and_then(|f| path(f, src)) {
+                out.calls.push((out.positional.len(), p));
+            }
+        }
+        out.positional.push(value_expr(a, src));
+    }
+    out
+}
+
+/// What a TS expression evaluates to statically.
+fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
+    match node.kind() {
+        "string" => Some(ValueExpr::Lit(
+            named_children(node)
+                .into_iter()
+                .filter(|c| c.kind() == "string_fragment")
+                .map(|c| text(c, src))
+                .collect(),
+        )),
+        "template_string" => {
+            let mut parts = Vec::new();
+            for c in named_children(node) {
+                match c.kind() {
+                    "string_fragment" => parts.push(TemplatePart::Lit(text(c, src).to_string())),
+                    "template_substitution" => parts.push(TemplatePart::Expr(
+                        named_children(c)
+                            .into_iter()
+                            .next()
+                            .and_then(|e| path(e, src)),
+                    )),
+                    _ => {}
+                }
+            }
+            Some(ValueExpr::Template(parts))
+        }
+        "object" => Some(ValueExpr::Record(
+            named_children(node)
+                .into_iter()
+                .filter(|p| p.kind() == "pair")
+                .filter_map(|p| {
+                    let k = p.child_by_field_name("key")?;
+                    let key = match value_expr(k, src) {
+                        Some(ValueExpr::Lit(s)) => s,
+                        _ => text(k, src).to_string(),
+                    };
+                    Some((key, value_expr(p.child_by_field_name("value")?, src)?))
+                })
+                .collect(),
+        )),
+        "binary_expression" if field_text(node, "operator", src) == Some("+") => {
+            Some(ValueExpr::Join {
+                sep: String::new(),
+                parts: vec![
+                    value_expr(node.child_by_field_name("left")?, src)?,
+                    value_expr(node.child_by_field_name("right")?, src)?,
+                ],
+            })
+        }
+        "identifier" | "member_expression" => path(node, src).map(ValueExpr::Name),
+        "parenthesized_expression" | "as_expression" | "satisfies_expression" => {
+            value_expr(named_children(node).into_iter().next()?, src)
+        }
+        _ => None,
+    }
+}
+
+/// `src/app/api/jobs/[id]/route.ts` → `/api/jobs/{id}` (Next.js app router).
+pub fn next_route_path(rel: &str) -> Option<String> {
+    let segs: Vec<&str> = rel.split('/').collect();
+    let file = segs.last()?;
+    if !matches!(*file, "route.ts" | "route.js" | "route.tsx" | "route.mjs") {
+        return None;
+    }
+    let app = segs.iter().rposition(|s| *s == "app")?;
+    let parts: Vec<String> = segs[app + 1..segs.len() - 1]
+        .iter()
+        .filter(|s| !(s.starts_with('(') && s.ends_with(')')) && !s.starts_with('@'))
+        .map(|s| {
+            if s.starts_with('[') {
+                "{}".to_string()
+            } else {
+                s.to_string()
+            }
+        })
+        .collect();
+    Some(format!("/{}", parts.join("/")))
 }
