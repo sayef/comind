@@ -171,6 +171,18 @@ enum Family {
     Js,
     Go,
     Jvm,
+    Rust,
+}
+
+impl Family {
+    /// Separator between a module and its submodules, where submodules exist.
+    fn sub_sep(self) -> Option<&'static str> {
+        match self {
+            Family::Py => Some("."),
+            Family::Rust => Some("::"),
+            _ => None,
+        }
+    }
 }
 
 fn family(lang: &Language) -> Option<Family> {
@@ -179,6 +191,7 @@ fn family(lang: &Language) -> Option<Family> {
         Language::TypeScript | Language::JavaScript => Some(Family::Js),
         Language::Go => Some(Family::Go),
         Language::Java | Language::Kotlin => Some(Family::Jvm),
+        Language::Rust => Some(Family::Rust),
         _ => None,
     }
 }
@@ -191,8 +204,8 @@ struct Binder<'a> {
     facts: HashMap<&'a str, &'a FileFacts>,
     /// Module / package name → files (one per Python module, many per Go package).
     modules: HashMap<(Family, &'a str), Vec<&'a FileFacts>>,
-    /// Every dotted prefix of a Python module name (namespace packages).
-    py_packages: HashSet<String>,
+    /// Every prefix of a Python/Rust module path (namespace packages, `mod` parents).
+    packages: HashSet<(Family, String)>,
     by_path: HashMap<(&'a str, &'a str), &'a FileFacts>,
     types: HashMap<(&'a str, &'a str), &'a TypeSource>,
     bases: RefCell<HashMap<String, Vec<String>>>,
@@ -219,7 +232,7 @@ impl<'a> Binder<'a> {
             members,
             facts: HashMap::new(),
             modules: HashMap::new(),
-            py_packages: HashSet::new(),
+            packages: HashSet::new(),
             by_path: HashMap::new(),
             types: HashMap::new(),
             bases: RefCell::new(HashMap::new()),
@@ -232,14 +245,14 @@ impl<'a> Binder<'a> {
             };
             for m in &f.modules {
                 b.modules.entry((fam, m.as_str())).or_default().push(f);
-                if fam == Family::Py {
+                if let Some(sep) = fam.sub_sep() {
                     let mut prefix = String::new();
-                    for part in m.split('.') {
+                    for part in m.split(sep) {
                         if !prefix.is_empty() {
-                            prefix.push('.');
+                            prefix.push_str(sep);
                         }
                         prefix.push_str(part);
-                        b.py_packages.insert(prefix.clone());
+                        b.packages.insert((fam, prefix.clone()));
                     }
                 }
             }
@@ -313,7 +326,23 @@ impl<'a> Binder<'a> {
                 }
                 Some(module(Family::Py, parts.join(".")))
             }
-            Family::Go | Family::Jvm => Some(module(family(&f.language)?, imp.module.clone())),
+            fam @ (Family::Go | Family::Jvm) => Some(module(fam, imp.module.clone())),
+            // Uniform paths: `use store::X` may name a child module rather than a crate.
+            Family::Rust => {
+                let head = imp.module.split("::").next().unwrap_or_default();
+                let local = f
+                    .modules
+                    .first()
+                    .filter(|own| {
+                        self.packages
+                            .contains(&(Family::Rust, format!("{own}::{head}")))
+                    })
+                    .map(|own| format!("{own}::{}", imp.module));
+                Some(module(
+                    Family::Rust,
+                    local.unwrap_or_else(|| imp.module.clone()),
+                ))
+            }
             Family::Js if imp.file.is_some() => self
                 .by_path
                 .get(&(f.repo.as_str(), imp.file.as_deref()?))
@@ -374,8 +403,8 @@ impl<'a> Binder<'a> {
         match v {
             Value::File(f) => self.module_member(f, name, true, depth + 1),
             Value::Module { fam, name: m, repo } => {
-                // Python/JS modules re-export what they import; Go/JVM packages don't.
-                let reexports = matches!(fam, Family::Py | Family::Js);
+                // Python/JS/Rust modules re-export what they import; Go/JVM packages don't.
+                let reexports = matches!(fam, Family::Py | Family::Js | Family::Rust);
                 let files = self.module_files(*fam, m, repo);
                 if let Some(x) = files
                     .iter()
@@ -383,12 +412,17 @@ impl<'a> Binder<'a> {
                 {
                     return Some(x);
                 }
-                // JVM `a.b.Outer.Inner`: not a package, so walk through the class.
-                if *fam == Family::Jvm && files.is_empty() {
-                    let (pkg, outer) = m.rsplit_once('.')?;
+                // `a.b.Outer.Inner` (JVM) / `krate::Enum::Variant` (Rust): walk through the type.
+                let sep = match fam {
+                    Family::Jvm => Some("."),
+                    Family::Rust => Some("::"),
+                    _ => None,
+                };
+                if let (Some(sep), true) = (sep, files.is_empty()) {
+                    let (pkg, outer) = m.rsplit_once(sep)?;
                     let outer = self.member(
                         &Value::Module {
-                            fam: Family::Jvm,
+                            fam: *fam,
                             name: pkg.to_string(),
                             repo: repo.clone(),
                         },
@@ -397,12 +431,14 @@ impl<'a> Binder<'a> {
                     )?;
                     return self.member(&outer, name, depth + 1);
                 }
-                let sub = format!("{m}.{name}");
-                (*fam == Family::Py && self.py_packages.contains(&sub)).then(|| Value::Module {
-                    fam: Family::Py,
-                    name: sub,
-                    repo: repo.clone(),
-                })
+                let sub = format!("{m}{}{name}", fam.sub_sep()?);
+                self.packages
+                    .contains(&(*fam, sub.clone()))
+                    .then(|| Value::Module {
+                        fam: *fam,
+                        name: sub,
+                        repo: repo.clone(),
+                    })
             }
             Value::Sym(id) if self.is_type(id) => self.class_member(id, name, depth + 1),
             // A module variable: its members come from its inferred type.
@@ -556,6 +592,11 @@ impl<'a> Binder<'a> {
         if head == "self" || head == "this" {
             return self.enclosing_class(scope).map(Value::Instance);
         }
+        if f.language == Language::Rust {
+            if let Some(v) = self.rust_head(head, scope, f) {
+                return Some(v);
+            }
+        }
         for s in self.scope_chain(scope) {
             if let Some(src) = self.types.get(&(s.as_str(), head)) {
                 return self.type_of(src, &s, depth + 1);
@@ -579,6 +620,20 @@ impl<'a> Binder<'a> {
         if let Some(v) = self.module_member(&f.file_id, head, true, depth + 1) {
             return Some(v);
         }
+        // Rust: a child module (`mod util;`) or another crate named directly.
+        if fam == Family::Rust {
+            let own = f.modules.first()?;
+            for cand in [format!("{own}::{head}"), head.to_string()] {
+                if self.packages.contains(&(Family::Rust, cand.clone())) {
+                    return Some(Value::Module {
+                        fam,
+                        name: cand,
+                        repo: f.repo.clone(),
+                    });
+                }
+            }
+            return None;
+        }
         // Go/JVM: the whole package shares one namespace across files.
         if !matches!(fam, Family::Go | Family::Jvm) {
             return None;
@@ -588,6 +643,23 @@ impl<'a> Binder<'a> {
             .iter()
             .filter(|s| s.file_id != f.file_id)
             .find_map(|s| self.module_member(&s.file_id, head, false, depth + 1))
+    }
+
+    /// Rust path heads: `Self` (the impl type), `crate`, `<self>` and `super` (modules).
+    fn rust_head(&self, head: &str, scope: &str, f: &FileFacts) -> Option<Value> {
+        let own = f.modules.first()?;
+        let name = match head {
+            "Self" => return self.enclosing_class(scope).map(Value::Sym),
+            "crate" => own.split("::").next()?.to_string(),
+            "<self>" => own.clone(),
+            "super" => own.rsplit_once("::")?.0.to_string(),
+            _ => return None,
+        };
+        Some(Value::Module {
+            fam: Family::Rust,
+            name,
+            repo: f.repo.clone(),
+        })
     }
 
     fn resolve_path(

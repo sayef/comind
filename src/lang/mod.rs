@@ -5,6 +5,7 @@ pub mod go;
 pub mod java;
 pub mod kotlin;
 pub mod python;
+pub mod rust;
 pub mod typescript;
 
 use tree_sitter::Node;
@@ -26,6 +27,11 @@ pub trait LangSpec: Sync {
 
     /// A definition node: its kind and name. `in_class` is true directly inside a class body.
     fn def(&self, node: Node, src: &[u8], in_class: bool) -> Option<(SymbolKind, String)>;
+
+    /// A base declared apart from the type (Rust `impl Trait for Type`): (type name, kind, base).
+    fn owned_bases(&self, _node: Node, _src: &[u8]) -> Option<(String, RefKind, Vec<String>)> {
+        None
+    }
 
     /// The package a file declares (JVM); `None` derives it from the path instead.
     fn package(&self, _root: Node, _src: &[u8]) -> Option<String> {
@@ -66,6 +72,7 @@ pub fn spec(lang: &Language) -> Option<&'static dyn LangSpec> {
         Language::Go => Some(&go::Go),
         Language::Java => Some(&java::Java),
         Language::Kotlin => Some(&kotlin::Kotlin),
+        Language::Rust => Some(&rust::Rust),
         _ => None,
     }
 }

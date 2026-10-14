@@ -20,6 +20,8 @@ pub struct RepoPackages {
     ts_pkgs: Vec<TsPackage>,
     /// Go modules as (repo-relative dir, module path), deepest first.
     go_mods: Vec<(String, String)>,
+    /// Rust crates as (repo-relative dir, crate name with `_`), deepest first.
+    crates: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +49,7 @@ impl RepoPackages {
         let mut ts_pkgs = Vec::new();
         let mut tsconfigs = Vec::new();
         let mut go_mods = Vec::new();
+        let mut crates = Vec::new();
         let manifests = WalkBuilder::new(root)
             .hidden(false)
             .filter_entry(|e| e.file_name() != "node_modules")
@@ -59,6 +62,7 @@ impl RepoPackages {
                     || n == "tsconfig.json"
                     || n == "jsconfig.json"
                     || n == "go.mod"
+                    || n == "Cargo.toml"
             });
         for m in manifests {
             let Ok(rel_dir) = m.path().parent().unwrap_or(root).strip_prefix(root) else {
@@ -70,6 +74,14 @@ impl RepoPackages {
             };
             if m.file_name() == "pyproject.toml" {
                 py_roots.extend(python_roots(root, &dir, &text));
+            } else if m.file_name() == "Cargo.toml" {
+                if let Some(name) = text
+                    .parse::<toml::Value>()
+                    .ok()
+                    .and_then(|v| v.get("package")?.get("name")?.as_str().map(str::to_string))
+                {
+                    crates.push((dir, name.replace('-', "_")));
+                }
             } else if m.file_name() == "go.mod" {
                 if let Some(module) = text.lines().find_map(|l| l.trim().strip_prefix("module ")) {
                     go_mods.push((dir, module.trim().trim_matches('"').to_string()));
@@ -88,9 +100,11 @@ impl RepoPackages {
         ts_pkgs.sort_by_key(|p| std::cmp::Reverse(p.dir.len()));
         tsconfigs.sort_by_key(|c: &TsConfig| std::cmp::Reverse(c.dir.len()));
         go_mods.sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
+        crates.sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
         RepoPackages {
             root: root.to_path_buf(),
             go_mods,
+            crates,
             tsconfigs,
             py_roots,
             ts_pkgs,
@@ -146,6 +160,7 @@ impl RepoPackages {
             Language::Python => self.python_module(rel).into_iter().collect(),
             Language::TypeScript | Language::JavaScript => self.ts_specifiers(rel),
             Language::Go => self.go_package(rel).into_iter().collect(),
+            Language::Rust => self.rust_module(rel).into_iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -158,6 +173,22 @@ impl RepoPackages {
             .or_else(|| tail.strip_suffix(".py"))?;
         let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
         (stem != "__init__").then(|| stem.replace('/', "."))
+    }
+
+    /// `crate::a::b` path of a Rust file under its crate's `src/` (binaries excluded).
+    fn rust_module(&self, rel: &str) -> Option<String> {
+        let (dir, name) = self.crates.iter().find(|(d, _)| under(rel, d))?;
+        let tail = rel.strip_prefix(dir.as_str())?.trim_start_matches('/');
+        let tail = tail.strip_prefix("src/")?;
+        if tail.starts_with("bin/") {
+            return None;
+        }
+        if matches!(tail, "lib.rs" | "main.rs") {
+            return Some(name.clone());
+        }
+        let stem = tail.strip_suffix(".rs")?;
+        let stem = stem.strip_suffix("/mod").unwrap_or(stem);
+        Some(format!("{name}::{}", stem.replace('/', "::")))
     }
 
     /// Import path of the package (directory) a Go file belongs to.

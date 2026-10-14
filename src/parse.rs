@@ -71,6 +71,7 @@ fn detect(path: &Path) -> Option<Language> {
         Some("go") => Some(Language::Go),
         Some("java") => Some(Language::Java),
         Some("kt" | "kts") => Some(Language::Kotlin),
+        Some("rs") => Some(Language::Rust),
         _ => None,
     }
 }
@@ -87,6 +88,7 @@ fn tree_sitter_language(lang: &Language, is_tsx: bool) -> Option<tree_sitter::La
         Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
         Language::Java => Some(tree_sitter_java::LANGUAGE.into()),
         Language::Kotlin => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
+        Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -260,8 +262,24 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
         }) {
             imp.file = ctx.packages.ts_alias(ctx.rel_str, &imp.module);
         }
+        if *ctx.lang == Language::Rust {
+            let own = facts(out).modules.first().cloned();
+            for imp in &mut imports {
+                imp.module = rust_absolute(&imp.module, own.as_deref());
+            }
+        }
         facts(out).imports.extend(imports);
         return; // imported names are not references
+    }
+
+    if let Some((ty, kind, path)) = ctx.spec.owned_bases(node, ctx.source) {
+        let from = id(ctx.repo_name, &format!("{}#", join_core(&scope.core, &ty)));
+        facts(out).refs.push(Ref {
+            kind,
+            from: from.render(),
+            path,
+            line: lang::line(node),
+        });
     }
 
     if let Some((kind, path)) = ctx.spec.reference(node, ctx.source) {
@@ -553,6 +571,31 @@ fn edge(src: &GlobalSymbolId, dst: &GlobalSymbolId, kind: EdgeKind, confidence: 
         confidence,
         cross_repo: false,
     }
+}
+
+/// Make a Rust `use` path absolute: `crate::`, `self::` and `super::` against the file's module.
+fn rust_absolute(module: &str, own: Option<&str>) -> String {
+    let Some(own) = own else {
+        return module.to_string();
+    };
+    let mut segs: Vec<&str> = module.split("::").collect();
+    let mut base: Vec<&str> = match segs.first() {
+        Some(&"crate") => vec![own.split("::").next().unwrap_or(own)],
+        Some(&"self") => own.split("::").collect(),
+        Some(&"super") => {
+            let mut b: Vec<&str> = own.split("::").collect();
+            while segs.first() == Some(&"super") {
+                segs.remove(0);
+                b.pop();
+            }
+            segs.insert(0, "");
+            b
+        }
+        _ => return module.to_string(),
+    };
+    segs.remove(0);
+    base.extend(segs.into_iter().filter(|s| !s.is_empty()));
+    base.join("::")
 }
 
 fn join_core(core: &str, name: &str) -> String {

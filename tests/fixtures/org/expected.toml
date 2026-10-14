@@ -412,3 +412,101 @@ case = "jvm-static-call"
 kind = "calls"
 src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::boot"
 dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+
+# ---- rs-lib (Rust crate acme-core) ----
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/lib.rs"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/store.rs"
+dst = "rs-lib:src/db.rs::Db"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/store.rs"
+dst = "rs-lib:src/lib.rs::Health"
+
+[[edge]]
+case = "rust-struct-literal"
+kind = "instantiates"
+src = "rs-lib:src/store.rs::Store.new"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.new"
+dst = "rs-lib:src/db.rs::Db.open"
+
+[[edge]]
+case = "rust-field-type-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.get"
+dst = "rs-lib:src/db.rs::Db.query"
+
+[[edge]]
+case = "rust-impl-trait"
+kind = "implements"
+src = "rs-lib:src/store.rs::Store"
+dst = "rs-lib:src/lib.rs::Health"
+
+[[edge]]
+case = "rust-self-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.health"
+dst = "rs-lib:src/store.rs::Store.get"
+
+# ---- rs-app -> rs-lib (cross-repo Rust) ----
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/db.rs"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/db.rs::Db"
+
+[[edge]]
+case = "rust-reexport"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/store.rs::Store.new"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/store.rs::Store.get"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/db.rs::Db.open"
+
+[[edge]]
+case = "rust-child-module-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-app:src/util.rs::helper"
+
+[[edge]]
+case = "rust-crate-path-call"
+kind = "calls"
+src = "rs-app:src/util.rs::helper"
+dst = "rs-app:src/main.rs::banner"
