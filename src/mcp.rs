@@ -153,6 +153,44 @@ struct ZoomDto {
     callees: Vec<NodeDto>,
     importers: Vec<NodeDto>,
     members: Vec<NodeDto>,
+    /// Service contracts (HTTP routes, queues, buckets, tables) this symbol takes part in.
+    contracts: Vec<ContractRoleDto>,
+    /// When the focus is a contract: its providers and consumers.
+    providers: Vec<NodeDto>,
+    consumers: Vec<NodeDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractRoleDto {
+    role: String,
+    contract: String,
+    /// Participants on the other side (consumers of what it serves, providers of what it uses).
+    counterparts: Vec<NodeDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractDto {
+    contract: String,
+    providers: Vec<NodeDto>,
+    consumers: Vec<NodeDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractsDto {
+    contracts: Vec<ContractDto>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct ContractsParam {
+    /// Only this contract type: `http`, `sqs`, `sns`, `s3` or `table`.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Only contracts missing a provider or consumer (calls to nothing, unused routes).
+    #[serde(default)]
+    dangling: Option<bool>,
+    /// Substring filter on the contract key, e.g. `/skills` or `orders`.
+    #[serde(default)]
+    query: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -277,8 +315,9 @@ struct PackParam {
 const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed codebase.\n\
 New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
 Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
-`ripple` (who breaks if I change this), `thread` (forward call trace), `context_pack` \
-(minimal safe edit read-set), or `flow` (narrated walkthrough). `search` needs embeddings \
+`ripple` (who breaks if I change this — crosses service contracts too), `thread` (forward call \
+trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthrough). \
+`contracts` lists HTTP routes, queues, topics, buckets and tables with providers and consumers. `search` needs embeddings \
 (on by default unless the index was built with --no-embed); the graph tools always work.";
 
 #[tool_router]
@@ -410,6 +449,9 @@ impl ComindServer {
                 callees: vec![],
                 importers: vec![],
                 members: vec![],
+                contracts: vec![],
+                providers: vec![],
+                consumers: vec![],
             },
             Some(idx) => {
                 let z = self.graph.zoom(idx);
@@ -421,10 +463,53 @@ impl ComindServer {
                     callees: z.callees.into_iter().map(|n| self.node_dto(n)).collect(),
                     importers: z.importers.into_iter().map(|n| self.node_dto(n)).collect(),
                     members: z.members.into_iter().map(|n| self.node_dto(n)).collect(),
+                    contracts: z
+                        .contracts
+                        .into_iter()
+                        .map(|c| ContractRoleDto {
+                            role: c.role.to_string(),
+                            contract: c.contract.name,
+                            counterparts: c
+                                .counterparts
+                                .into_iter()
+                                .map(|n| self.node_dto(n))
+                                .collect(),
+                        })
+                        .collect(),
+                    providers: z.providers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    consumers: z.consumers.into_iter().map(|n| self.node_dto(n)).collect(),
                 }
             }
         };
         let md = md_zoom(&p.focus, &dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "contracts",
+        description = "Service contracts across repos: HTTP routes ↔ clients, SQS/SNS queues and topics, S3 buckets, DB tables — each with providers and consumers. Use to see how services talk, find calls to routes nobody serves (`dangling`), or filter by `kind`/`query`. `ripple` already crosses these."
+    )]
+    fn contracts(&self, Parameters(p): Parameters<ContractsParam>) -> CallToolResult {
+        let views = self
+            .graph
+            .contracts(p.kind.as_deref(), p.dangling.unwrap_or(false));
+        let dto = ContractsDto {
+            contracts: views
+                .into_iter()
+                .filter(|v| {
+                    p.query
+                        .as_deref()
+                        .is_none_or(|q| v.contract.name.contains(q))
+                })
+                .take(200)
+                .map(|v| ContractDto {
+                    contract: v.contract.name,
+                    providers: v.providers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    consumers: v.consumers.into_iter().map(|n| self.node_dto(n)).collect(),
+                })
+                .collect(),
+        };
+        let md = md_contracts(&dto);
         self.reply(&dto, md)
     }
 
@@ -716,6 +801,35 @@ fn md_zoom(focus: &str, d: &ZoomDto) -> String {
     node_section(&mut o, "Callers", &d.callers);
     node_section(&mut o, "Callees", &d.callees);
     node_section(&mut o, "Importers", &d.importers);
+    node_section(&mut o, "Provided by", &d.providers);
+    node_section(&mut o, "Used by", &d.consumers);
+    if !d.contracts.is_empty() {
+        let _ = write!(o, "\n**Contracts**\n");
+        for c in &d.contracts {
+            let _ = writeln!(o, "- {} `{}`", c.role, c.contract);
+            for n in &c.counterparts {
+                let _ = writeln!(o, "  - **{}** ({}) `{}`", n.name, n.repo, n.location);
+            }
+        }
+    }
+    o
+}
+
+fn md_contracts(d: &ContractsDto) -> String {
+    let mut o = format!("## {} contract(s)\n", d.contracts.len());
+    for c in &d.contracts {
+        let _ = writeln!(o, "\n### `{}`", c.contract);
+        let side = |o: &mut String, label: &str, ns: &[NodeDto]| {
+            if ns.is_empty() {
+                let _ = writeln!(o, "- {label}: _none indexed_");
+            }
+            for n in ns {
+                let _ = writeln!(o, "- {label}: **{}** ({}) `{}`", n.name, n.repo, n.location);
+            }
+        };
+        side(&mut o, "provided by", &c.providers);
+        side(&mut o, "used by", &c.consumers);
+    }
     o
 }
 

@@ -223,6 +223,7 @@ fn parse_file_with(
         callable: file_id,
         class: None,
         in_class: false,
+        module_level: true,
     };
     walk(tree.root_node(), &scope, &ctx, &mut out);
     next_routes(&rel_str, &mut out);
@@ -251,6 +252,8 @@ struct Scope {
     class: Option<GlobalSymbolId>,
     /// Directly inside a class body.
     in_class: bool,
+    /// At module level (file or inline module), not inside a callable or class.
+    module_level: bool,
 }
 
 fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
@@ -295,13 +298,13 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
         });
     }
 
-    let module_level = scope.callable == scope.id && scope.class.is_none();
+    let module_level = scope.module_level;
     if module_level {
         if let Some(name) = ctx.spec.variable(node, ctx.source) {
             variable(node, &name, scope, ctx, out);
         }
     }
-    if module_level || scope.in_class {
+    {
         if let Some((name, value)) = ctx.spec.value(node, ctx.source) {
             let owner = if scope.in_class {
                 &scope.id
@@ -422,6 +425,7 @@ fn define(
             parent_class
         },
         in_class: class_like,
+        module_level: kind == SymbolKind::Module,
     };
     for c in children(node) {
         walk(c, &child, ctx, out);

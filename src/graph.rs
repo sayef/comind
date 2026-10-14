@@ -71,6 +71,36 @@ pub struct Zoom {
     pub callers: Vec<Node>,
     pub callees: Vec<Node>,
     pub importers: Vec<Node>,
+    /// Contracts this symbol takes part in, with the other side of each.
+    pub contracts: Vec<ContractRole>,
+    /// When the focus is itself a contract: who provides and who consumes it.
+    pub providers: Vec<Node>,
+    pub consumers: Vec<Node>,
+}
+
+/// A symbol's role in a contract (`serves http:GET /x`) and the participants on the other side.
+#[derive(Debug, Clone)]
+pub struct ContractRole {
+    pub role: EdgeKind,
+    pub contract: Node,
+    pub counterparts: Vec<Node>,
+}
+
+/// A contract with everyone on each side.
+#[derive(Debug, Clone)]
+pub struct ContractView {
+    pub contract: Node,
+    pub providers: Vec<Node>,
+    pub consumers: Vec<Node>,
+}
+
+/// Every contract-role edge kind (provider and consumer side).
+pub fn is_contract_role(k: &EdgeKind) -> bool {
+    PROVIDES.contains(k)
+        || matches!(
+            k,
+            EdgeKind::Consumes | EdgeKind::Subscribes | EdgeKind::Reads
+        )
 }
 
 struct NodeData {
@@ -161,8 +191,11 @@ impl CodeGraph {
         }
         candidates.sort_by_key(|&i| {
             let s = &self.g[i].sym;
+            let inexact = (s.name != focus) as usize;
             let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
-            (is_file, s.id.descriptor.len())
+            let path = s.file_path.to_ascii_lowercase();
+            let is_test = (path.contains("test") || path.contains("spec")) as usize;
+            (inexact, is_file, is_test, s.id.descriptor.len())
         });
         candidates.first().copied()
     }
@@ -283,6 +316,40 @@ impl CodeGraph {
         out
     }
 
+    /// Providers and consumers of a contract node.
+    fn sides(&self, contract: NodeIndex) -> (Vec<Node>, Vec<Node>) {
+        let (mut p, mut c) = (Vec::new(), Vec::new());
+        for e in self.g.edges_directed(contract, Incoming) {
+            if PROVIDES.contains(e.weight()) {
+                p.push(self.node_of(e.source()));
+            } else if is_contract_role(e.weight()) {
+                c.push(self.node_of(e.source()));
+            }
+        }
+        (p, c)
+    }
+
+    /// All contracts, optionally of one type (`http`, `sqs`, …) or only those missing a side.
+    pub fn contracts(&self, kind: Option<&str>, dangling: bool) -> Vec<ContractView> {
+        let mut out: Vec<ContractView> = self
+            .g
+            .node_indices()
+            .filter(|&i| self.g[i].sym.kind == crate::model::SymbolKind::Contract)
+            .filter(|&i| kind.is_none_or(|k| self.g[i].sym.name.starts_with(&format!("{k}:"))))
+            .map(|i| {
+                let (providers, consumers) = self.sides(i);
+                ContractView {
+                    contract: self.node_of(i),
+                    providers,
+                    consumers,
+                }
+            })
+            .filter(|v| !dangling || v.providers.is_empty() || v.consumers.is_empty())
+            .collect();
+        out.sort_by(|a, b| a.contract.name.cmp(&b.contract.name));
+        out
+    }
+
     /// The structured neighborhood of `focus`.
     pub fn zoom(&self, focus: NodeIndex) -> Zoom {
         let mut z = Zoom {
@@ -297,6 +364,26 @@ impl CodeGraph {
                 }
                 EdgeKind::Imports => z.importers.push(self.node_of(e.source())),
                 _ => {}
+            }
+        }
+        for e in self.g.edges_directed(focus, Incoming) {
+            if is_contract_role(e.weight()) {
+                if PROVIDES.contains(e.weight()) {
+                    z.providers.push(self.node_of(e.source()));
+                } else {
+                    z.consumers.push(self.node_of(e.source()));
+                }
+            }
+        }
+        for e in self.g.edges_directed(focus, Outgoing) {
+            if is_contract_role(e.weight()) {
+                let provider = PROVIDES.contains(e.weight());
+                let (providers, consumers) = self.sides(e.target());
+                z.contracts.push(ContractRole {
+                    role: e.weight().clone(),
+                    contract: self.node_of(e.target()),
+                    counterparts: if provider { consumers } else { providers },
+                });
             }
         }
         for e in self.g.edges_directed(focus, Outgoing) {
