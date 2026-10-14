@@ -39,16 +39,17 @@ rayon = "1"
 ignore = "=0.4.23"
 petgraph = "0.8.3"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
-tree-sitter = "0.25"
-tree-sitter-python = "0.23"
+tree-sitter = "0.27"
+tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
 model2vec-rs = "0.2.1"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
-lancedb = { version = "0.31.0", default-features = false, features = ["aws"] }
-lance-index = "=8.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
+lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
+lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
 rig-core = "0.36"
-rmcp = { version = "2.2.0", features = ["server", "transport-io"] } # MCP server
+rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
+blake3 = "1"
 
 [profile.release]
 lto = "thin"

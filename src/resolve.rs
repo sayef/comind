@@ -55,6 +55,10 @@ pub struct ResolveStats {
     pub cross_repo_edges: usize,
     /// Imports whose target was not found in the corpus (e.g. third-party libraries).
     pub unresolved_imports: usize,
+    /// Calls dropped because several same-repo definitions share the name.
+    pub ambiguous_calls: usize,
+    /// Calls dropped because no same-repo definition has the name (often third-party).
+    pub unknown_calls: usize,
 }
 
 /// Resolve the merged `symbols`/`edges` of one or more repos.
@@ -85,10 +89,11 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge]) -> Resolved {
             }
             EdgeKind::Calls if provisional_call_name(&e.dst).is_some() => {
                 let name = provisional_call_name(&e.dst).unwrap();
-                if let Some(def) = resolve_call(&e.src, name, &by_name) {
-                    out.push(bind(&e.src, &def.id, EdgeKind::Calls, 0.8));
+                match resolve_call(&e.src, name, &by_name) {
+                    CallTarget::Bound(def) => out.push(bind(&e.src, &def.id, EdgeKind::Calls, 0.8)),
+                    CallTarget::Ambiguous => out.stats.ambiguous_calls += 1,
+                    CallTarget::Unknown => out.stats.unknown_calls += 1,
                 }
-                // ambiguous / unknown calls are dropped (no reliable target)
             }
             // Contains, and any pre-resolved edge, pass through.
             _ => out.edges.push(e.clone()),
@@ -108,22 +113,30 @@ fn resolve_import<'a>(
         .and_then(|defs| defs.first().copied())
 }
 
+enum CallTarget<'a> {
+    Bound(&'a Symbol),
+    Ambiguous,
+    Unknown,
+}
+
 /// A call binds to a same-repo definition of `name` when there is exactly one; otherwise it
 /// is left unresolved (name-only cross-repo call binding is too noisy to trust).
 fn resolve_call<'a>(
     src: &GlobalSymbolId,
     name: &str,
     by_name: &HashMap<&str, Vec<&'a Symbol>>,
-) -> Option<&'a Symbol> {
-    let defs = by_name.get(name)?;
-    let same_repo: Vec<&Symbol> = defs
-        .iter()
+) -> CallTarget<'a> {
+    let same_repo: Vec<&Symbol> = by_name
+        .get(name)
+        .into_iter()
+        .flatten()
         .copied()
         .filter(|d| d.id.package == src.package)
         .collect();
     match same_repo.as_slice() {
-        [only] => Some(*only),
-        _ => None,
+        [] => CallTarget::Unknown,
+        [only] => CallTarget::Bound(only),
+        _ => CallTarget::Ambiguous,
     }
 }
 
@@ -176,6 +189,7 @@ mod tests {
             },
             signature: None,
             docstring: None,
+            fingerprint: None,
         }
     }
 

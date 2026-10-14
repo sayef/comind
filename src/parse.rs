@@ -7,7 +7,8 @@
 use std::path::{Path, MAIN_SEPARATOR};
 
 use crate::model::{
-    Edge, EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, Symbol, SymbolKind,
+    Edge, EdgeKind, Fingerprint, GlobalSymbolId, Language, Position, Range, RepoId, Symbol,
+    SymbolKind,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -160,6 +161,7 @@ pub fn parse_file(path: &Path, repo_name: &str, root: &Path) -> Result<Option<Pa
         range: node_range(&tree.root_node()),
         signature: None,
         docstring: None,
+        fingerprint: Some(fingerprint(tree.root_node(), &source, &lang)),
     };
 
     let mut out = ParseOutput {
@@ -217,6 +219,7 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
                 range: node_range(&node),
                 signature: Some(first_line(node, ctx.source)),
                 docstring: None,
+                fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
             });
             out.edges
                 .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
@@ -397,6 +400,69 @@ fn callee_name<'a>(node: Node, lang: &Language, src: &'a [u8]) -> Option<&'a str
 
 // ---- helpers ------------------------------------------------------------------------
 
+/// Hash a definition's leaf tokens, skipping comments, Python docstrings and whitespace.
+fn fingerprint(node: Node, src: &[u8], lang: &Language) -> Fingerprint {
+    let body_start = node
+        .child_by_field_name("body")
+        .map_or(node.end_byte(), |b| b.start_byte());
+    let (mut sig, mut body, mut shape) = (
+        blake3::Hasher::new(),
+        blake3::Hasher::new(),
+        blake3::Hasher::new(),
+    );
+    let mut renames: std::collections::HashMap<&[u8], u32> = std::collections::HashMap::new();
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if n.kind().contains("comment") || is_docstring(n, lang) {
+            continue;
+        }
+        if n.child_count() > 0 {
+            let mut cur = n.walk();
+            let kids: Vec<Node> = n.children(&mut cur).collect();
+            stack.extend(kids.into_iter().rev());
+            continue;
+        }
+        let text = &src[n.start_byte()..n.end_byte()];
+        for h in [&mut body, &mut shape] {
+            h.update(n.kind().as_bytes());
+            h.update(b"\0");
+        }
+        body.update(text);
+        body.update(b"\0");
+        if n.start_byte() < body_start {
+            sig.update(n.kind().as_bytes());
+            sig.update(b"\0");
+            sig.update(text);
+            sig.update(b"\0");
+        }
+        if n.kind().ends_with("identifier") {
+            let next = renames.len() as u32;
+            shape.update(&renames.entry(text).or_insert(next).to_le_bytes());
+        } else {
+            shape.update(text);
+        }
+        shape.update(b"\0");
+    }
+    let short =
+        |h: blake3::Hasher| u64::from_le_bytes(h.finalize().as_bytes()[..8].try_into().unwrap());
+    Fingerprint {
+        sig: short(sig),
+        body: short(body),
+        shape: short(shape),
+    }
+}
+
+/// A Python string statement that opens a block (module/class/function docstring).
+fn is_docstring(n: Node, lang: &Language) -> bool {
+    matches!(lang, Language::Python)
+        && n.kind() == "expression_statement"
+        && n.named_child_count() == 1
+        && n.named_child(0).is_some_and(|c| c.kind() == "string")
+        && n.prev_named_sibling().is_none()
+        && n.parent()
+            .is_some_and(|p| matches!(p.kind(), "block" | "module"))
+}
+
 /// Python: a `function_definition` is really a method when nested under a class — but we
 /// key off `SymbolKind` from the def table, so treat both Function and Method as callable.
 fn is_callable(kind: &SymbolKind) -> bool {
@@ -514,5 +580,42 @@ mod tests {
             && e.dst.descriptor.contains("helper")));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn fp_of(body: &str, name: &str) -> Fingerprint {
+        let dir = std::env::temp_dir().join(format!(
+            "comind-fp-{}-{}",
+            std::process::id(),
+            blake3::hash(body.as_bytes()).to_hex()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        write(&dir, "m.py", body);
+        let out = parse_repo(&dir, "demo").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        out.symbols
+            .into_iter()
+            .find(|s| s.name == name)
+            .and_then(|s| s.fingerprint)
+            .unwrap()
+    }
+
+    #[test]
+    fn fingerprint_ignores_formatting_and_tracks_renames() {
+        let base = fp_of("def f(a):\n    x = a + 1\n    return x\n", "f");
+        let noisy = fp_of(
+            "def f(a):\n    \"\"\"Doc.\"\"\"\n    # note\n    x = a + 1\n\n    return x\n",
+            "f",
+        );
+        assert_eq!(base, noisy);
+
+        let renamed = fp_of("def f(b):\n    y = b + 1\n    return y\n", "f");
+        assert_ne!(base.body, renamed.body);
+        assert_ne!(base.sig, renamed.sig);
+        assert_eq!(base.shape, renamed.shape);
+
+        let changed = fp_of("def f(a):\n    x = a + 2\n    return x\n", "f");
+        assert_eq!(base.sig, changed.sig);
+        assert_ne!(base.body, changed.body);
+        assert_ne!(base.shape, changed.shape);
     }
 }

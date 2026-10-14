@@ -1,7 +1,7 @@
 //! Comind CLI — the single distributable binary.
 //!
 //! Subcommands: `index`, `link`, `explore`, `search`, `find`, `repos`, `stats`, `guide`,
-//! `flow`, `changed`, `serve`, `config`.
+//! `flow`, `changed`, `serve`, `config`, `eval`.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -185,10 +185,28 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Measure graph quality against a gold set
+    Eval {
+        #[command(subcommand)]
+        what: EvalWhat,
+    },
     /// Show or scaffold the config file
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalWhat {
+    /// Precision/recall of resolved edges on a fixture org (subdir per repo + expected.toml)
+    Graph {
+        /// Fixture directory
+        #[arg(default_value = "tests/fixtures/org")]
+        fixture: String,
+        /// List every missed and spurious edge
+        #[arg(long, short)]
+        verbose: bool,
     },
 }
 
@@ -317,6 +335,9 @@ fn main() -> ExitCode {
             let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(index_dir.as_deref(), markdown)
         }
+        Cmd::Eval {
+            what: EvalWhat::Graph { fixture, verbose },
+        } => cmd_eval_graph(&fixture, verbose),
         Cmd::Config { action } => cmd_config(action),
     }
 }
@@ -824,6 +845,59 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn cmd_eval_graph(fixture: &str, verbose: bool) -> ExitCode {
+    let r = match comind::eval::eval_fixture(Path::new(fixture)) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("eval failed: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let pct = |x: f64| format!("{:.0}%", x * 100.0);
+    let mut kinds = comfy_table::Table::new();
+    kinds
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec![
+            "kind",
+            "found",
+            "missed",
+            "spurious",
+            "precision",
+            "recall",
+        ]);
+    for (k, c) in r.by_kind.iter().chain([(&"total".to_string(), &r.total)]) {
+        kinds.add_row(vec![
+            k.clone(),
+            c.tp.to_string(),
+            c.fn_.to_string(),
+            c.fp.to_string(),
+            pct(c.precision()),
+            pct(c.recall()),
+        ]);
+    }
+    comind::ui::header(&format!("Graph eval — {fixture}"));
+    println!("{kinds}");
+    let mut cases = comfy_table::Table::new();
+    cases
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec!["case", "found / expected"]);
+    for (case, (found, expected)) in &r.by_case {
+        cases.add_row(vec![case.clone(), format!("{found} / {expected}")]);
+    }
+    println!("{cases}");
+    if verbose {
+        comind::ui::header("Missed");
+        for g in &r.missed {
+            comind::ui::note(&format!("[{}] {} {} -> {}", g.case, g.kind, g.src, g.dst));
+        }
+        comind::ui::header("Spurious");
+        for (k, s, d) in &r.spurious {
+            comind::ui::note(&format!("{k} {s} -> {d}"));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
     match action {
         None | Some(ConfigAction::Path) => {
@@ -929,8 +1003,13 @@ fn cmd_link(
     let resolved = comind::resolve::resolve(&symbols, &edges);
     let s = &resolved.stats;
     comind::ui::ok(&format!(
-        "resolved: {} imports ({} cross-repo), {} calls; {} unresolved (third-party)",
-        s.resolved_imports, s.cross_repo_edges, s.resolved_calls, s.unresolved_imports
+        "resolved: {} imports ({} cross-repo edges), {} calls; unresolved: {} imports, {} ambiguous + {} unknown calls",
+        s.resolved_imports,
+        s.cross_repo_edges,
+        s.resolved_calls,
+        s.unresolved_imports,
+        s.ambiguous_calls,
+        s.unknown_calls
     ));
 
     // Rank cross-repo import targets by how many distinct repos depend on them.

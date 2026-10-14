@@ -1,0 +1,175 @@
+# Gold edge set for the fixture org: every import/call/inherit/implement/instantiate edge that
+# should exist. Keys are `repo:path` (file) or `repo:path::Qualified.name`; `case` names the gap.
+
+# ---- pkg-common (Python, src/ layout) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "pkg-common:src/acme/common/__init__.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "pkg-common:src/acme/common/__init__.py"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+# ---- service-a -> pkg-common (cross-repo, Python) ----
+[[edge]]
+case = "reexport-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "reexport-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "src-layout-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/base.py::BaseService"
+
+[[edge]]
+case = "module-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/events.py"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.fetch"
+dst = "pkg-common:src/acme/common/http.py::Client.get"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/http.py::Client.post"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/events.py::publish"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "service-a:service_a/users.py::normalize"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "inherits"
+kind = "inherits"
+src = "service-a:service_a/users.py::UserService"
+dst = "pkg-common:src/acme/common/base.py::BaseService"
+
+# ---- service-a internal ----
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/main.py"
+dst = "service-a:service_a/jobs.py::run"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/main.py"
+dst = "service-a:service_a/users.py::UserService"
+
+[[edge]]
+case = "ambiguous-name-call"
+kind = "calls"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/jobs.py::run"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/users.py::UserService.fetch"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/users.py::UserService"
+
+# ---- ui-kit (TypeScript package with a barrel) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/button.ts"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/theme.ts"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/format.ts::formatDate"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "ui-kit:src/format.ts::Formatter.format"
+dst = "ui-kit:src/format.ts::formatDate"
+
+# ---- web-app -> ui-kit (cross-repo, TypeScript) ----
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/button.ts::Button"
+
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/theme.ts::Theme"
+
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/index.ts"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/button.ts::Button"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::formatDate"
+
+[[edge]]
+case = "implements"
+kind = "implements"
+src = "web-app:src/app.ts::DarkTheme"
+dst = "ui-kit:src/theme.ts::Theme"

@@ -161,6 +161,16 @@ pub struct Symbol {
     pub range: Range,
     pub signature: Option<String>,
     pub docstring: Option<String>,
+    #[serde(default)]
+    pub fingerprint: Option<Fingerprint>,
+}
+
+/// Normalized AST hashes: signature, body, and body with identifiers alpha-renamed (rename-stable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Fingerprint {
+    pub sig: u64,
+    pub body: u64,
+    pub shape: u64,
 }
 
 /// A directed relationship between two symbols. Edges may cross repo boundaries once the

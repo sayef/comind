@@ -13,6 +13,8 @@ pub mod git;
 pub mod parse;
 pub mod resolve;
 
+pub mod eval;
+
 pub mod index;
 pub mod search;
 

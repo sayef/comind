@@ -1,0 +1,4 @@
+[project]
+name = "service-a"
+version = "0.1.0"
+dependencies = ["acme-common==1.4.0"]

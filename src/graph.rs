@@ -375,6 +375,7 @@ mod tests {
             },
             signature: Some(format!("def {name}(): ...")),
             docstring: None,
+            fingerprint: None,
         }
     }
     fn edge(s: &Symbol, d: &Symbol, k: EdgeKind) -> Edge {

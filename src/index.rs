@@ -9,7 +9,8 @@ use std::sync::Arc;
 use crate::model::{Edge, Symbol};
 use anyhow::{Context, Result};
 use lancedb::arrow::arrow_array::{
-    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray, UInt32Array,
+    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
+    UInt32Array, UInt64Array,
 };
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use lancedb::table::AddDataMode;
@@ -40,6 +41,9 @@ fn symbols_schema() -> Arc<Schema> {
         Field::new("col_end", DataType::UInt32, false),
         Field::new("signature", DataType::Utf8, true),
         Field::new("docstring", DataType::Utf8, true),
+        Field::new("fp_sig", DataType::UInt64, true),
+        Field::new("fp_body", DataType::UInt64, true),
+        Field::new("fp_shape", DataType::UInt64, true),
     ]))
 }
 
@@ -105,6 +109,15 @@ fn symbols_batch(symbols: &[Symbol]) -> Result<RecordBatch> {
         )),
         Arc::new(StringArray::from_iter(
             symbols.iter().map(|s| s.docstring.clone()),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.sig)),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.body)),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.shape)),
         )),
     ];
     RecordBatch::try_new(symbols_schema(), arrays).context("build symbols batch")
@@ -179,7 +192,9 @@ pub async fn latest_versions(uri: &str) -> Result<(u64, u64)> {
 
 // ---- reading the persisted graph back into core types ----------------------------------
 
-use crate::model::{EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
+use crate::model::{
+    EdgeKind, Fingerprint, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind,
+};
 use futures::TryStreamExt;
 use lancedb::arrow::arrow_array::Array;
 use lancedb::query::ExecutableQuery;
@@ -303,6 +318,12 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
         );
         let sig = str_col(&b, "signature")?;
         let doc = str_col(&b, "docstring")?;
+        // Absent in indexes written before fingerprints existed.
+        let fp = |name: &str| {
+            b.column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<UInt64Array>())
+        };
+        let (fs, fb, fsh) = (fp("fp_sig"), fp("fp_body"), fp("fp_shape"));
         for i in 0..b.num_rows() {
             symbols.push(Symbol {
                 id: GlobalSymbolId {
@@ -329,6 +350,14 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
                 },
                 signature: (!sig.is_null(i)).then(|| sig.value(i).to_string()),
                 docstring: (!doc.is_null(i)).then(|| doc.value(i).to_string()),
+                fingerprint: match (fs, fb, fsh) {
+                    (Some(a), Some(c), Some(d)) if !a.is_null(i) => Some(Fingerprint {
+                        sig: a.value(i),
+                        body: c.value(i),
+                        shape: d.value(i),
+                    }),
+                    _ => None,
+                },
             });
         }
     }
