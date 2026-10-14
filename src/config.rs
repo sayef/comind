@@ -31,6 +31,8 @@ pub struct Config {
     pub enrich: Option<bool>,
     pub flows: Option<bool>,
     pub guide: Option<bool>,
+    /// SCIP use in `index`/`link`: `auto` (default) | `require` | `off`.
+    pub scip: Option<String>,
 }
 
 impl Config {
@@ -120,6 +122,14 @@ impl Config {
     pub fn guide(&self) -> bool {
         self.guide.unwrap_or(true)
     }
+
+    /// SCIP mode: `COMIND_SCIP` → file → `auto`.
+    pub fn scip(&self) -> crate::scip::Mode {
+        non_empty_env("COMIND_SCIP")
+            .or_else(|| self.scip.clone())
+            .and_then(|s| crate::scip::Mode::parse(&s))
+            .unwrap_or(crate::scip::Mode::Auto)
+    }
 }
 
 /// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
@@ -157,6 +167,9 @@ pub fn init(force: bool) -> Result<PathBuf> {
          enrich = true\n\
          flows  = true\n\
          guide  = true\n\n\
+         # SCIP (compiler-grade resolution): auto = use index.scip or installed indexers,\n\
+         # require = fail without it, off = tree-sitter only.\n\
+         scip   = \"auto\"\n\n\
          # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
          # max_enrich = 200   # max symbols enriched by --enrich\n\
          # max_flows  = 50    # max flows narrated by --flows\n",

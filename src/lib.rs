@@ -15,6 +15,7 @@ pub mod lang;
 pub mod packages;
 pub mod parse;
 pub mod resolve;
+pub mod scip;
 
 pub mod eval;
 

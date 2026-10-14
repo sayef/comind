@@ -196,6 +196,7 @@ fn parse_file_with(
             imports: Vec::new(),
             refs: Vec::new(),
             types: Vec::new(),
+            scip: None,
         }],
     };
 

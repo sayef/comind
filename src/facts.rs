@@ -17,6 +17,23 @@ pub struct FileFacts {
     pub imports: Vec<Import>,
     pub refs: Vec<Ref>,
     pub types: Vec<TypeHint>,
+    /// Compiler-grade occurrences from a SCIP index, when one was ingested.
+    #[serde(default)]
+    pub scip: Option<ScipFacts>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScipFacts {
+    /// (SCIP symbol, our symbol id) for definitions in this file.
+    pub defs: Vec<(String, String)>,
+    pub refs: Vec<ScipRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScipRef {
+    pub line: u32,
+    pub name: String,
+    pub symbol: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

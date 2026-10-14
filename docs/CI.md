@@ -91,6 +91,14 @@ index:
 Secrets: `COMIND_REPO_TOKEN` (read repos), AWS creds (OIDC role or keys), and an LLM key if using
 `--enrich`.
 
+## SCIP (compiler-grade resolution)
+
+`index`/`link` default to `--scip auto`: a repo's `index.scip` (any depth ≤ 4, gitignored is fine)
+is ingested; otherwise any SCIP indexer on `PATH` that matches the repo's manifests runs
+(`scip-typescript`, `scip-python`, `scip-go`, `scip-java`, `rust-analyzer scip`). Indexers need the
+repo's dependencies installed, so install them before indexing. `--scip require` fails the job when
+a repo yields no SCIP; `--scip off` skips it. Tree-sitter resolution covers everything SCIP doesn't.
+
 ## LLM provider (for `--enrich` / `--flows`)
 
 Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENAI_API_KEY`, model

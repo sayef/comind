@@ -11,6 +11,9 @@ use crate::facts::{FileFacts, Import, ImportItem, RefKind, TypeSource};
 use crate::model::{Edge, EdgeKind, Language, Symbol, SymbolKind};
 use crate::packages::strip_ts_ext;
 
+/// Name → (line, SCIP symbol) occurrences within one file.
+type ScipOccs<'a> = HashMap<&'a str, Vec<(u32, &'a str)>>;
+
 /// Guard against re-export / alias cycles.
 const MAX_DEPTH: u32 = 12;
 
@@ -34,6 +37,8 @@ pub struct ResolveStats {
     pub unresolved_calls: usize,
     /// `Inherits` + `Implements`.
     pub type_edges: usize,
+    /// References answered by SCIP rather than tree-sitter resolution.
+    pub scip_answers: usize,
     pub cross_repo_edges: usize,
 }
 
@@ -66,7 +71,18 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
                 continue;
             }
             let scope = b.parent.get(&r.from).cloned().unwrap_or(f.file_id.clone());
-            let Some(Value::Sym(t)) = b.resolve_path(&r.path, &scope, f, 0) else {
+            let name = r.path.last().map_or("", String::as_str);
+            let target = match b.scip(f, name, r.line) {
+                Some(t) => {
+                    out.stats.scip_answers += 1;
+                    Some(t)
+                }
+                None => match b.resolve_path(&r.path, &scope, f, 0) {
+                    Some(Value::Sym(t)) => Some(t),
+                    _ => None,
+                },
+            };
+            let Some(t) = target else {
                 continue;
             };
             if !b.is_type(&t) {
@@ -92,9 +108,13 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
             let base = b.import_target(f, imp);
             for item in &imp.items {
                 let target = match item {
-                    ImportItem::Name { name, .. } => {
-                        base.as_ref().and_then(|v| b.member(v, name, 0))
-                    }
+                    ImportItem::Name { name, .. } => match b.scip(f, name, imp.line) {
+                        Some(t) => {
+                            out.stats.scip_answers += 1;
+                            Some(Value::Sym(t))
+                        }
+                        None => base.as_ref().and_then(|v| b.member(v, name, 0)),
+                    },
                     ImportItem::Module { .. } | ImportItem::All => base.clone(),
                 };
                 match target.and_then(|v| b.node_of(&v)) {
@@ -120,7 +140,18 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
             if !matches!(r.kind, RefKind::Call | RefKind::New) {
                 continue;
             }
-            let Some(Value::Sym(t)) = b.resolve_path(&r.path, &r.from, f, 0) else {
+            let name = r.path.last().map_or("", String::as_str);
+            let target = match b.scip(f, name, r.line) {
+                Some(t) => {
+                    out.stats.scip_answers += 1;
+                    Some(t)
+                }
+                None => match b.resolve_path(&r.path, &r.from, f, 0) {
+                    Some(Value::Sym(t)) => Some(t),
+                    _ => None,
+                },
+            };
+            let Some(t) = target else {
                 out.stats.unresolved_calls += 1;
                 continue;
             };
@@ -209,6 +240,10 @@ struct Binder<'a> {
     by_path: HashMap<(&'a str, &'a str), &'a FileFacts>,
     types: HashMap<(&'a str, &'a str), &'a TypeSource>,
     bases: RefCell<HashMap<String, Vec<String>>>,
+    /// SCIP symbol → our id, for every definition SCIP mapped.
+    scip_defs: HashMap<&'a str, &'a str>,
+    /// File id → name → (line, SCIP symbol) of reference occurrences.
+    scip_refs: HashMap<&'a str, ScipOccs<'a>>,
 }
 
 impl<'a> Binder<'a> {
@@ -236,6 +271,8 @@ impl<'a> Binder<'a> {
             by_path: HashMap::new(),
             types: HashMap::new(),
             bases: RefCell::new(HashMap::new()),
+            scip_defs: HashMap::new(),
+            scip_refs: HashMap::new(),
         };
         for f in facts {
             b.facts.insert(f.file_id.as_str(), f);
@@ -261,8 +298,32 @@ impl<'a> Binder<'a> {
                     .entry((t.scope.as_str(), t.name.as_str()))
                     .or_insert(&t.source);
             }
+            if let Some(sf) = &f.scip {
+                for (sym, id) in &sf.defs {
+                    b.scip_defs.insert(sym.as_str(), id.as_str());
+                }
+                let by_name = b.scip_refs.entry(f.file_id.as_str()).or_default();
+                for r in &sf.refs {
+                    by_name
+                        .entry(r.name.as_str())
+                        .or_default()
+                        .push((r.line, r.symbol.as_str()));
+                }
+            }
         }
         b
+    }
+
+    /// SCIP's exact target for `name` referenced at `line`, when it maps into the corpus.
+    /// Unknown targets defer to tree-sitter resolution (other repos may lack SCIP).
+    fn scip(&self, f: &FileFacts, name: &str, line: u32) -> Option<String> {
+        let occs = self.scip_refs.get(f.file_id.as_str())?.get(name)?;
+        // A call spanning lines puts the callee name at or just after the statement start.
+        let (_, sym) = occs
+            .iter()
+            .filter(|(l, _)| *l >= line && *l <= line + 3)
+            .min_by_key(|(l, _)| *l)?;
+        self.scip_defs.get(sym).map(|id| id.to_string())
     }
 
     fn sym(&self, id: &str) -> Option<&'a Symbol> {

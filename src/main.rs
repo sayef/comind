@@ -58,6 +58,9 @@ enum Cmd {
         /// Diff against this commit instead of the recorded base
         #[arg(long)]
         since: Option<String>,
+        /// SCIP: auto (index.scip or installed indexers) | require | off; config `scip`
+        #[arg(long)]
+        scip: Option<String>,
     },
     /// Link several repos into one cross-repo index (adds cross-repo edges + blast radius)
     Link {
@@ -90,6 +93,9 @@ enum Cmd {
         /// Recompute only symbols in files changed since the last index
         #[arg(long)]
         incremental: bool,
+        /// SCIP: auto (index.scip or installed indexers) | require | off; config `scip`
+        #[arg(long)]
+        scip: Option<String>,
     },
     /// Zoom, blast radius, and context pack for a symbol
     Explore {
@@ -207,6 +213,12 @@ enum EvalWhat {
         /// List every missed and spurious edge
         #[arg(long, short)]
         verbose: bool,
+        /// Directory of `<repo>.scip` indexes to attach
+        #[arg(long)]
+        scip: Option<String>,
+        /// Limit to these fixture repos (repeatable)
+        #[arg(long)]
+        repo: Vec<String>,
     },
 }
 
@@ -237,8 +249,12 @@ fn main() -> ExitCode {
             no_guide,
             incremental,
             since,
+            scip,
         } => {
             let cfg = comind::config::Config::load();
+            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+                return ExitCode::FAILURE;
+            };
             cmd_index(
                 &repo,
                 index_dir.as_deref(),
@@ -248,6 +264,7 @@ fn main() -> ExitCode {
                 tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
                 since.as_deref(),
+                scip,
             )
         }
         Cmd::Link {
@@ -262,8 +279,12 @@ fn main() -> ExitCode {
             guide,
             no_guide,
             incremental,
+            scip,
         } => {
             let cfg = comind::config::Config::load();
+            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+                return ExitCode::FAILURE;
+            };
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
             cmd_link(
                 &repos,
@@ -273,6 +294,7 @@ fn main() -> ExitCode {
                 tri(flows, no_flows).unwrap_or(cfg.flows()),
                 tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
+                scip,
             )
         }
         Cmd::Explore {
@@ -336,8 +358,14 @@ fn main() -> ExitCode {
             cmd_serve(index_dir.as_deref(), markdown)
         }
         Cmd::Eval {
-            what: EvalWhat::Graph { fixture, verbose },
-        } => cmd_eval_graph(&fixture, verbose),
+            what:
+                EvalWhat::Graph {
+                    fixture,
+                    verbose,
+                    scip,
+                    repo,
+                },
+        } => cmd_eval_graph(&fixture, verbose, scip.as_deref(), &repo),
         Cmd::Config { action } => cmd_config(action),
     }
 }
@@ -352,6 +380,37 @@ fn gate_llm_steps(enrich: bool, flows: bool, guide: bool) -> (bool, bool, bool) 
         (false, false, false)
     } else {
         (enrich, flows, guide)
+    }
+}
+
+/// `--scip` flag → config → `auto`; `None` (after an error message) for an unknown value.
+fn scip_mode(flag: Option<&str>, cfg: &comind::config::Config) -> Option<comind::scip::Mode> {
+    match flag {
+        None => Some(cfg.scip()),
+        Some(f) => comind::scip::Mode::parse(f).or_else(|| {
+            comind::ui::err(&format!("--scip must be auto, require or off (got {f:?})"));
+            None
+        }),
+    }
+}
+
+/// Attach SCIP to one parsed repo, reporting what was found.
+fn attach_scip(
+    mode: comind::scip::Mode,
+    root: &Path,
+    name: &str,
+    out: &mut comind::parse::ParseOutput,
+) -> Result<(), String> {
+    match comind::scip::ingest(mode, root, name, &out.symbols, &mut out.facts) {
+        Ok(a) if a.documents > 0 => {
+            comind::ui::note(&format!(
+                "{name}: SCIP {} index(es), {} files, {} defs, {} refs",
+                a.indexes, a.documents, a.definitions, a.references
+            ));
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("{e:#}")),
     }
 }
 
@@ -847,8 +906,13 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
-fn cmd_eval_graph(fixture: &str, verbose: bool) -> ExitCode {
-    let r = match comind::eval::eval_fixture(Path::new(fixture)) {
+fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[String]) -> ExitCode {
+    let only: Vec<&str> = repos.iter().map(String::as_str).collect();
+    let r = match comind::eval::eval_with(
+        Path::new(fixture),
+        (!only.is_empty()).then_some(only.as_slice()),
+        scip.map(Path::new),
+    ) {
         Ok(r) => r,
         Err(e) => {
             comind::ui::err(&format!("eval failed: {e:#}"));
@@ -887,6 +951,9 @@ fn cmd_eval_graph(fixture: &str, verbose: bool) -> ExitCode {
         cases.add_row(vec![case.clone(), format!("{found} / {expected}")]);
     }
     println!("{cases}");
+    if scip.is_some() {
+        comind::ui::note(&format!("references answered by SCIP: {}", r.scip_answers));
+    }
     if verbose {
         comind::ui::header("Missed");
         for g in &r.missed {
@@ -968,6 +1035,7 @@ fn repo_name(path: &str) -> String {
 
 /// Parse several repos, resolve references across them, and report the cross-repo graph
 /// (the org-wide blast-radius signal that per-repo tools cannot produce).
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
 fn cmd_link(
     repos: &[&str],
     to: Option<&str>,
@@ -976,6 +1044,7 @@ fn cmd_link(
     flows: bool,
     guide: bool,
     incremental: bool,
+    scip: comind::scip::Mode,
 ) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
@@ -988,11 +1057,15 @@ fn cmd_link(
     for path in repos {
         let name = repo_name(path);
         match comind::parse::parse_repo(Path::new(path), &name) {
-            Ok(o) => {
+            Ok(mut o) => {
                 comind::ui::field(
                     &name,
                     &format!("{} symbols, {} files", o.symbols.len(), o.facts.len()),
                 );
+                if let Err(e) = attach_scip(scip, Path::new(path), &name, &mut o) {
+                    comind::ui::err(&e);
+                    return ExitCode::FAILURE;
+                }
                 symbols.extend(o.symbols);
                 edges.extend(o.edges);
                 facts.extend(o.facts);
@@ -1007,8 +1080,16 @@ fn cmd_link(
     let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
     let s = &resolved.stats;
     comind::ui::ok(&format!(
-        "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges",
-        s.resolved_imports, s.resolved_calls, s.type_edges, s.cross_repo_edges
+        "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges{}",
+        s.resolved_imports,
+        s.resolved_calls,
+        s.type_edges,
+        s.cross_repo_edges,
+        if s.scip_answers > 0 {
+            format!(" ({} answered by SCIP)", s.scip_answers)
+        } else {
+            String::new()
+        }
     ));
     comind::ui::note(&format!(
         "unresolved: {} imports, {} calls (mostly third-party or dynamic)",
@@ -1756,6 +1837,7 @@ fn cmd_index(
     guide: bool,
     incremental: bool,
     since: Option<&str>,
+    scip: comind::scip::Mode,
 ) -> ExitCode {
     // `--since` implies incremental.
     let incremental = incremental || since.is_some();
@@ -1792,6 +1874,10 @@ fn cmd_index(
             return ExitCode::FAILURE;
         }
     };
+    if let Err(e) = attach_scip(scip, root, &repo_name, &mut out) {
+        comind::ui::err(&e);
+        return ExitCode::FAILURE;
+    }
     // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
     out.edges = comind::resolve::resolve(&out.symbols, &out.edges, &out.facts).edges;
 

@@ -30,8 +30,10 @@ Written in Rust. One static binary. No server to run, no per-developer re-indexi
 
 ## Why it's different
 
-- **Deterministic graph, not fuzzy RAG.** Calls, imports, and containment come from the AST
-  (tree-sitter) — exact, reproducible, cheap to build.
+- **Deterministic graph, not fuzzy RAG.** Calls, imports, inheritance and instantiation come from
+  the AST (tree-sitter) — exact, reproducible, cheap to build. Python, TypeScript/JavaScript, Go,
+  Java, Kotlin and Rust. Where a repo has a SCIP index (or a SCIP indexer is installed), its
+  compiler-grade answers take precedence.
 - **Cross-repo by design.** A global symbol identity (SCIP scheme) links a definition in one repo to
   its users in every other. `ripple` gives blast radius across the whole org.
 - **Built once, read everywhere.** CI builds a new atomically-versioned index (local dir or S3);
@@ -165,9 +167,13 @@ competitive landscape.
 
 ```
 src/model.rs   SCIP identity, Symbol/Edge model
-src/parse.rs   tree-sitter → symbols + intra-file edges (Python, TypeScript; polyglot-ready)
+src/parse.rs   tree-sitter walk → symbols, structure, per-file facts
+src/lang/      per-language adapters: Python, TypeScript/JS, Go, Java, Kotlin, Rust
+src/packages.rs module names from pyproject / package.json / tsconfig / go.mod / Cargo.toml
+src/resolve.rs binder: imports, re-exports, type flow, inheritance — within and across repos
+src/scip.rs    SCIP ingestion (existing index.scip or installed indexers)
+src/eval.rs    graph-quality eval on a gold fixture (`comind eval graph`)
 src/git.rs     git change detection (incremental)
-src/resolve.rs cross-repo import/call binding
 src/index.rs   versioned LanceDB store: symbols, edges, search, enrichment, flows, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack
 src/embed.rs   Model2Vec embeddings + code-aware hybrid ranking
@@ -217,8 +223,8 @@ Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MOD
 
 Feature-complete: parse → resolve → index → graph → embed → enrich → search → serve, with
 git-incremental indexing at repo and org level, hybrid search (BM25 + vector + centrality), flow
-walkthroughs, and CI. Roadmap: more languages, native Bedrock/Vertex backends, and
-`cargo install` / Homebrew packaging.
+walkthroughs, and CI. Roadmap: service-contract graph (HTTP, queues, tables), a conventions engine,
+and the reasoning ledger — see [`docs/design/roadmap.md`](docs/design/roadmap.md).
 
 ## Development
 

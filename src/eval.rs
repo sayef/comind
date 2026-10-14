@@ -62,10 +62,18 @@ pub struct EvalReport {
     pub by_case: BTreeMap<String, (usize, usize)>,
     pub missed: Vec<GoldEdge>,
     pub spurious: Vec<KeyedEdge>,
+    /// References answered by SCIP rather than tree-sitter resolution.
+    pub scip_answers: usize,
 }
 
 /// Parse + resolve every repo under `fixture` and score the result against its `expected.toml`.
 pub fn eval_fixture(fixture: &Path) -> Result<EvalReport> {
+    eval_with(fixture, None, None)
+}
+
+/// Like [`eval_fixture`], limited to `only` repos (gold filtered to edges among them), with
+/// `<scip>/<repo>.scip` indexes attached where present.
+pub fn eval_with(fixture: &Path, only: Option<&[&str]>, scip: Option<&Path>) -> Result<EvalReport> {
     let gold_path = fixture.join("expected.toml");
     let gold: Gold = toml::from_str(
         &std::fs::read_to_string(&gold_path)
@@ -73,9 +81,11 @@ pub fn eval_fixture(fixture: &Path) -> Result<EvalReport> {
     )
     .with_context(|| format!("parse {}", gold_path.display()))?;
 
+    let keep = |name: &str| only.is_none_or(|o| o.contains(&name));
     let mut repos: Vec<_> = std::fs::read_dir(fixture)?
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
+        .filter(|e| keep(&e.file_name().to_string_lossy()))
         .collect();
     repos.sort_by_key(|e| e.file_name());
 
@@ -84,13 +94,26 @@ pub fn eval_fixture(fixture: &Path) -> Result<EvalReport> {
     let mut facts = Vec::new();
     for r in repos {
         let name = r.file_name().to_string_lossy().to_string();
-        let out = crate::parse::parse_repo(&r.path(), &name)?;
+        let mut out = crate::parse::parse_repo(&r.path(), &name)?;
+        if let Some(index) = scip.map(|d| d.join(format!("{name}.scip"))) {
+            if index.is_file() {
+                crate::scip::attach(&index, "", &name, &out.symbols, &mut out.facts)?;
+            }
+        }
         symbols.extend(out.symbols);
         edges.extend(out.edges);
         facts.extend(out.facts);
     }
     let resolved = crate::resolve::resolve(&symbols, &edges, &facts);
-    Ok(score(&gold.edge, &keyed_edges(&symbols, &resolved.edges)))
+    let repo_of = |k: &str| k.split(':').next().unwrap_or_default().to_string();
+    let gold: Vec<GoldEdge> = gold
+        .edge
+        .into_iter()
+        .filter(|g| keep(&repo_of(&g.src)) && keep(&repo_of(&g.dst)))
+        .collect();
+    let mut report = score(&gold, &keyed_edges(&symbols, &resolved.edges));
+    report.scip_answers = resolved.stats.scip_answers;
+    Ok(report)
 }
 
 /// Render resolved edges of the evaluated kinds as gold keys.
