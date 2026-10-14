@@ -306,16 +306,24 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
     }
     {
         if let Some((name, value)) = ctx.spec.value(node, ctx.source) {
-            let owner = if scope.in_class {
-                &scope.id
-            } else {
-                &scope.callable
+            // `self.x = v` / `this.x = v` describe the class, wherever they are assigned.
+            let attr = ["self.", "this."]
+                .iter()
+                .find_map(|r| name.strip_prefix(r))
+                .map(str::to_string);
+            let owner_name = match (attr, &scope.class) {
+                (Some(a), Some(c)) => Some((c.clone(), a)),
+                (Some(_), None) => None,
+                (None, _) if scope.in_class => Some((scope.id.clone(), name)),
+                (None, _) => Some((scope.callable.clone(), name)),
             };
-            facts(out).values.push(ValueFact {
-                scope: owner.render(),
-                name,
-                value,
-            });
+            if let Some((owner, name)) = owner_name {
+                facts(out).values.push(ValueFact {
+                    scope: owner.render(),
+                    name,
+                    value,
+                });
+            }
         }
     }
     if let Some(raw) = ctx.spec.contract(node, ctx.source) {

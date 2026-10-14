@@ -270,6 +270,9 @@ const OPS: &[&str] = &[
     "list_objects_v2",
     "copy_object",
     "include_router",
+    "from_",
+    "into",
+    "join",
     "query",
     "add",
     "merge",
@@ -353,16 +356,25 @@ impl Python {
         }
     }
 
+    /// `name = v`, or `self.name = v` (returned as `self.name`; the walk files it on the class).
     pub(crate) fn value_at(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
         if node.kind() != "assignment" {
             return None;
         }
         let left = node.child_by_field_name("left")?;
-        if left.kind() != "identifier" {
-            return None;
-        }
+        let name = match left.kind() {
+            "identifier" => text(left, src).to_string(),
+            "attribute"
+                if left
+                    .child_by_field_name("object")
+                    .is_some_and(|o| text(o, src) == "self") =>
+            {
+                format!("self.{}", field_text(left, "attribute", src)?)
+            }
+            _ => return None,
+        };
         let v = value_expr(node.child_by_field_name("right")?, src)?;
-        Some((text(left, src).to_string(), v))
+        Some((name, v))
     }
 }
 

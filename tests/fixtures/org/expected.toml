@@ -720,3 +720,22 @@ case = "contract-ts-wrapper"
 kind = "consumes"
 src = "web-app:src/jobs.ts::loadSkill"
 dst = "contract:http:GET /v1/skills/{}"
+
+# ---- pypika: Table set on a base class in __init__, used by a subclass ----
+[[edge]]
+case = "inherits"
+kind = "inherits"
+src = "profile-svc:profile_svc/queries.py::SkillQueries"
+dst = "profile-svc:profile_svc/queries.py::QueryBase"
+
+[[edge]]
+case = "contract-table-pypika"
+kind = "reads"
+src = "profile-svc:profile_svc/queries.py::SkillQueries.list_skills"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table-pypika"
+kind = "writes"
+src = "profile-svc:profile_svc/queries.py::SkillQueries.rename"
+dst = "contract:table:skills"

@@ -411,6 +411,23 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             return;
         }
+        // pypika: `Query.from_(t)` / `.join(t)` read, `Query.into(t)` / `Query.update(t)` write.
+        if matches!(method, "from_" | "join" | "into" | "update") {
+            if let Some(table) = args
+                .positional
+                .first()
+                .and_then(Option::as_ref)
+                .and_then(|v| self.pypika_table(v, from))
+            {
+                let kind = if matches!(method, "into" | "update") {
+                    EdgeKind::Writes
+                } else {
+                    EdgeKind::Reads
+                };
+                emit(from, format!("table:{table}"), kind);
+                return;
+            }
+        }
         if let Some(table) = self.model_table(args, from, f) {
             if DB_READS.contains(&method) {
                 emit(from, format!("table:{table}"), EdgeKind::Reads);
@@ -547,6 +564,26 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             _ => return None,
         })
+    }
+
+    /// The table name of a pypika `Table("name", schema=…)` an expression evaluates to.
+    fn pypika_table(&self, v: &ValueExpr, scope: &str) -> Option<String> {
+        let (expr, at) = match v {
+            ValueExpr::Name(p) => self.locate(p, scope, 0)?,
+            other => (other.clone(), scope.to_string()),
+        };
+        let ValueExpr::Call { func, args, kwargs } = &expr else {
+            return None;
+        };
+        if func.last().map(String::as_str) != Some("Table") {
+            return None;
+        }
+        let name = kwargs
+            .iter()
+            .find(|(k, _)| k == "name")
+            .map(|(_, v)| v)
+            .or(args.first())?;
+        self.value(name, &at, 0)
     }
 
     /// Table of the ORM model an operation's first argument names or constructs.
