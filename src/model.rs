@@ -51,6 +51,8 @@ pub enum SymbolKind {
     TypeAlias,
     /// A detected multi-step execution flow (comind-specific higher-order node).
     Process,
+    /// A cross-service contract: an HTTP route, queue, topic, bucket or table.
+    Contract,
 }
 
 /// Edge kinds between symbols. `cross_repo` on [`Edge`] marks whether an edge spans repos.
@@ -67,6 +69,13 @@ pub enum EdgeKind {
     Defines,
     Uses,
     ParticipatesIn,
+    /// Contract roles: provider side (serves/publishes/writes/defines) and consumer side.
+    Serves,
+    Consumes,
+    Publishes,
+    Subscribes,
+    Reads,
+    Writes,
 }
 
 impl EdgeKind {
@@ -83,6 +92,12 @@ impl EdgeKind {
             EdgeKind::Defines => "defines",
             EdgeKind::Uses => "uses",
             EdgeKind::ParticipatesIn => "participates_in",
+            EdgeKind::Serves => "serves",
+            EdgeKind::Consumes => "consumes",
+            EdgeKind::Publishes => "publishes",
+            EdgeKind::Subscribes => "subscribes",
+            EdgeKind::Reads => "reads",
+            EdgeKind::Writes => "writes",
         }
     }
 }

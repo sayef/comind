@@ -12,7 +12,20 @@ use serde::Deserialize;
 use crate::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
 /// Edge kinds the gold set covers; other kinds are ignored on both sides.
-pub const EVAL_KINDS: &[&str] = &["imports", "calls", "inherits", "implements", "instantiates"];
+pub const EVAL_KINDS: &[&str] = &[
+    "imports",
+    "calls",
+    "inherits",
+    "implements",
+    "instantiates",
+    "serves",
+    "consumes",
+    "publishes",
+    "subscribes",
+    "reads",
+    "writes",
+    "defines",
+];
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GoldEdge {
@@ -105,11 +118,14 @@ pub fn eval_with(fixture: &Path, only: Option<&[&str]>, scip: Option<&Path>) -> 
         facts.extend(out.facts);
     }
     let resolved = crate::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols.iter().cloned());
     let repo_of = |k: &str| k.split(':').next().unwrap_or_default().to_string();
     let gold: Vec<GoldEdge> = gold
         .edge
         .into_iter()
-        .filter(|g| keep(&repo_of(&g.src)) && keep(&repo_of(&g.dst)))
+        .filter(|g| {
+            keep(&repo_of(&g.src)) && (g.dst.starts_with("contract:") || keep(&repo_of(&g.dst)))
+        })
         .collect();
     let mut report = score(&gold, &keyed_edges(&symbols, &resolved.edges));
     report.scip_answers = resolved.stats.scip_answers;
@@ -128,6 +144,9 @@ pub fn keyed_edges(symbols: &[Symbol], edges: &[Edge]) -> BTreeSet<KeyedEdge> {
         let Some(sym) = by_id.get(id) else {
             return format!("?{id}");
         };
+        if sym.kind == SymbolKind::Contract {
+            return format!("contract:{}", sym.name);
+        }
         let mut names = Vec::new();
         let mut cur = Some(id.to_string());
         while let Some(c) = cur {

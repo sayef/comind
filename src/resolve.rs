@@ -11,6 +11,9 @@ use crate::facts::{FileFacts, Import, ImportItem, RefKind, TypeSource};
 use crate::model::{Edge, EdgeKind, Language, Symbol, SymbolKind};
 use crate::packages::strip_ts_ext;
 
+mod contracts;
+pub use contracts::{contract_id, http_path, CONTRACTS};
+
 /// Name → (line, SCIP symbol) occurrences within one file.
 type ScipOccs<'a> = HashMap<&'a str, Vec<(u32, &'a str)>>;
 
@@ -20,6 +23,8 @@ const MAX_DEPTH: u32 = 12;
 #[derive(Debug, Default)]
 pub struct Resolved {
     pub edges: Vec<Edge>,
+    /// Contract nodes (routes, queues, buckets, tables) to add to the symbol set.
+    pub symbols: Vec<Symbol>,
     pub stats: ResolveStats,
     /// Top-level module → count of import items that didn't resolve.
     pub unresolved_modules: HashMap<String, usize>,
@@ -39,6 +44,8 @@ pub struct ResolveStats {
     pub type_edges: usize,
     /// References answered by SCIP rather than tree-sitter resolution.
     pub scip_answers: usize,
+    /// Participant → contract edges (serves, consumes, publishes, …).
+    pub contract_edges: usize,
     pub cross_repo_edges: usize,
 }
 
@@ -167,6 +174,29 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
             new_edges.push((r.from.clone(), t, kind, 0.9));
         }
     }
+
+    let linked = contracts::link(&b, facts);
+    for (src, dst, kind) in linked.edges {
+        let Some(s) = b.sym(&src) else {
+            continue;
+        };
+        let dst_id = linked
+            .symbols
+            .iter()
+            .find(|c| c.id.render() == dst)
+            .map(|c| c.id.clone());
+        if let Some(d) = dst_id {
+            out.stats.contract_edges += 1;
+            out.edges.push(Edge {
+                src: s.id.clone(),
+                dst: d,
+                kind,
+                confidence: 0.9,
+                cross_repo: false,
+            });
+        }
+    }
+    out.symbols = linked.symbols;
 
     let mut seen: HashSet<(String, String, EdgeKind)> = out
         .edges
@@ -660,7 +690,13 @@ impl<'a> Binder<'a> {
         }
         for s in self.scope_chain(scope) {
             if let Some(src) = self.types.get(&(s.as_str(), head)) {
-                return self.type_of(src, &s, depth + 1);
+                if let Some(v) = self.type_of(src, &s, depth + 1) {
+                    return Some(v);
+                }
+                // A local of unknown type shadows outer names; a module variable is its symbol.
+                if s != f.file_id {
+                    return None;
+                }
             }
             // Functions nested in an enclosing callable (closures).
             if self.is_callable(&s) {

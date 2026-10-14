@@ -218,6 +218,7 @@ fn kind_from_str(s: &str) -> SymbolKind {
         "Import" => SymbolKind::Import,
         "TypeAlias" => SymbolKind::TypeAlias,
         "Process" => SymbolKind::Process,
+        "Contract" => SymbolKind::Contract,
         _ => SymbolKind::Variable,
     }
 }
@@ -410,6 +411,12 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
         "Defines" => EdgeKind::Defines,
         "Uses" => EdgeKind::Uses,
         "ParticipatesIn" => EdgeKind::ParticipatesIn,
+        "Serves" => EdgeKind::Serves,
+        "Consumes" => EdgeKind::Consumes,
+        "Publishes" => EdgeKind::Publishes,
+        "Subscribes" => EdgeKind::Subscribes,
+        "Reads" => EdgeKind::Reads,
+        "Writes" => EdgeKind::Writes,
         _ => EdgeKind::References,
     }
 }

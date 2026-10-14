@@ -2,8 +2,8 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, text, LangSpec, RawContract, Target};
+use crate::facts::{Args, Import, ImportItem, RefKind, TemplatePart, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct Python;
@@ -21,6 +21,14 @@ impl LangSpec for Python {
             _ => return None,
         };
         Some((kind, field_text(node, "name", src)?.to_string()))
+    }
+
+    fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        self.contract_at(node, src)
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        self.value_at(node, src)
     }
 
     fn variable(&self, node: Node, src: &[u8]) -> Option<String> {
@@ -217,4 +225,284 @@ fn type_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
         }
         _ => path(node, src),
     }
+}
+
+// ---- contracts ----------------------------------------------------------------------
+
+const ROUTE_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options"];
+
+/// Constructors whose result can carry contract meaning (routers, apps, clients).
+const CTORS: &[&str] = &[
+    "APIRouter",
+    "FastAPI",
+    "Client",
+    "AsyncClient",
+    "Session",
+    "ClientSession",
+    "client",
+    "resource",
+];
+
+/// Calls that may be service operations; receivers decide at resolve time.
+const OPS: &[&str] = &[
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "request",
+    "stream",
+    "send_message",
+    "send_message_batch",
+    "receive_message",
+    "publish",
+    "publish_batch",
+    "put_object",
+    "get_object",
+    "upload_file",
+    "upload_fileobj",
+    "download_file",
+    "download_fileobj",
+    "head_object",
+    "delete_object",
+    "list_objects_v2",
+    "copy_object",
+    "include_router",
+    "query",
+    "add",
+    "merge",
+    "execute",
+    "select",
+    "insert",
+    "update",
+    "text",
+];
+
+impl Python {
+    pub(crate) fn contract_at(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        match node.kind() {
+            "decorated_definition" => {
+                let def = node.child_by_field_name("definition")?;
+                let handler = field_text(def, "name", src)?.to_string();
+                named_children(node)
+                    .into_iter()
+                    .filter(|d| d.kind() == "decorator")
+                    .find_map(|d| {
+                        let call = named_children(d).into_iter().find(|c| c.kind() == "call")?;
+                        let f = call.child_by_field_name("function")?;
+                        if f.kind() != "attribute" {
+                            return None;
+                        }
+                        let method = field_text(f, "attribute", src)?;
+                        if !ROUTE_METHODS.contains(&method) {
+                            return None;
+                        }
+                        let args = args(call.child_by_field_name("arguments")?, src);
+                        Some(RawContract::Route {
+                            handler: handler.clone(),
+                            receiver: path(f.child_by_field_name("object")?, src)?,
+                            method: method.to_uppercase(),
+                            path: args.get("path", 0)?.clone(),
+                        })
+                    })
+            }
+            "assignment" => {
+                let left = node.child_by_field_name("left")?;
+                let right = node.child_by_field_name("right")?;
+                if left.kind() == "identifier" && text(left, src) == "__tablename__" {
+                    if let Some(ValueExpr::Lit(t)) = value_expr(right, src) {
+                        return Some(RawContract::TableName(t));
+                    }
+                }
+                if right.kind() != "call" {
+                    return None;
+                }
+                let ctor = path(right.child_by_field_name("function")?, src)?;
+                if !CTORS.contains(&ctor.last()?.as_str()) {
+                    return None;
+                }
+                let (target, _) = self.assignment(node, src)?;
+                Some(RawContract::Construct {
+                    target,
+                    ctor,
+                    args: args(right.child_by_field_name("arguments")?, src),
+                })
+            }
+            "call" => {
+                let f = node.child_by_field_name("function")?;
+                let (receiver, method) = match f.kind() {
+                    "identifier" => (Vec::new(), text(f, src).to_string()),
+                    "attribute" => (
+                        path(f.child_by_field_name("object")?, src).unwrap_or_default(),
+                        field_text(f, "attribute", src)?.to_string(),
+                    ),
+                    _ => return None,
+                };
+                if !OPS.contains(&method.as_str()) {
+                    return None;
+                }
+                Some(RawContract::Op {
+                    receiver,
+                    method,
+                    args: args(node.child_by_field_name("arguments")?, src),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn value_at(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if node.kind() != "assignment" {
+            return None;
+        }
+        let left = node.child_by_field_name("left")?;
+        if left.kind() != "identifier" {
+            return None;
+        }
+        let v = value_expr(node.child_by_field_name("right")?, src)?;
+        Some((text(left, src).to_string(), v))
+    }
+}
+
+fn args(list: Node, src: &[u8]) -> Args {
+    let mut out = Args::default();
+    for a in named_children(list) {
+        match a.kind() {
+            "keyword_argument" => {
+                if let (Some(k), Some(v)) = (
+                    field_text(a, "name", src),
+                    a.child_by_field_name("value")
+                        .and_then(|v| value_expr(v, src)),
+                ) {
+                    out.keywords.push((k.to_string(), v));
+                }
+            }
+            "list_splat" | "dictionary_splat" | "comment" => {}
+            _ => {
+                if a.kind() == "call" {
+                    if let Some(p) = a.child_by_field_name("function").and_then(|f| path(f, src)) {
+                        out.calls.push((out.positional.len(), p));
+                    }
+                }
+                out.positional.push(value_expr(a, src));
+            }
+        }
+    }
+    out
+}
+
+/// What an expression evaluates to statically: literal, template, env var, or a name.
+fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
+    match node.kind() {
+        "string" => {
+            let mut parts = Vec::new();
+            for c in named_children(node) {
+                match c.kind() {
+                    "string_content" => parts.push(TemplatePart::Lit(text(c, src).to_string())),
+                    "interpolation" => parts.push(TemplatePart::Expr(
+                        c.child_by_field_name("expression")
+                            .and_then(|e| path(e, src)),
+                    )),
+                    _ => {}
+                }
+            }
+            if parts.iter().all(|p| matches!(p, TemplatePart::Lit(_))) {
+                let s: String = parts
+                    .into_iter()
+                    .map(|p| match p {
+                        TemplatePart::Lit(s) => s,
+                        TemplatePart::Expr(_) => String::new(),
+                    })
+                    .collect();
+                Some(ValueExpr::Lit(s))
+            } else {
+                Some(ValueExpr::Template(parts))
+            }
+        }
+        "concatenated_string" => {
+            let mut parts = Vec::new();
+            for c in named_children(node) {
+                match value_expr(c, src)? {
+                    ValueExpr::Lit(s) => parts.push(TemplatePart::Lit(s)),
+                    ValueExpr::Template(p) => parts.extend(p),
+                    _ => return None,
+                }
+            }
+            Some(ValueExpr::Template(parts))
+        }
+        // os.environ["X"]
+        "subscript" => {
+            let value = node.child_by_field_name("value")?;
+            if path(value, src)?.join(".") != "os.environ" {
+                return None;
+            }
+            match value_expr(node.child_by_field_name("subscript")?, src)? {
+                ValueExpr::Lit(k) => Some(ValueExpr::Env(k)),
+                _ => None,
+            }
+        }
+        // os.getenv("X", …) / os.environ.get("X", …); other calls kept for known callees.
+        "call" => {
+            let f = path(node.child_by_field_name("function")?, src)?.join(".");
+            if !matches!(
+                f.as_str(),
+                "os.getenv" | "getenv" | "os.environ.get" | "environ.get"
+            ) {
+                return call_value(node, src);
+            }
+            let first = named_children(node.child_by_field_name("arguments")?)
+                .into_iter()
+                .next()?;
+            match value_expr(first, src)? {
+                ValueExpr::Lit(k) => Some(ValueExpr::Env(k)),
+                _ => None,
+            }
+        }
+        "identifier" | "attribute" => path(node, src).map(ValueExpr::Name),
+        "binary_operator" => {
+            let sep = match field_text(node, "operator", src)? {
+                "/" => "/",
+                "+" => "",
+                _ => return None,
+            };
+            let mut parts = Vec::new();
+            for side in ["left", "right"] {
+                match value_expr(node.child_by_field_name(side)?, src)? {
+                    ValueExpr::Join { sep: s, parts: p } if s == sep => parts.extend(p),
+                    v => parts.push(v),
+                }
+            }
+            Some(ValueExpr::Join {
+                sep: sep.to_string(),
+                parts,
+            })
+        }
+        "dictionary" => Some(ValueExpr::Record(
+            named_children(node)
+                .into_iter()
+                .filter(|p| p.kind() == "pair")
+                .filter_map(|p| {
+                    let ValueExpr::Lit(k) = value_expr(p.child_by_field_name("key")?, src)? else {
+                        return None;
+                    };
+                    Some((k, value_expr(p.child_by_field_name("value")?, src)?))
+                })
+                .collect(),
+        )),
+        "parenthesized_expression" => value_expr(named_children(node).into_iter().next()?, src),
+        _ => None,
+    }
+}
+
+/// A call as a value: positional/keyword argument values by callee path.
+fn call_value(node: Node, src: &[u8]) -> Option<ValueExpr> {
+    let func = path(node.child_by_field_name("function")?, src)?;
+    let a = args(node.child_by_field_name("arguments")?, src);
+    Some(ValueExpr::Call {
+        func,
+        args: a.positional.into_iter().map_while(|v| v).collect(),
+        kwargs: a.keywords,
+    })
 }

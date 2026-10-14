@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::path::{Path, MAIN_SEPARATOR};
 
-use crate::facts::{FileFacts, Ref, TypeHint, TypeSource};
-use crate::lang::{self, LangSpec, Target};
+use crate::facts::{ContractFact, FileFacts, Ref, TypeHint, TypeSource, ValueFact};
+use crate::lang::{self, LangSpec, RawContract, Target};
 use crate::model::{
     Edge, EdgeKind, Fingerprint, GlobalSymbolId, Language, Position, Range, RepoId, Symbol,
     SymbolKind,
@@ -197,6 +197,8 @@ fn parse_file_with(
             refs: Vec::new(),
             types: Vec::new(),
             scip: None,
+            contracts: Vec::new(),
+            values: Vec::new(),
         }],
     };
 
@@ -297,6 +299,23 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
         if let Some(name) = ctx.spec.variable(node, ctx.source) {
             variable(node, &name, scope, ctx, out);
         }
+    }
+    if module_level || scope.in_class {
+        if let Some((name, value)) = ctx.spec.value(node, ctx.source) {
+            let owner = if scope.in_class {
+                &scope.id
+            } else {
+                &scope.callable
+            };
+            facts(out).values.push(ValueFact {
+                scope: owner.render(),
+                name,
+                value,
+            });
+        }
+    }
+    if let Some(raw) = ctx.spec.contract(node, ctx.source) {
+        contract(raw, node, scope, ctx, out);
     }
 
     if let Some((target, source)) = ctx.spec.assignment(node, ctx.source) {
@@ -435,6 +454,66 @@ fn variable(node: Node, name: &str, scope: &Scope, ctx: &Ctx, out: &mut ParseOut
     });
     out.edges
         .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
+}
+
+fn contract(raw: RawContract, node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
+    let line = lang::line(node);
+    let fact = match raw {
+        RawContract::Route {
+            handler,
+            receiver,
+            method,
+            path,
+        } => ContractFact::Route {
+            handler: id(
+                ctx.repo_name,
+                &format!(
+                    "{}{}",
+                    join_core(&scope.core, &handler),
+                    suffix(&SymbolKind::Function)
+                ),
+            )
+            .render(),
+            receiver,
+            method,
+            path,
+            line,
+        },
+        RawContract::Construct { target, ctor, args } => {
+            let (owner, name) = match target {
+                Target::Var(n) => (scope.callable.render(), n),
+                Target::Attr(n) => match &scope.class {
+                    Some(c) => (c.render(), format!("{}.{n}", ctx.spec.receiver())),
+                    None => return,
+                },
+            };
+            ContractFact::Construct {
+                scope: owner,
+                target: name,
+                ctor,
+                args,
+            }
+        }
+        RawContract::Op {
+            receiver,
+            method,
+            args,
+        } => ContractFact::Op {
+            from: scope.callable.render(),
+            receiver,
+            method,
+            args,
+            line,
+        },
+        RawContract::TableName(name) => match &scope.class {
+            Some(c) => ContractFact::Table {
+                class: c.render(),
+                name,
+            },
+            None => return,
+        },
+    };
+    facts(out).contracts.push(fact);
 }
 
 fn type_hint(target: Target, source: TypeSource, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {

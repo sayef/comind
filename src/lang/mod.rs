@@ -10,7 +10,7 @@ pub mod typescript;
 
 use tree_sitter::Node;
 
-use crate::facts::{Import, RefKind, TypeSource};
+use crate::facts::{Args, Import, RefKind, TypeSource, ValueExpr};
 use crate::model::{Language, SymbolKind};
 
 /// What an assignment's left-hand side names.
@@ -19,6 +19,27 @@ pub enum Target {
     Var(String),
     /// An attribute on the instance (`self.x` / `this.x`).
     Attr(String),
+}
+
+/// Service-boundary syntax found at a node; the walk fills in scope ids.
+pub enum RawContract {
+    Route {
+        handler: String,
+        receiver: Vec<String>,
+        method: String,
+        path: ValueExpr,
+    },
+    Construct {
+        target: Target,
+        ctor: Vec<String>,
+        args: Args,
+    },
+    Op {
+        receiver: Vec<String>,
+        method: String,
+        args: Args,
+    },
+    TableName(String),
 }
 
 pub trait LangSpec: Sync {
@@ -30,6 +51,16 @@ pub trait LangSpec: Sync {
 
     /// A base declared apart from the type (Rust `impl Trait for Type`): (type name, kind, base).
     fn owned_bases(&self, _node: Node, _src: &[u8]) -> Option<(String, RefKind, Vec<String>)> {
+        None
+    }
+
+    /// Contract syntax at this node (routes, client construction, service operations).
+    fn contract(&self, _node: Node, _src: &[u8]) -> Option<RawContract> {
+        None
+    }
+
+    /// `name = <statically known value>` at module or class level.
+    fn value(&self, _node: Node, _src: &[u8]) -> Option<(String, ValueExpr)> {
         None
     }
 

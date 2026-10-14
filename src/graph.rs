@@ -28,6 +28,18 @@ pub const DEPENDENCY: &[EdgeKind] = &[
     EdgeKind::Instantiates,
     EdgeKind::Inherits,
     EdgeKind::Implements,
+    EdgeKind::Consumes,
+    EdgeKind::Subscribes,
+    EdgeKind::Reads,
+];
+
+/// Provider-side contract roles: the contract depends on its provider, so `ripple` crosses
+/// these against their direction (handler → route → every consumer).
+pub const PROVIDES: &[EdgeKind] = &[
+    EdgeKind::Serves,
+    EdgeKind::Publishes,
+    EdgeKind::Writes,
+    EdgeKind::Defines,
 ];
 
 /// A node as returned to callers — flat, printable, agent-friendly.
@@ -200,7 +212,7 @@ impl CodeGraph {
     /// (callers of callers, importers), multi-hop, cross-repo. Structural `Contains` is
     /// ignored — a containing module is not a dependency.
     pub fn ripple(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(focus, max_depth, Incoming, DEPENDENCY)
+        self.bfs(focus, max_depth, Incoming, DEPENDENCY, PROVIDES)
     }
 
     /// *What does `focus` do downstream?* Forward call trace.
@@ -210,6 +222,7 @@ impl CodeGraph {
             max_depth,
             Outgoing,
             &[EdgeKind::Calls, EdgeKind::Instantiates],
+            &[],
         )
     }
 
@@ -219,6 +232,7 @@ impl CodeGraph {
         max_depth: usize,
         dir: petgraph::Direction,
         kinds: &[EdgeKind],
+        reversed: &[EdgeKind],
     ) -> Vec<Hop> {
         let mut seen: HashSet<NodeIndex> = HashSet::from([start]);
         let mut q: VecDeque<(NodeIndex, usize)> = VecDeque::from([(start, 0)]);
@@ -227,20 +241,40 @@ impl CodeGraph {
             if depth >= max_depth {
                 continue;
             }
-            for e in self.g.edges_directed(n, dir) {
-                if !kinds.contains(e.weight()) {
-                    continue;
-                }
-                let next = if dir == Incoming {
-                    e.source()
-                } else {
-                    e.target()
-                };
+            let forward = self
+                .g
+                .edges_directed(n, dir)
+                .filter(|e| kinds.contains(e.weight()))
+                .map(|e| {
+                    (
+                        e.weight(),
+                        if dir == Incoming {
+                            e.source()
+                        } else {
+                            e.target()
+                        },
+                    )
+                });
+            let backward = self
+                .g
+                .edges_directed(n, dir.opposite())
+                .filter(|e| reversed.contains(e.weight()))
+                .map(|e| {
+                    (
+                        e.weight(),
+                        if dir == Incoming {
+                            e.target()
+                        } else {
+                            e.source()
+                        },
+                    )
+                });
+            for (kind, next) in forward.chain(backward).collect::<Vec<_>>() {
                 if seen.insert(next) {
                     out.push(Hop {
                         node: self.node_of(next),
                         depth: depth + 1,
-                        via: e.weight().clone(),
+                        via: kind.clone(),
                     });
                     q.push_back((next, depth + 1));
                 }
@@ -301,7 +335,10 @@ impl CodeGraph {
             if rank <= 0.0 {
                 break; // unreachable from focus
             }
-            if matches!(self.g[idx].sym.kind, crate::model::SymbolKind::File) {
+            if matches!(
+                self.g[idx].sym.kind,
+                crate::model::SymbolKind::File | crate::model::SymbolKind::Contract
+            ) {
                 continue;
             }
             let t = est_tokens(&self.g[idx].sym);
@@ -325,7 +362,7 @@ impl CodeGraph {
         // Undirected neighbor lists over dependency edges only.
         let mut neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
         for e in self.g.edge_references() {
-            if !DEPENDENCY.contains(e.weight()) {
+            if !DEPENDENCY.contains(e.weight()) && !PROVIDES.contains(e.weight()) {
                 continue;
             }
             let (a, b) = (e.source().index(), e.target().index());

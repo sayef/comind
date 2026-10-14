@@ -94,6 +94,7 @@ src/
   facts.rs    per-file facts: imports, reference paths, type hints (persisted for incremental).
   packages.rs importable module names: pyproject, package.json, tsconfig paths, go.mod, Cargo.toml.
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
+  resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
   eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).
   index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
   graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.

@@ -33,9 +33,11 @@ fn main() -> ExitCode {
 
     // 2. Bind imports, calls and bases to real definitions (cross-repo aware).
     let resolved = comind::resolve::resolve(&parsed.symbols, &parsed.edges, &parsed.facts);
+    let mut symbols = parsed.symbols.clone();
+    symbols.extend(resolved.symbols);
 
-    // 3. Build the in-memory dependency graph.
-    let g = comind::graph::CodeGraph::build(&parsed.symbols, &resolved.edges);
+    // 3. Build the in-memory dependency graph (code + contract nodes).
+    let g = comind::graph::CodeGraph::build(&symbols, &resolved.edges);
     println!(
         "indexed {} symbols, {} edges",
         g.node_count(),

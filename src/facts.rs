@@ -20,6 +20,99 @@ pub struct FileFacts {
     /// Compiler-grade occurrences from a SCIP index, when one was ingested.
     #[serde(default)]
     pub scip: Option<ScipFacts>,
+    /// Service-boundary facts (routes, clients, queue/bucket/table operations).
+    #[serde(default)]
+    pub contracts: Vec<ContractFact>,
+    /// Statically known values of module- and class-level names (for contract keys).
+    #[serde(default)]
+    pub values: Vec<ValueFact>,
+}
+
+/// A value an expression evaluates to, as far as static analysis can tell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValueExpr {
+    Lit(String),
+    /// An f-string / template: literal parts and placeholder expressions.
+    Template(Vec<TemplatePart>),
+    /// A name or attribute path, resolved later (`QUEUE_URL`, `settings.bucket`).
+    Name(Vec<String>),
+    /// An environment variable read (`os.environ["X"]`, `os.getenv("X")`).
+    Env(String),
+    /// `a / b` (path join, `sep = "/"`) or `a + b` (concatenation, `sep = ""`).
+    Join {
+        sep: String,
+        parts: Vec<ValueExpr>,
+    },
+    /// A call: `Path("/x")`, `str(x)`, `AttrDict(k=v)`; evaluated by known callee names.
+    Call {
+        func: Vec<String>,
+        args: Vec<ValueExpr>,
+        kwargs: Vec<(String, ValueExpr)>,
+    },
+    /// A literal mapping with string keys: `{"k": v}`.
+    Record(Vec<(String, ValueExpr)>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplatePart {
+    Lit(String),
+    Expr(Option<Vec<String>>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValueFact {
+    /// File id (module level) or class id (class attribute).
+    pub scope: String,
+    pub name: String,
+    pub value: ValueExpr,
+}
+
+/// A call's arguments as values: positional, then `name=` keywords.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Args {
+    pub positional: Vec<Option<ValueExpr>>,
+    pub keywords: Vec<(String, ValueExpr)>,
+    /// Positional arguments that are calls, by callee path (`Skill(...)`).
+    pub calls: Vec<(usize, Vec<String>)>,
+}
+
+impl Args {
+    pub fn get(&self, keyword: &str, position: usize) -> Option<&ValueExpr> {
+        self.keywords
+            .iter()
+            .find(|(k, _)| k == keyword)
+            .map(|(_, v)| v)
+            .or_else(|| self.positional.get(position).and_then(Option::as_ref))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContractFact {
+    /// `@router.get("/x")` on `handler`.
+    Route {
+        handler: String,
+        receiver: Vec<String>,
+        method: String,
+        path: ValueExpr,
+        line: u32,
+    },
+    /// `target = Ctor(args)` where the constructor may be a router, app or client.
+    Construct {
+        scope: String,
+        target: String,
+        ctor: Vec<String>,
+        args: Args,
+    },
+    /// A method or function call that may be a service operation.
+    Op {
+        from: String,
+        receiver: Vec<String>,
+        method: String,
+        args: Args,
+        line: u32,
+    },
+    /// `__tablename__ = "x"` on a model class.
+    Table { class: String, name: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

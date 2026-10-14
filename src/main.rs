@@ -191,6 +191,18 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Service contracts (HTTP routes, queues, topics, buckets, tables) and who uses them
+    Contracts {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only contracts of this type: http, sqs, sns, s3, table
+        #[arg(long = "type")]
+        kind: Option<String>,
+        /// Only contracts missing a provider or a consumer
+        #[arg(long)]
+        dangling: bool,
+    },
     /// Measure graph quality against a gold set
     Eval {
         #[command(subcommand)]
@@ -357,6 +369,11 @@ fn main() -> ExitCode {
             let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(index_dir.as_deref(), markdown)
         }
+        Cmd::Contracts {
+            index_dir,
+            kind,
+            dangling,
+        } => cmd_contracts(index_dir.as_deref(), kind.as_deref(), dangling),
         Cmd::Eval {
             what:
                 EvalWhat::Graph {
@@ -440,6 +457,7 @@ fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String>
         facts.extend(o.facts);
     }
     let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols);
     Ok((symbols, resolved.edges))
 }
 
@@ -906,6 +924,64 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
+    // contract id → (providers, consumers) as `repo:name`
+    let mut roles: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
+    for s in symbols.iter().filter(|s| s.kind == SymbolKind::Contract) {
+        roles.entry(s.name.clone()).or_default();
+    }
+    for e in &edges {
+        let (Some(src), Some(dst)) = (by_id.get(&e.src.render()), by_id.get(&e.dst.render()))
+        else {
+            continue;
+        };
+        if dst.kind != SymbolKind::Contract {
+            continue;
+        }
+        let who = format!("{}:{}", src.repo.0, src.name);
+        let slot = roles.entry(dst.name.clone()).or_default();
+        if comind::graph::PROVIDES.contains(&e.kind) {
+            slot.0.insert(who);
+        } else {
+            slot.1.insert(who);
+        }
+    }
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec!["contract", "provided by", "used by"]);
+    let mut shown = 0;
+    for (name, (prov, cons)) in &roles {
+        if kind.is_some_and(|k| !name.starts_with(&format!("{k}:"))) {
+            continue;
+        }
+        if dangling && !prov.is_empty() && !cons.is_empty() {
+            continue;
+        }
+        let list = |s: &BTreeSet<String>| {
+            if s.is_empty() {
+                "—".to_string()
+            } else {
+                s.iter().cloned().collect::<Vec<_>>().join("\n")
+            }
+        };
+        table.add_row(vec![name.clone(), list(prov), list(cons)]);
+        shown += 1;
+    }
+    comind::ui::header(&format!("Contracts — {shown} shown of {}", roles.len()));
+    println!("{table}");
+    ExitCode::SUCCESS
+}
+
 fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[String]) -> ExitCode {
     let only: Vec<&str> = repos.iter().map(String::as_str).collect();
     let r = match comind::eval::eval_with(
@@ -1078,6 +1154,22 @@ fn cmd_link(
     }
 
     let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols.iter().cloned());
+    if !resolved.symbols.is_empty() {
+        let mut by_type: BTreeMap<&str, usize> = BTreeMap::new();
+        for c in &resolved.symbols {
+            *by_type
+                .entry(c.name.split(':').next().unwrap_or_default())
+                .or_default() += 1;
+        }
+        let parts: Vec<String> = by_type.iter().map(|(t, n)| format!("{t} {n}")).collect();
+        comind::ui::ok(&format!(
+            "contracts: {} ({}), {} participant edges",
+            resolved.symbols.len(),
+            parts.join(", "),
+            resolved.stats.contract_edges
+        ));
+    }
     let s = &resolved.stats;
     comind::ui::ok(&format!(
         "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges{}",
@@ -1879,7 +1971,9 @@ fn cmd_index(
         return ExitCode::FAILURE;
     }
     // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
-    out.edges = comind::resolve::resolve(&out.symbols, &out.edges, &out.facts).edges;
+    let resolved = comind::resolve::resolve(&out.symbols, &out.edges, &out.facts);
+    out.edges = resolved.edges;
+    out.symbols.extend(resolved.symbols);
 
     let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
     for s in &out.symbols {
@@ -2055,7 +2149,11 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
             newout.facts
         }
     };
-    let edges = comind::resolve::resolve(&symbols, &edges, &facts).edges;
+    // Contract nodes are derived; drop the old ones and re-derive from all facts.
+    symbols.retain(|s| s.kind != SymbolKind::Contract);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols);
+    let edges = resolved.edges;
 
     if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges)
         .and_then(|_| comind::index::write_facts_blocking(dst, &facts))

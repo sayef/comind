@@ -510,3 +510,146 @@ case = "rust-crate-path-call"
 kind = "calls"
 src = "rs-app:src/util.rs::helper"
 dst = "rs-app:src/main.rs::banner"
+
+# ---- skills-svc / profile-svc: code edges ----
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "profile-svc:profile_svc/clients.py"
+dst = "profile-svc:profile_svc/config.py::settings"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "profile-svc:profile_svc/worker.py"
+dst = "profile-svc:profile_svc/config.py::settings"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/db.py::SessionLocal"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/db.py::Skill"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+
+[[edge]]
+case = "module-import"
+kind = "imports"
+src = "skills-svc:skills_svc/main.py"
+dst = "skills-svc:skills_svc/api.py"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "profile-svc:profile_svc/config.py"
+dst = "profile-svc:profile_svc/config.py::Settings"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "skills-svc:skills_svc/db.py::Skill"
+
+# ---- contracts: HTTP (FastAPI ↔ httpx, cross-repo via router prefix + include_router) ----
+[[edge]]
+case = "contract-http-serve"
+kind = "serves"
+src = "skills-svc:skills_svc/api.py::get_skill"
+dst = "contract:http:GET /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-serve"
+kind = "serves"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "contract:http:POST /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-consume"
+kind = "consumes"
+src = "profile-svc:profile_svc/clients.py::SkillsClient.fetch"
+dst = "contract:http:GET /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-consume"
+kind = "consumes"
+src = "profile-svc:profile_svc/clients.py::SkillsClient.rename"
+dst = "contract:http:POST /v1/skills/{}"
+
+# ---- contracts: tables (SQLAlchemy model, session ops, raw SQL from another repo) ----
+[[edge]]
+case = "contract-table"
+kind = "defines"
+src = "skills-svc:skills_svc/db.py::Skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table"
+kind = "reads"
+src = "skills-svc:skills_svc/api.py::get_skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table"
+kind = "writes"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table-raw-sql"
+kind = "reads"
+src = "profile-svc:profile_svc/reports.py::count_skills"
+dst = "contract:table:skills"
+
+# ---- contracts: AWS (values via env var, module constant, pydantic settings default) ----
+[[edge]]
+case = "contract-sns-env"
+kind = "publishes"
+src = "skills-svc:skills_svc/events.py::publish_skill_updated"
+dst = "contract:sns:{env:SKILL_EVENTS_TOPIC_ARN}"
+
+[[edge]]
+case = "contract-sqs-const"
+kind = "subscribes"
+src = "profile-svc:profile_svc/worker.py::poll"
+dst = "contract:sqs:skill-updates"
+
+[[edge]]
+case = "contract-s3-settings"
+kind = "writes"
+src = "profile-svc:profile_svc/worker.py::poll"
+dst = "contract:s3:acme-profile-exports"
+
+# ---- wrapper propagation: pkg-common's Client wraps httpx, so its verb methods are HTTP calls ----
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "contract:http:POST /users"
+
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::UserService.fetch"
+dst = "contract:http:GET /users/{}"
+
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::ping"
+dst = "contract:http:GET /ping"
