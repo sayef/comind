@@ -239,6 +239,17 @@ enum Cmd {
         #[arg(long)]
         inbox: bool,
     },
+    /// Seed the ledger from git history: reverts → failed attempts, commit trailers → records
+    Harvest {
+        /// Repository paths (already indexed)
+        #[arg(required = true)]
+        repos: Vec<String>,
+        /// How many first-parent commits to scan per repo
+        #[arg(long, default_value_t = 2000)]
+        limit: usize,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
     /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
     Hook {
         /// Agent: `claude`
@@ -491,6 +502,11 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+        Cmd::Harvest {
+            repos,
+            limit,
+            index_dir,
+        } => cmd_harvest(&repos, limit, index_dir.as_deref()),
 
         Cmd::Eval {
             what:
@@ -1180,6 +1196,53 @@ fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
     let shown = comind::ledger::inbox(&entries, inbox);
     let title = if inbox { "Ledger inbox" } else { "Ledger" };
     println!("{}", comind::ledger::markdown(title, &shown));
+    ExitCode::SUCCESS
+}
+
+fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let symbols = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok((s, _)) => s,
+        Err(e) => {
+            comind::ui::err(&format!("index the repos first: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let root = cfg.index_dir(from);
+    let existing: HashSet<String> = comind::ledger::all_blocking(&root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
+    for path in repos {
+        let name = repo_name(path);
+        let history = match comind::git::all_history(Path::new(path), limit) {
+            Ok(h) => h,
+            Err(e) => {
+                comind::ui::warn(&format!("{name}: {e:#}"));
+                continue;
+            }
+        };
+        for rec in comind::ledger::harvest(&name, &history, &symbols) {
+            if existing.contains(&rec.id) {
+                continue;
+            }
+            match comind::ledger::put_blocking(&root, &rec) {
+                Ok(()) => *by_kind.entry(rec.kind.as_str()).or_default() += 1,
+                Err(e) => comind::ui::warn(&format!("{name}: {e:#}")),
+            }
+        }
+    }
+    let parts: Vec<String> = by_kind.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    comind::ui::ok(&format!(
+        "harvested {}",
+        if parts.is_empty() {
+            "nothing new".into()
+        } else {
+            parts.join(", ")
+        }
+    ));
     ExitCode::SUCCESS
 }
 
