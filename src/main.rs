@@ -191,6 +191,15 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Measured coding conventions per repo and org-wide, with exemplars and deviations
+    Conventions {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only this repo (and the org baseline)
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Internal packages: who publishes each, who depends on it, and at which version
     Packages {
         /// Index directory to read — root; default: configured index dir (local path or s3://…)
@@ -384,6 +393,9 @@ fn main() -> ExitCode {
             dangling,
         } => cmd_contracts(index_dir.as_deref(), kind.as_deref(), dangling),
         Cmd::Packages { index_dir, skew } => cmd_packages(index_dir.as_deref(), skew),
+        Cmd::Conventions { index_dir, repo } => {
+            cmd_conventions(index_dir.as_deref(), repo.as_deref())
+        }
         Cmd::Eval {
             what:
                 EvalWhat::Graph {
@@ -934,6 +946,46 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let Ok(Some(facts)) = comind::index::read_facts_blocking(&dir) else {
+        comind::ui::err("index has no stored facts; re-run `comind index`/`link`");
+        return ExitCode::FAILURE;
+    };
+    let all = comind::conventions::mine(&symbols, &edges, &facts);
+    let mut by_repo: BTreeMap<&str, Vec<&comind::conventions::Convention>> = BTreeMap::new();
+    for c in &all {
+        if repo.is_none_or(|r| c.repo == r || c.repo == comind::conventions::ORG) {
+            by_repo.entry(c.repo.as_str()).or_default().push(c);
+        }
+    }
+    for (r, cs) in by_repo {
+        let title = if r == comind::conventions::ORG {
+            "Org baseline".to_string()
+        } else {
+            r.to_string()
+        };
+        comind::ui::header(&title);
+        for c in cs {
+            comind::ui::field(&c.dimension, &c.rule);
+            if !c.exemplars.is_empty() {
+                comind::ui::note(&format!("e.g. {}", c.exemplars.join(", ")));
+            }
+            if !c.counterexamples.is_empty() {
+                comind::ui::note(&format!("except {}", c.counterexamples.join(", ")));
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
     let dir = comind::config::Config::load().graph_dir(from);
     let rows = match comind::index::read_packages_blocking(&dir) {
@@ -1900,6 +1952,10 @@ fn run_style_guides(
     };
     comind::ui::header("Style guides (per repo)");
     comind::ui::warn("--guide sends code samples + config to the LLM — opt-in egress.");
+    let conventions = match comind::index::read_facts_blocking(dst) {
+        Ok(Some(facts)) => comind::conventions::mine(symbols, edges, &facts),
+        _ => Vec::new(),
+    };
     let mut guide_rows: Vec<(String, String)> = Vec::new();
     for (repo, root) in repo_roots {
         let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
@@ -1911,7 +1967,12 @@ fn run_style_guides(
             .filter(|e| &e.src.package == repo)
             .cloned()
             .collect();
-        let sections = comind::styleguide::build_sections(root, &rsyms, &redges);
+        let rconv: Vec<_> = conventions
+            .iter()
+            .filter(|c| &c.repo == repo)
+            .cloned()
+            .collect();
+        let sections = comind::styleguide::build_sections(root, &rsyms, &redges, &rconv);
         if sections.is_empty() {
             continue;
         }

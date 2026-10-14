@@ -48,11 +48,28 @@ pub struct ComindServer {
     uri: Arc<String>,
     /// Manifest/lockfile rows for internal-dependency answers.
     packages: Arc<Vec<crate::manifests::PackageRow>>,
+    /// Measured conventions (per repo + org baseline), computed at startup from stored facts.
+    conventions: Arc<Vec<crate::conventions::Convention>>,
     /// Hand results back as markdown text (default). `false` → raw JSON text.
     markdown: bool,
 }
 
 impl ComindServer {
+    /// The repo a focus names: a repo itself, a file path, or a symbol.
+    fn repo_of(&self, focus: &str) -> Option<String> {
+        if self.graph.repos().iter().any(|(r, _)| r == focus) {
+            return Some(focus.to_string());
+        }
+        if let Some(s) = self
+            .symbols
+            .values()
+            .find(|s| s.kind == crate::model::SymbolKind::File && s.file_path.ends_with(focus))
+        {
+            return Some(s.repo.0.clone());
+        }
+        self.graph.lookup(focus).map(|i| self.graph.node(i).repo)
+    }
+
     /// Build a result node, attaching its LLM summary when available.
     fn node_dto(&self, n: GNode) -> NodeDto {
         let enr = self.enrichment.get(&n.id);
@@ -228,7 +245,28 @@ struct PackItem {
 #[derive(Serialize, schemars::JsonSchema)]
 struct GuideDto {
     found: bool,
+    /// Repo the conventions are scoped to (from `focus`), if any.
+    repo: Option<String>,
+    /// Measured conventions for the repo, then the org baseline.
+    conventions: Vec<ConventionDto>,
+    /// LLM-written narrative guide (present only if the index was built with `--guide`).
     guide: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ConventionDto {
+    scope: String,
+    dimension: String,
+    rule: String,
+    exemplars: Vec<String>,
+    counterexamples: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct GuideParam {
+    /// A repo name, file path or symbol: scopes conventions to its repo. Omit for org-wide.
+    #[serde(default)]
+    focus: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -575,11 +613,34 @@ impl ComindServer {
 
     #[tool(
         name = "guide",
-        description = "The repo's inferred coding style guide (naming, typing, structure)"
+        description = "Measured coding conventions to follow when editing: naming, signatures, base classes, error roots, layout, logging, config, internal libraries to use instead of raw ones, testing — each with counts, exemplar locations and known deviations. Pass `focus` (repo, file or symbol) to scope to its repo; the org baseline is always included."
     )]
-    fn guide(&self, _p: Parameters<NoArgs>) -> CallToolResult {
+    fn guide(&self, Parameters(p): Parameters<GuideParam>) -> CallToolResult {
+        let repo = p.focus.as_deref().and_then(|f| self.repo_of(f));
+        let repo_keys: std::collections::HashSet<&str> = self
+            .conventions
+            .iter()
+            .filter(|c| Some(&c.repo) == repo.as_ref())
+            .map(|c| c.key.as_str())
+            .collect();
+        let mut conventions: Vec<ConventionDto> = Vec::new();
+        for c in self.conventions.iter() {
+            let scoped = Some(&c.repo) == repo.as_ref();
+            let org = c.repo == crate::conventions::ORG && !repo_keys.contains(c.key.as_str());
+            if scoped || org {
+                conventions.push(ConventionDto {
+                    scope: c.repo.clone(),
+                    dimension: c.dimension.clone(),
+                    rule: c.rule.clone(),
+                    exemplars: c.exemplars.iter().take(2).cloned().collect(),
+                    counterexamples: c.counterexamples.iter().take(2).cloned().collect(),
+                });
+            }
+        }
         let dto = GuideDto {
-            found: self.style_guide.is_some(),
+            found: !conventions.is_empty() || self.style_guide.is_some(),
+            repo,
+            conventions,
             guide: (*self.style_guide).clone(),
         };
         let md = md_guide(&dto);
@@ -978,10 +1039,31 @@ fn md_pack(d: &PackDto) -> String {
 }
 
 fn md_guide(d: &GuideDto) -> String {
-    match &d.guide {
-        Some(g) => format!("## Style guide\n\n{g}\n"),
-        None => "## Style guide\n\n_none — index was built without `--enrich`_\n".into(),
+    let mut o = match &d.repo {
+        Some(r) => format!("## Conventions — {r}\n"),
+        None => "## Conventions — org baseline\n".to_string(),
+    };
+    if d.conventions.is_empty() {
+        o.push_str("\n_none measured — re-run `comind index`/`link` to store facts._\n");
     }
+    let mut org_header = false;
+    for c in &d.conventions {
+        if c.scope == crate::conventions::ORG && d.repo.is_some() && !org_header {
+            o.push_str("\n**Org baseline**\n");
+            org_header = true;
+        }
+        let _ = writeln!(o, "- _{}_: {}", c.dimension, c.rule);
+        if !c.exemplars.is_empty() {
+            let _ = writeln!(o, "  - e.g. `{}`", c.exemplars.join("`, `"));
+        }
+        if !c.counterexamples.is_empty() {
+            let _ = writeln!(o, "  - deviations: `{}`", c.counterexamples.join("`, `"));
+        }
+    }
+    if let Some(g) = &d.guide {
+        let _ = write!(o, "\n## Narrative guide\n\n{g}\n");
+    }
+    o
 }
 
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
@@ -989,6 +1071,10 @@ fn md_guide(d: &GuideDto) -> String {
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
+    let conventions = match crate::index::read_facts(uri).await {
+        Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
+        _ => Vec::new(),
+    };
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
     let by_id: HashMap<String, Symbol> =
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
@@ -1041,6 +1127,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
         packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
+        conventions: Arc::new(conventions),
         markdown,
     };
     let service = server.serve(rmcp::transport::io::stdio()).await?;

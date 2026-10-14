@@ -8,6 +8,7 @@
 pub mod model;
 
 pub mod config;
+pub mod conventions;
 
 pub mod facts;
 pub mod git;

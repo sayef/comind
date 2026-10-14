@@ -157,6 +157,10 @@ impl CodeGraph {
         self.g.edge_count()
     }
 
+    pub fn node(&self, idx: NodeIndex) -> Node {
+        self.node_of(idx)
+    }
+
     fn node_of(&self, idx: NodeIndex) -> Node {
         let s = &self.g[idx].sym;
         Node {
