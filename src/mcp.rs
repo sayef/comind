@@ -793,6 +793,7 @@ impl ComindServer {
         };
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
         let entries = crate::ledger::derive(&records, &symbols);
+        let findings = crate::checks::run(&entries, &symbols, &self.edges, &self.packages);
         let recipes: Vec<crate::conventions::Convention> = self
             .conventions
             .iter()
@@ -809,6 +810,7 @@ impl ComindServer {
                 &self.edges,
                 &entries,
                 &recipes,
+                &findings,
                 &changes,
             )
         };

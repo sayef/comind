@@ -58,6 +58,7 @@ pub fn report(
     edges: &[Edge],
     entries: &[Entry],
     recipes: &[Convention],
+    findings: &[crate::checks::Finding],
     changes: &[Change],
 ) -> String {
     let ids = touched(symbols, changes);
@@ -95,6 +96,13 @@ pub fn report(
     }
     for e in live {
         let _ = writeln!(o, "- {}", crate::ledger::line(e));
+    }
+
+    let changed: Vec<String> = files.iter().map(|(r, p)| format!("{r}/{p}")).collect();
+    let checks = crate::checks::markdown(findings, Some(&changed));
+    if !checks.is_empty() {
+        o.push_str("\n### Constraint checks failing in changed files\n");
+        o.push_str(&checks);
     }
 
     // Contracts provided by touched symbols, with their consumers.

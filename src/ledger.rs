@@ -201,6 +201,12 @@ impl Record {
         if self.kind != Kind::Relation && self.anchors.is_empty() {
             bail!("a record needs at least one anchor (a symbol it is about)");
         }
+        if let Some(rule) = self.fields.get("check").and_then(|v| v.as_str()) {
+            if self.kind != Kind::Constraint {
+                bail!("only constraints carry a check");
+            }
+            crate::checks::Rule::parse(rule)?;
+        }
         if self.kind == Kind::Attempt && self.evidence.is_empty() {
             bail!("an attempt needs evidence (a revert commit, failing test, error, MR, …)");
         }
@@ -480,13 +486,15 @@ pub enum Status {
     Retracted,
 }
 
-/// T3 human or human-confirmed, T2 agent with evidence, T1 agent assertion, T0 untrusted.
+/// T4 constraint enforced by a passing check, T3 human or human-confirmed, T2 agent with evidence,
+/// T1 agent assertion, T0 untrusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Trust {
     T0,
     T1,
     T2,
     T3,
+    T4,
 }
 
 /// A record with its derived state against the current index.

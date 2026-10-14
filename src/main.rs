@@ -238,6 +238,9 @@ enum Cmd {
         /// Only stale, orphaned, or unconfirmed agent records
         #[arg(long)]
         inbox: bool,
+        /// Evaluate constraint checks; exits non-zero when a `must` constraint is violated (CI)
+        #[arg(long)]
+        check: bool,
     },
     /// Terminal UI: overview, contracts, ledger, explorer and conventions
     Ui {
@@ -512,7 +515,11 @@ fn main() -> ExitCode {
             reason,
             index_dir,
         } => cmd_review(&id, &action, &reason, index_dir.as_deref()),
-        Cmd::Ledger { index_dir, inbox } => cmd_ledger(index_dir.as_deref(), inbox),
+        Cmd::Ledger {
+            index_dir,
+            inbox,
+            check,
+        } => cmd_ledger(index_dir.as_deref(), inbox, check),
         Cmd::Hook {
             agent,
             event,
@@ -1203,11 +1210,10 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
     }
 }
 
-fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
+fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool) -> ExitCode {
     let cfg = comind::config::Config::load();
-    let symbols = comind::index::read_graph_blocking(&cfg.graph_dir(from))
-        .map(|(s, _)| s)
-        .unwrap_or_default();
+    let (symbols, edges) =
+        comind::index::read_graph_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let records = match comind::ledger::all_blocking(&cfg.index_dir(from)) {
         Ok(r) => r,
         Err(e) => {
@@ -1215,7 +1221,31 @@ fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let entries = comind::ledger::derive(&records, &symbols);
+    let mut entries = comind::ledger::derive(&records, &symbols);
+    if check {
+        let packages =
+            comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+        let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+        if findings.is_empty() {
+            comind::ui::ok("no constraint carries a check (add one with --field check=...)");
+            return ExitCode::SUCCESS;
+        }
+        println!(
+            "## Constraint checks\n\n{}",
+            comind::checks::markdown(&findings, None)
+        );
+        let failed = findings
+            .iter()
+            .any(|f| f.severity == "must" && !f.violations.is_empty());
+        return if failed {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
+    }
+    let packages = comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+    comind::checks::promote(&mut entries, &findings);
     let shown = comind::ledger::inbox(&entries, inbox);
     let title = if inbox { "Ledger inbox" } else { "Ledger" };
     println!("{}", comind::ledger::markdown(title, &shown));
@@ -1299,9 +1329,11 @@ fn cmd_preflight(repo: &str, base: &str, from: Option<&str>) -> ExitCode {
     let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
     let entries = comind::ledger::derive(&records, &symbols);
     let recipes = comind::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let packages = comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
     println!(
         "{}",
-        comind::preflight::report(&g, &symbols, &edges, &entries, &recipes, &changes)
+        comind::preflight::report(&g, &symbols, &edges, &entries, &recipes, &findings, &changes)
     );
     ExitCode::SUCCESS
 }

@@ -109,7 +109,7 @@ Add to your MCP client (e.g. Claude Code):
 - **Before a change:** `ripple` (blast radius, across repos and service contracts), `context_pack` (minimal read-set + known constraints), `preflight` (constraints, dead ends, contracts, missing companions for a planned edit), `contracts` (HTTP routes, queues, buckets, tables and who uses them), `guide` (measured conventions and recipes).
 - **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
 
-Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). `comind init-hooks claude` prints Claude Code hooks that inject relevant ledger records at session start and just before an edit.
+Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). A constraint can carry a check that is evaluated on the graph and on manifests, e.g. `comind remember constraint --on get_user --title "Handlers never call raw SQL" --field "check=forbid calls from svc/app/handlers/** to **::raw_*"` or `--field "check=forbid dep lance =1.0.1"`; passing checks rank as T4, and `preflight` lists violations in the changed files. `comind init-hooks claude` prints Claude Code hooks that inject relevant ledger records at session start and just before an edit.
 
 ## Commands
 
@@ -133,7 +133,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
 | `comind why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
-| `comind ledger [--inbox]` | All ledger records, or only those needing review |
+| `comind ledger [--inbox] [--check]` | All ledger records, only those needing review, or evaluate constraint checks (non-zero exit on a violated `must`, for CI) |
 | `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
