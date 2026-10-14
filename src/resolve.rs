@@ -20,6 +20,8 @@ pub struct Resolved {
     pub stats: ResolveStats,
     /// Top-level module → count of import items that didn't resolve.
     pub unresolved_modules: HashMap<String, usize>,
+    /// Top-level module → a few `path:line module item` examples.
+    pub unresolved_examples: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -103,9 +105,12 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
                     Some(_) => {}
                     None => {
                         out.stats.unresolved_imports += 1;
-                        *out.unresolved_modules
-                            .entry(top_module(f, imp))
-                            .or_default() += 1;
+                        let top = top_module(f, imp);
+                        let ex = out.unresolved_examples.entry(top.clone()).or_default();
+                        if ex.len() < 3 {
+                            ex.push(format!("{}:{} {} {:?}", f.path, imp.line, imp.module, item));
+                        }
+                        *out.unresolved_modules.entry(top).or_default() += 1;
                     }
                 }
             }
@@ -165,6 +170,7 @@ enum Family {
     Py,
     Js,
     Go,
+    Jvm,
 }
 
 fn family(lang: &Language) -> Option<Family> {
@@ -172,6 +178,7 @@ fn family(lang: &Language) -> Option<Family> {
         Language::Python => Some(Family::Py),
         Language::TypeScript | Language::JavaScript => Some(Family::Js),
         Language::Go => Some(Family::Go),
+        Language::Java | Language::Kotlin => Some(Family::Jvm),
         _ => None,
     }
 }
@@ -306,7 +313,7 @@ impl<'a> Binder<'a> {
                 }
                 Some(module(Family::Py, parts.join(".")))
             }
-            Family::Go => Some(module(Family::Go, imp.module.clone())),
+            Family::Go | Family::Jvm => Some(module(family(&f.language)?, imp.module.clone())),
             Family::Js if imp.file.is_some() => self
                 .by_path
                 .get(&(f.repo.as_str(), imp.file.as_deref()?))
@@ -367,14 +374,28 @@ impl<'a> Binder<'a> {
         match v {
             Value::File(f) => self.module_member(f, name, true, depth + 1),
             Value::Module { fam, name: m, repo } => {
-                // Python/JS modules re-export what they import; Go packages don't.
-                let reexports = *fam != Family::Go;
-                if let Some(x) = self
-                    .module_files(*fam, m, repo)
+                // Python/JS modules re-export what they import; Go/JVM packages don't.
+                let reexports = matches!(fam, Family::Py | Family::Js);
+                let files = self.module_files(*fam, m, repo);
+                if let Some(x) = files
                     .iter()
                     .find_map(|f| self.module_member(&f.file_id, name, reexports, depth + 1))
                 {
                     return Some(x);
+                }
+                // JVM `a.b.Outer.Inner`: not a package, so walk through the class.
+                if *fam == Family::Jvm && files.is_empty() {
+                    let (pkg, outer) = m.rsplit_once('.')?;
+                    let outer = self.member(
+                        &Value::Module {
+                            fam: Family::Jvm,
+                            name: pkg.to_string(),
+                            repo: repo.clone(),
+                        },
+                        outer,
+                        depth + 1,
+                    )?;
+                    return self.member(&outer, name, depth + 1);
                 }
                 let sub = format!("{m}.{name}");
                 (*fam == Family::Py && self.py_packages.contains(&sub)).then(|| Value::Module {
@@ -546,12 +567,20 @@ impl<'a> Binder<'a> {
                 }
             }
         }
+        let fam = family(&f.language)?;
+        // JVM: members and fields of the enclosing class (and its bases) need no `this.`.
+        if fam == Family::Jvm {
+            if let Some(c) = self.enclosing_class(scope) {
+                if let Some(v) = self.member(&Value::Instance(c), head, depth + 1) {
+                    return Some(v);
+                }
+            }
+        }
         if let Some(v) = self.module_member(&f.file_id, head, true, depth + 1) {
             return Some(v);
         }
-        // Go: the whole package (all files of the directory) shares one namespace.
-        let fam = family(&f.language)?;
-        if fam != Family::Go {
+        // Go/JVM: the whole package shares one namespace across files.
+        if !matches!(fam, Family::Go | Family::Jvm) {
             return None;
         }
         let own = f.modules.first()?;
@@ -581,6 +610,14 @@ impl<'a> Binder<'a> {
 fn top_module(f: &FileFacts, imp: &Import) -> String {
     if imp.level > 0 || imp.module.starts_with('.') {
         return format!("(relative in {})", f.repo);
+    }
+    if matches!(f.language, Language::Java | Language::Kotlin) {
+        return imp
+            .module
+            .splitn(4, '.')
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(".");
     }
     // Go: host/org/repo identifies the module.
     if f.language == Language::Go

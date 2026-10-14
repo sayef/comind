@@ -90,7 +90,7 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 src/
   model.rs    domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
   parse.rs    tree-sitter walk: file → symbols, Contains edges, per-file facts (+ fingerprints).
-  lang/       per-language syntax adapters (python.rs, typescript.rs, go.rs) behind the LangSpec trait.
+  lang/       per-language syntax adapters (python, typescript, go, java, kotlin) behind LangSpec.
   facts.rs    per-file facts: imports, reference paths, type hints (persisted for incremental).
   packages.rs importable module names: pyproject roots, package.json, tsconfig paths, go.mod.
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.

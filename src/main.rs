@@ -1024,6 +1024,13 @@ fn cmd_link(
     if !top.is_empty() {
         comind::ui::note(&format!("top unresolved: {}", top.join(", ")));
     }
+    if std::env::var("COMIND_DEBUG").is_ok() {
+        for (m, ex) in &resolved.unresolved_examples {
+            for e in ex {
+                comind::ui::note(&format!("  unresolved {m}: {e}"));
+            }
+        }
+    }
 
     // Rank cross-repo import targets by how many distinct repos depend on them.
     // (dst descriptor) -> (defining repo, set of importer repos, total refs)

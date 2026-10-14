@@ -69,6 +69,8 @@ fn detect(path: &Path) -> Option<Language> {
         Some("ts" | "tsx") => Some(Language::TypeScript),
         Some("js" | "jsx" | "mjs" | "cjs") => Some(Language::JavaScript),
         Some("go") => Some(Language::Go),
+        Some("java") => Some(Language::Java),
+        Some("kt" | "kts") => Some(Language::Kotlin),
         _ => None,
     }
 }
@@ -83,6 +85,8 @@ fn tree_sitter_language(lang: &Language, is_tsx: bool) -> Option<tree_sitter::La
             Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
         }
         Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+        Language::Java => Some(tree_sitter_java::LANGUAGE.into()),
+        Language::Kotlin => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -183,7 +187,10 @@ fn parse_file_with(
             path: rel_str.clone(),
             language: lang.clone(),
             file_id: file_id.render(),
-            modules: packages.module_names(&rel_str, &lang),
+            modules: spec
+                .package(tree.root_node(), &source)
+                .map(|p| vec![p])
+                .unwrap_or_else(|| packages.module_names(&rel_str, &lang)),
             imports: Vec::new(),
             refs: Vec::new(),
             types: Vec::new(),

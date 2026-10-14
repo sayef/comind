@@ -308,3 +308,107 @@ case = "return-type-flow"
 kind = "calls"
 src = "gosvc:main.go::main"
 dst = "gosvc:main.go::Handler.Serve"
+
+# ---- jvm-lib (Java) ----
+[[edge]]
+case = "jvm-inherits"
+kind = "inherits"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+dst = "jvm-lib:src/main/java/com/acme/lib/Base.java::Base"
+
+[[edge]]
+case = "jvm-implements"
+kind = "implements"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+dst = "jvm-lib:src/main/java/com/acme/lib/Store.java::Store"
+
+[[edge]]
+case = "jvm-field-init"
+kind = "instantiates"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java"
+dst = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db"
+
+[[edge]]
+case = "jvm-implicit-this-field"
+kind = "calls"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo.load"
+dst = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db.query"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db.query"
+dst = "jvm-lib:src/main/java/com/acme/lib/Item.java::Item"
+
+# ---- jvm-svc (Kotlin) -> jvm-lib (Java) ----
+[[edge]]
+case = "jvm-import"
+kind = "imports"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+
+[[edge]]
+case = "jvm-import"
+kind = "imports"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt"
+dst = "jvm-lib:src/main/java/com/acme/lib/util/Strings.java::Strings"
+
+[[edge]]
+case = "jvm-property-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo.load"
+
+[[edge]]
+case = "jvm-static-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-lib:src/main/java/com/acme/lib/util/Strings.java::Strings.trim"
+
+[[edge]]
+case = "jvm-implicit-this-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.describe"
+
+[[edge]]
+case = "jvm-same-package-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::version"
+
+[[edge]]
+case = "jvm-inherited-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.describe"
+dst = "jvm-lib:src/main/java/com/acme/lib/Base.java::Base.health"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+
+[[edge]]
+case = "jvm-same-package-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::main"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::boot"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::main"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+
+[[edge]]
+case = "jvm-static-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::boot"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"

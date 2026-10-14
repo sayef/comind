@@ -2,6 +2,8 @@
 //! file's language; adding a language means implementing [`LangSpec`] for its grammar.
 
 pub mod go;
+pub mod java;
+pub mod kotlin;
 pub mod python;
 pub mod typescript;
 
@@ -24,6 +26,11 @@ pub trait LangSpec: Sync {
 
     /// A definition node: its kind and name. `in_class` is true directly inside a class body.
     fn def(&self, node: Node, src: &[u8], in_class: bool) -> Option<(SymbolKind, String)>;
+
+    /// The package a file declares (JVM); `None` derives it from the path instead.
+    fn package(&self, _root: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
 
     /// The type a definition declared outside it belongs to (Go method receivers).
     fn owner(&self, _def: Node, _src: &[u8]) -> Option<String> {
@@ -57,6 +64,8 @@ pub fn spec(lang: &Language) -> Option<&'static dyn LangSpec> {
         Language::Python => Some(&python::Python),
         Language::TypeScript | Language::JavaScript => Some(&typescript::TypeScript),
         Language::Go => Some(&go::Go),
+        Language::Java => Some(&java::Java),
+        Language::Kotlin => Some(&kotlin::Kotlin),
         _ => None,
     }
 }

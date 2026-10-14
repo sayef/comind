@@ -51,6 +51,8 @@ rig-core = "0.36"
 rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
 blake3 = "1"
 tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-kotlin-ng = "1.1"
 
 [profile.release]
 lto = "thin"
