@@ -239,6 +239,11 @@ enum Cmd {
         #[arg(long)]
         inbox: bool,
     },
+    /// Terminal UI: overview, contracts, ledger, explorer and conventions
+    Ui {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
     /// Before committing: recorded constraints/dead ends, contracts, blast radius and missing
     /// companions for your uncommitted changes
     Preflight {
@@ -524,6 +529,7 @@ fn main() -> ExitCode {
             base,
             index_dir,
         } => cmd_preflight(&repo, &base, index_dir.as_deref()),
+        Cmd::Ui { index_dir } => cmd_ui(index_dir.as_deref()),
 
         Cmd::Eval {
             what:
@@ -1214,6 +1220,45 @@ fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
     let title = if inbox { "Ledger inbox" } else { "Ledger" };
     println!("{}", comind::ledger::markdown(title, &shown));
     ExitCode::SUCCESS
+}
+
+fn cmd_ui(from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let dir = cfg.graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut conventions = match comind::index::read_facts_blocking(&dir) {
+        Ok(Some(facts)) => comind::conventions::mine(&symbols, &edges, &facts),
+        _ => Vec::new(),
+    };
+    conventions.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let deps = comind::manifests::internal(
+        &comind::index::read_packages_blocking(&dir).unwrap_or_default(),
+    );
+    let graph = comind::graph::CodeGraph::build(&symbols, &edges);
+    let data = comind::tui::Data {
+        contracts: graph.contracts(None, false),
+        graph,
+        symbols,
+        edges,
+        entries,
+        conventions,
+        deps,
+    };
+    match comind::tui::App::new(data).run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn cmd_preflight(repo: &str, base: &str, from: Option<&str>) -> ExitCode {

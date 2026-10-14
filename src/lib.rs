@@ -36,4 +36,5 @@ pub mod styleguide;
 
 pub mod mcp;
 
+pub mod tui;
 pub mod ui;

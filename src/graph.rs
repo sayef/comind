@@ -230,7 +230,9 @@ impl CodeGraph {
     pub fn repos(&self) -> Vec<(String, usize)> {
         let mut m: BTreeMap<String, usize> = BTreeMap::new();
         for i in self.g.node_indices() {
-            *m.entry(self.g[i].sym.id.package.clone()).or_default() += 1;
+            if self.g[i].sym.kind != crate::model::SymbolKind::Contract {
+                *m.entry(self.g[i].sym.id.package.clone()).or_default() += 1;
+            }
         }
         m.into_iter().collect()
     }

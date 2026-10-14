@@ -137,6 +137,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
+| `comind ui [--index-dir <dir>]` | Terminal UI: overview, contracts, ledger, explorer, conventions |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for the full flags of any subcommand.
