@@ -694,6 +694,29 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
     o
 }
 
+/// One compact line for embedding in other tool results.
+pub fn line(e: &Entry) -> String {
+    let r = &e.record;
+    let at = r
+        .anchors
+        .first()
+        .map(|a| format!(" — about `{}` ({}:{})", a.name, a.path, a.line))
+        .unwrap_or_default();
+    let ev = if r.evidence.is_empty() {
+        String::new()
+    } else {
+        format!(" · evidence {}", r.evidence.join(", "))
+    };
+    format!(
+        "[{} · {:?} · {}] {}{at}{ev} · id `{}`",
+        r.kind.as_str(),
+        e.trust,
+        status_label(e.status),
+        r.title,
+        &r.id[..r.id.len().min(13)]
+    )
+}
+
 fn status_label(s: Status) -> &'static str {
     match s {
         Status::Active => "active",

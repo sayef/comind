@@ -74,6 +74,33 @@ impl ComindServer {
         }
     }
 
+    /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
+    async fn known(&self, ids: &[String], limit: usize) -> Vec<String> {
+        let Ok(ledger) = crate::ledger::Ledger::open(&self.ledger_root()) else {
+            return Vec::new();
+        };
+        let records = ledger.all().await.unwrap_or_default();
+        if records.is_empty() {
+            return Vec::new();
+        }
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        crate::ledger::about(&entries, ids)
+            .into_iter()
+            .filter(|e| e.trust >= crate::ledger::Trust::T2)
+            .filter(|e| {
+                matches!(
+                    e.status,
+                    crate::ledger::Status::Active
+                        | crate::ledger::Status::Moved
+                        | crate::ledger::Status::Stale
+                )
+            })
+            .take(limit)
+            .map(crate::ledger::line)
+            .collect()
+    }
+
     async fn write_record(&self, p: RememberParam) -> anyhow::Result<String> {
         let kind = crate::ledger::Kind::parse(&p.kind)
             .ok_or_else(|| anyhow::anyhow!("unknown kind `{}`", p.kind))?;
@@ -264,6 +291,8 @@ struct ZoomDto {
     /// When the focus is a contract: its providers and consumers.
     providers: Vec<NodeDto>,
     consumers: Vec<NodeDto>,
+    /// Recorded constraints, failed attempts and decisions about this symbol or its containers.
+    known: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -387,6 +416,8 @@ struct PackDto {
     est_total_tokens: usize,
     token_budget: usize,
     items: Vec<PackItem>,
+    /// Recorded constraints and failed attempts about the focus and the packed symbols.
+    known: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -607,7 +638,7 @@ impl ComindServer {
         name = "zoom",
         description = "360° view of one symbol — definition, container, callers, callees, importers, members. Use to understand a symbol before changing it. Takes a symbol id/name from find/search."
     )]
-    fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
+    async fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
         let dto = match self.graph.lookup(&p.focus) {
             None => ZoomDto {
                 found: false,
@@ -620,6 +651,7 @@ impl ComindServer {
                 contracts: vec![],
                 providers: vec![],
                 consumers: vec![],
+                known: vec![],
             },
             Some(idx) => {
                 let z = self.graph.zoom(idx);
@@ -646,6 +678,10 @@ impl ComindServer {
                         .collect(),
                     providers: z.providers.into_iter().map(|n| self.node_dto(n)).collect(),
                     consumers: z.consumers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    known: match self.graph.scope_of(&p.focus) {
+                        Some((_, ids)) => self.known(&ids, 5).await,
+                        None => vec![],
+                    },
                 }
             }
         };
@@ -881,7 +917,7 @@ impl ComindServer {
         name = "context_pack",
         description = "The minimal token-budgeted set of symbols to read before editing the focus symbol safely. Use to assemble just-enough context for a change. Returns ranked symbols with locations + token estimates within the budget."
     )]
-    fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
+    async fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
         let budget = p.token_budget.unwrap_or(1500) as usize;
         let dto = match self.graph.lookup(&p.focus) {
             None => PackDto {
@@ -890,15 +926,21 @@ impl ComindServer {
                 est_total_tokens: 0,
                 token_budget: budget,
                 items: vec![],
+                known: vec![],
             },
             Some(idx) => {
                 let pack = self.graph.context_pack(idx, budget);
                 let est_total_tokens = pack.iter().map(|(_, t)| t).sum();
+                let mut ids: Vec<String> = pack.iter().map(|(n, _)| n.id.clone()).collect();
+                if let Some((_, scope)) = self.graph.scope_of(&p.focus) {
+                    ids.extend(scope);
+                }
                 PackDto {
                     focus: p.focus.clone(),
                     found: true,
                     est_total_tokens,
                     token_budget: budget,
+                    known: self.known(&ids, 6).await,
                     items: pack
                         .into_iter()
                         .map(|(n, t)| PackItem {
@@ -1077,6 +1119,14 @@ fn md_zoom(focus: &str, d: &ZoomDto) -> String {
     node_section(&mut o, "Callers", &d.callers);
     node_section(&mut o, "Callees", &d.callees);
     node_section(&mut o, "Importers", &d.importers);
+    if !d.known.is_empty() {
+        o.push_str(
+            "\n**Known constraints & dead ends** (team ledger — verify before relying on them)\n",
+        );
+        for k in &d.known {
+            let _ = writeln!(o, "- {k}");
+        }
+    }
     node_section(&mut o, "Provided by", &d.providers);
     node_section(&mut o, "Used by", &d.consumers);
     if !d.contracts.is_empty() {
@@ -1188,6 +1238,15 @@ fn md_pack(d: &PackDto) -> String {
         d.token_budget,
         d.items.len()
     );
+    if !d.known.is_empty() {
+        o.push_str(
+            "**Known constraints & dead ends** (team ledger — verify before relying on them)\n",
+        );
+        for k in &d.known {
+            let _ = writeln!(o, "- {k}");
+        }
+        o.push('\n');
+    }
     for (i, it) in d.items.iter().enumerate() {
         let _ = write!(
             o,
