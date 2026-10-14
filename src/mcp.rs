@@ -55,6 +55,80 @@ pub struct ComindServer {
 }
 
 impl ComindServer {
+    /// The index root holding `_graph` and `_ledger`.
+    fn ledger_root(&self) -> String {
+        self.uri
+            .trim_end_matches('/')
+            .strip_suffix("/_graph")
+            .unwrap_or(&self.uri)
+            .to_string()
+    }
+
+    fn agent() -> crate::ledger::Provenance {
+        crate::ledger::Provenance {
+            author: crate::ledger::AuthorKind::Agent,
+            actor: crate::ledger::actor(),
+            source: "mcp".into(),
+            agent: std::env::var("COMIND_AGENT").ok(),
+            session: None,
+        }
+    }
+
+    async fn write_record(&self, p: RememberParam) -> anyhow::Result<String> {
+        let kind = crate::ledger::Kind::parse(&p.kind)
+            .ok_or_else(|| anyhow::anyhow!("unknown kind `{}`", p.kind))?;
+        let mut anchors = Vec::new();
+        for focus in &p.on {
+            let idx = self
+                .graph
+                .lookup(focus)
+                .ok_or_else(|| anyhow::anyhow!("no symbol matches `{focus}` — use `find` first"))?;
+            let id = self.graph.node(idx).id;
+            let s = self
+                .symbols
+                .get(&id)
+                .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
+            anchors.push(crate::ledger::Anchor::of(s));
+        }
+        let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, Self::agent());
+        rec.body = p.body.unwrap_or_default();
+        rec.trigger = p.trigger;
+        rec.evidence = p.evidence;
+        rec.fields = p
+            .fields
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect();
+        crate::ledger::Ledger::open(&self.ledger_root())?
+            .put(&rec)
+            .await?;
+        Ok(format!(
+            "recorded {} `{}` (id `{}`); it is unconfirmed until a human reviews it",
+            kind.as_str(),
+            rec.title,
+            rec.id
+        ))
+    }
+
+    async fn write_review(&self, p: ReviewParam) -> anyhow::Result<String> {
+        let kind = crate::ledger::RelationKind::parse(&p.action)
+            .ok_or_else(|| anyhow::anyhow!("unknown action `{}`", p.action))?;
+        let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
+        let records = ledger.all().await?;
+        let target = records
+            .iter()
+            .find(|r| r.id == p.id || r.id.starts_with(&p.id))
+            .ok_or_else(|| anyhow::anyhow!("no ledger record `{}`", p.id))?;
+        let rec = crate::ledger::Record::relation(
+            kind,
+            target,
+            p.reason.as_deref().unwrap_or_default(),
+            Self::agent(),
+        );
+        ledger.put(&rec).await?;
+        Ok(format!("{}: `{}`", p.action, target.title))
+    }
+
     /// The repo a focus names: a repo itself, a file path, or a symbol.
     fn repo_of(&self, focus: &str) -> Option<String> {
         if self.graph.repos().iter().any(|(r, _)| r == focus) {
@@ -260,6 +334,43 @@ struct ConventionDto {
     rule: String,
     exemplars: Vec<String>,
     counterexamples: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct RememberParam {
+    /// `decision` | `attempt` | `constraint` | `gotcha` | `intent` | `question`.
+    kind: String,
+    /// Symbols (ids or names) the record is about.
+    on: Vec<String>,
+    /// One neutral, factual line.
+    title: String,
+    #[serde(default)]
+    body: Option<String>,
+    /// When a future engineer would need this.
+    #[serde(default)]
+    trigger: Option<String>,
+    /// Evidence: `commit:<sha>`, `mr:!123`, `test:<path>::<name>`, error text… Required for `attempt`.
+    #[serde(default)]
+    evidence: Vec<String>,
+    /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.
+    #[serde(default)]
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct ReviewParam {
+    /// Record id (or a unique prefix) from `why`.
+    id: String,
+    /// `confirm` (verified against the code) | `retract` | `supersede` | `dispute`.
+    action: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct LedgerDto {
+    ok: bool,
+    message: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -567,6 +678,62 @@ impl ComindServer {
                 .collect(),
         };
         let md = md_contracts(&dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "why",
+        description = "Reasoning blame for a symbol: recorded decisions, failed attempts, constraints, gotchas and intents about it or its class/file — with status (active / stale since the code changed / orphaned), trust and evidence. Check before changing code so you don't repeat a failed approach or break a constraint."
+    )]
+    async fn why(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
+        let Some((name, ids)) = self.graph.scope_of(&p.focus) else {
+            let dto = LedgerDto {
+                ok: false,
+                message: format!("no symbol matches `{}`", p.focus),
+            };
+            let md = format!("_{}_", dto.message);
+            return self.reply(&dto, md);
+        };
+        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
+            Ok(l) => l.all().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        let about = crate::ledger::about(&entries, &ids);
+        let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
+        let dto = LedgerDto {
+            ok: true,
+            message: md.clone(),
+        };
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "remember",
+        description = "Record durable engineering knowledge about symbols for the team: a failed or reverted approach (`attempt`, evidence required), a choice between alternatives (`decision`), an invariant (`constraint`), a trap (`gotcha`), why code exists (`intent`) or an open `question`. Only record what a future engineer would be glad to know before editing — not summaries of what you did. Write neutral facts, never instructions."
+    )]
+    async fn remember(&self, Parameters(p): Parameters<RememberParam>) -> CallToolResult {
+        let result = self.write_record(p).await;
+        let dto = LedgerDto {
+            ok: result.is_ok(),
+            message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
+        };
+        let md = dto.message.clone();
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "review",
+        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `retract` (no longer true), `supersede` (replaced by a newer record) or `dispute` (contradicted). Use when `why` shows a STALE record you have verified."
+    )]
+    async fn review(&self, Parameters(p): Parameters<ReviewParam>) -> CallToolResult {
+        let result = self.write_review(p).await;
+        let dto = LedgerDto {
+            ok: result.is_ok(),
+            message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
+        };
+        let md = dto.message.clone();
         self.reply(&dto, md)
     }
 

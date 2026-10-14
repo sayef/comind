@@ -191,6 +191,68 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Record why code is the way it is: a decision, failed attempt, constraint, gotcha, intent or question
+    Remember {
+        /// decision | attempt | constraint | gotcha | intent | question
+        kind: String,
+        /// The symbol (or file) this is about (repeatable)
+        #[arg(long)]
+        on: Vec<String>,
+        /// One-line statement of the fact
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        body: String,
+        /// When a future reader needs this
+        #[arg(long)]
+        trigger: Option<String>,
+        /// Evidence: commit:<sha>, mr:!123, test:<path>::<name>, url:…, or text (repeatable)
+        #[arg(long)]
+        evidence: Vec<String>,
+        /// Kind-specific field `key=value` (repeatable), e.g. outcome=reverted
+        #[arg(long)]
+        field: Vec<String>,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Reasoning blame: recorded decisions, failed attempts and constraints about a symbol
+    Why {
+        focus: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Confirm, retract, supersede or dispute a ledger record
+    Review {
+        id: String,
+        /// confirm | retract | supersede | dispute
+        action: String,
+        #[arg(long, default_value = "")]
+        reason: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// The ledger with derived status; `--inbox` shows only what needs review
+    Ledger {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only stale, orphaned, or unconfirmed agent records
+        #[arg(long)]
+        inbox: bool,
+    },
+    /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
+    Hook {
+        /// Agent: `claude`
+        agent: String,
+        /// Event: `session-start` | `pre-edit`
+        event: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Print the hook configuration to add to an agent's settings
+    InitHooks {
+        /// Agent: `claude`
+        agent: String,
+    },
     /// Measured coding conventions per repo and org-wide, with exemplars and deviations
     Conventions {
         /// Index directory to read — root; default: configured index dir (local path or s3://…)
@@ -396,6 +458,40 @@ fn main() -> ExitCode {
         Cmd::Conventions { index_dir, repo } => {
             cmd_conventions(index_dir.as_deref(), repo.as_deref())
         }
+        Cmd::Remember {
+            kind,
+            on,
+            title,
+            body,
+            trigger,
+            evidence,
+            field,
+            index_dir,
+        } => cmd_remember(
+            &kind,
+            &on,
+            &title,
+            &body,
+            trigger,
+            evidence,
+            &field,
+            index_dir.as_deref(),
+        ),
+        Cmd::Why { focus, index_dir } => cmd_why(&focus, index_dir.as_deref()),
+        Cmd::Review {
+            id,
+            action,
+            reason,
+            index_dir,
+        } => cmd_review(&id, &action, &reason, index_dir.as_deref()),
+        Cmd::Ledger { index_dir, inbox } => cmd_ledger(index_dir.as_deref(), inbox),
+        Cmd::Hook {
+            agent,
+            event,
+            index_dir,
+        } => cmd_hook(&agent, &event, index_dir.as_deref()),
+        Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+
         Cmd::Eval {
             what:
                 EvalWhat::Graph {
@@ -946,6 +1042,280 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn human() -> comind::ledger::Provenance {
+    comind::ledger::Provenance {
+        author: comind::ledger::AuthorKind::Human,
+        actor: comind::ledger::actor(),
+        source: "cli".into(),
+        agent: None,
+        session: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
+fn cmd_remember(
+    kind: &str,
+    on: &[String],
+    title: &str,
+    body: &str,
+    trigger: Option<String>,
+    evidence: Vec<String>,
+    fields: &[String],
+    from: Option<&str>,
+) -> ExitCode {
+    let Some(kind) = comind::ledger::Kind::parse(kind) else {
+        comind::ui::err("kind must be decision, attempt, constraint, gotcha, intent or question");
+        return ExitCode::FAILURE;
+    };
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index to anchor to: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
+    let mut anchors = Vec::new();
+    for focus in on {
+        match g.lookup(focus).and_then(|i| by_id.get(&g.node(i).id)) {
+            Some(s) => anchors.push(comind::ledger::Anchor::of(s)),
+            None => {
+                comind::ui::err(&format!("no symbol matches `{focus}` (try `comind find`)"));
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let mut rec = comind::ledger::Record::new(kind, title, anchors, human());
+    rec.body = body.to_string();
+    rec.trigger = trigger;
+    rec.evidence = evidence;
+    for f in fields {
+        if let Some((k, v)) = f.split_once('=') {
+            rec.fields.insert(
+                k.trim().to_string(),
+                serde_json::Value::String(v.trim().into()),
+            );
+        }
+    }
+    match comind::ledger::put_blocking(&cfg.index_dir(from), &rec) {
+        Ok(()) => {
+            comind::ui::ok(&format!(
+                "recorded {} `{}` ({})",
+                kind.as_str(),
+                rec.title,
+                rec.id
+            ));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let Some((name, ids)) = g.scope_of(focus) else {
+        comind::ui::err(&format!("no symbol matches `{focus}`"));
+        return ExitCode::FAILURE;
+    };
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let about = comind::ledger::about(&entries, &ids);
+    println!(
+        "{}",
+        comind::ledger::markdown(&format!("why `{name}`"), &about)
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitCode {
+    let Some(kind) = comind::ledger::RelationKind::parse(action) else {
+        comind::ui::err("action must be confirm, retract, supersede or dispute");
+        return ExitCode::FAILURE;
+    };
+    let root = comind::config::Config::load().index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    let Some(target) = records.iter().find(|r| r.id == id || r.id.starts_with(id)) else {
+        comind::ui::err(&format!("no ledger record `{id}`"));
+        return ExitCode::FAILURE;
+    };
+    let rec = comind::ledger::Record::relation(kind, target, reason, human());
+    match comind::ledger::put_blocking(&root, &rec) {
+        Ok(()) => {
+            comind::ui::ok(&format!("{action}: `{}`", target.title));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_ledger(from: Option<&str>, inbox: bool) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let symbols = comind::index::read_graph_blocking(&cfg.graph_dir(from))
+        .map(|(s, _)| s)
+        .unwrap_or_default();
+    let records = match comind::ledger::all_blocking(&cfg.index_dir(from)) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let entries = comind::ledger::derive(&records, &symbols);
+    let shown = comind::ledger::inbox(&entries, inbox);
+    let title = if inbox { "Ledger inbox" } else { "Ledger" };
+    println!("{}", comind::ledger::markdown(title, &shown));
+    ExitCode::SUCCESS
+}
+
+/// Claude Code hook: emit `additionalContext` with ledger records relevant to the session/edit.
+/// Never blocks or approves anything; any failure prints nothing and exits 0.
+fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
+    use std::io::Read;
+    if agent != "claude" {
+        return ExitCode::SUCCESS;
+    }
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let v: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    let cwd = v
+        .get("cwd")
+        .and_then(|c| c.as_str())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default();
+    let session = v
+        .get("session_id")
+        .and_then(|s| s.as_str())
+        .unwrap_or("default")
+        .to_string();
+    let cfg = comind::config::Config::load();
+    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
+        return ExitCode::SUCCESS;
+    };
+    let Ok(records) = comind::ledger::all_blocking(&cfg.index_dir(from)) else {
+        return ExitCode::SUCCESS;
+    };
+    if records.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let entries = comind::ledger::derive(&records, &symbols);
+    let (hook_event, ids): (&str, Vec<String>) = match event {
+        "session-start" => {
+            // Every symbol of the repo this session works in.
+            let repo = repo_at(&symbols, &cwd);
+            let ids = symbols
+                .iter()
+                .filter(|s| Some(&s.repo.0) == repo.as_ref())
+                .map(|s| s.id.render())
+                .collect();
+            ("SessionStart", ids)
+        }
+        "pre-edit" => {
+            let Some(path) = v
+                .get("tool_input")
+                .and_then(|t| t.get("file_path"))
+                .and_then(|p| p.as_str())
+            else {
+                return ExitCode::SUCCESS;
+            };
+            let ids = symbols
+                .iter()
+                .filter(|s| !s.file_path.is_empty() && path.ends_with(&format!("/{}", s.file_path)))
+                .map(|s| s.id.render())
+                .collect();
+            ("PreToolUse", ids)
+        }
+        _ => return ExitCode::SUCCESS,
+    };
+    let seen_file = std::env::temp_dir()
+        .join("comind-hook-sessions")
+        .join(session.replace(['/', '\\'], "_"));
+    let seen: HashSet<String> = std::fs::read_to_string(&seen_file)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let fresh: Vec<&comind::ledger::Entry> = comind::ledger::about(&entries, &ids)
+        .into_iter()
+        .filter(|e| e.trust >= comind::ledger::Trust::T2)
+        .filter(|e| {
+            matches!(
+                e.status,
+                comind::ledger::Status::Active
+                    | comind::ledger::Status::Moved
+                    | comind::ledger::Status::Stale
+            )
+        })
+        .filter(|e| !seen.contains(&e.record.id))
+        .take(if hook_event == "SessionStart" { 8 } else { 4 })
+        .collect();
+    if fresh.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let mut text =
+        comind::ledger::markdown("comind ledger: reasoning recorded about this code", &fresh);
+    text.truncate(9_000);
+    let _ = std::fs::create_dir_all(seen_file.parent().unwrap_or(std::path::Path::new(".")));
+    let mut lines: Vec<String> = seen.into_iter().collect();
+    lines.extend(fresh.iter().map(|e| e.record.id.clone()));
+    let _ = std::fs::write(&seen_file, lines.join("\n"));
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": hook_event,
+            "additionalContext": text,
+        }
+    });
+    println!("{out}");
+    ExitCode::SUCCESS
+}
+
+/// The indexed repo a working directory belongs to (by directory name).
+fn repo_at(symbols: &[Symbol], cwd: &Path) -> Option<String> {
+    let repos: BTreeSet<&str> = symbols.iter().map(|s| s.repo.0.as_str()).collect();
+    cwd.ancestors()
+        .filter_map(|a| a.file_name().and_then(|n| n.to_str()))
+        .find(|n| repos.contains(n))
+        .map(str::to_string)
+}
+
+fn cmd_init_hooks(agent: &str) -> ExitCode {
+    if agent != "claude" {
+        comind::ui::err("only `claude` is supported so far");
+        return ExitCode::FAILURE;
+    }
+    let snippet = serde_json::json!({
+        "hooks": {
+            "SessionStart": [{
+                "hooks": [{"type": "command", "command": "comind hook claude session-start"}]
+            }],
+            "PreToolUse": [{
+                "matcher": "Edit|MultiEdit|Write",
+                "hooks": [{"type": "command", "command": "comind hook claude pre-edit"}]
+            }]
+        }
+    });
+    comind::ui::note("add to .claude/settings.json (project) or ~/.claude/settings.json (user):");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&snippet).unwrap_or_default()
+    );
+    ExitCode::SUCCESS
+}
+
 fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
     let dir = comind::config::Config::load().graph_dir(from);
     let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {

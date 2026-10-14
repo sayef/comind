@@ -157,6 +157,28 @@ impl CodeGraph {
         self.g.edge_count()
     }
 
+    /// A symbol and its containers (class, file) as ids: what explains it, from inside out.
+    pub fn scope_of(&self, focus: &str) -> Option<(String, Vec<String>)> {
+        let idx = self.lookup(focus)?;
+        let mut ids = vec![self.node_of(idx).id];
+        let mut cur = idx;
+        for _ in 0..6 {
+            let parent = self
+                .g
+                .edges_directed(cur, Incoming)
+                .find(|e| *e.weight() == EdgeKind::Contains)
+                .map(|e| e.source());
+            match parent {
+                Some(p) => {
+                    ids.push(self.node_of(p).id);
+                    cur = p;
+                }
+                None => break,
+            }
+        }
+        Some((self.node_of(idx).name, ids))
+    }
+
     pub fn node(&self, idx: NodeIndex) -> Node {
         self.node_of(idx)
     }

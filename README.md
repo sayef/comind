@@ -173,6 +173,8 @@ src/packages.rs module names from pyproject / package.json / tsconfig / go.mod /
 src/resolve.rs binder: imports, re-exports, type flow, inheritance — within and across repos
 src/scip.rs    SCIP ingestion (existing index.scip or installed indexers)
 src/eval.rs    graph-quality eval on a gold fixture (`comind eval graph`)
+src/conventions.rs measured coding conventions + org baseline; src/recipes.rs change recipes from history
+src/ledger.rs  reasoning ledger: decisions, failed attempts, constraints anchored to symbols (`why`, `remember`)
 src/git.rs     git change detection (incremental)
 src/index.rs   versioned LanceDB store: symbols, edges, search, enrichment, flows, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack

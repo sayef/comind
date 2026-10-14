@@ -1254,6 +1254,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "chrono",
  "clap",
  "comfy-table",
  "console 0.16.4",
@@ -1264,6 +1265,7 @@ dependencies = [
  "lance-index",
  "lancedb",
  "model2vec-rs",
+ "object_store",
  "petgraph",
  "protobuf",
  "rayon",
@@ -1282,6 +1284,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "uuid",
 ]
 
 [[package]]

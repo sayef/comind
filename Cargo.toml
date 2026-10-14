@@ -57,6 +57,9 @@ tree-sitter-rust = "0.24"
 scip = "0.10"
 protobuf = "=3.7.2"
 sqlparser = "0.63"
+object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
+uuid = { version = "1.24", features = ["v7", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [profile.release]
 lto = "thin"

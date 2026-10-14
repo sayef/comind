@@ -28,6 +28,7 @@ pub mod search;
 pub mod embed;
 pub mod graph;
 
+pub mod ledger;
 pub mod llm;
 
 pub mod styleguide;
