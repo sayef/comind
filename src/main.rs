@@ -959,7 +959,8 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
         comind::ui::err("index has no stored facts; re-run `comind index`/`link`");
         return ExitCode::FAILURE;
     };
-    let all = comind::conventions::mine(&symbols, &edges, &facts);
+    let mut all = comind::conventions::mine(&symbols, &edges, &facts);
+    all.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
     let mut by_repo: BTreeMap<&str, Vec<&comind::conventions::Convention>> = BTreeMap::new();
     for c in &all {
         if repo.is_none_or(|r| c.repo == r || c.repo == comind::conventions::ORG) {
@@ -1026,6 +1027,23 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
     comind::ui::header(&format!("Internal dependencies — {}", deps.len()));
     println!("{table}");
     ExitCode::SUCCESS
+}
+
+/// Change recipes from each repo's recent first-parent history.
+fn mine_recipes(repos: &[(String, std::path::PathBuf)]) -> Vec<comind::conventions::Convention> {
+    let out: Vec<_> = repos
+        .iter()
+        .filter_map(|(name, root)| {
+            comind::git::history(root, 500)
+                .ok()
+                .map(|h| comind::recipes::mine(name, &h))
+        })
+        .flatten()
+        .collect();
+    if !out.is_empty() {
+        comind::ui::ok(&format!("recipes: {} from commit history", out.len()));
+    }
+    out
 }
 
 /// Manifests and lockfiles of each repo, and a one-line internal-dependency summary.
@@ -1397,9 +1415,11 @@ fn cmd_link(
             .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
             .collect();
         let packages = scan_packages(&roots);
+        let recipes = mine_recipes(&roots);
         match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges)
             .and_then(|v| comind::index::write_facts_blocking(&dst, &facts).map(|_| v))
             .and_then(|v| comind::index::write_packages_blocking(&dst, &packages).map(|_| v))
+            .and_then(|v| comind::index::write_recipes_blocking(&dst, &recipes).map(|_| v))
         {
             Ok((sv, ev)) => comind::ui::ok(&format!(
                 "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
@@ -2146,7 +2166,14 @@ fn cmd_index(
                 .filter(|r| r.repo != repo_name)
                 .collect();
             rows.extend(scan_packages(&[(repo_name.clone(), root.to_path_buf())]));
-            comind::index::write_packages_blocking(&dst, &rows).map(|_| v)
+            comind::index::write_packages_blocking(&dst, &rows)?;
+            let mut recipes: Vec<_> = comind::index::read_recipes_blocking(&dst)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.repo != repo_name)
+                .collect();
+            recipes.extend(mine_recipes(&[(repo_name.clone(), root.to_path_buf())]));
+            comind::index::write_recipes_blocking(&dst, &recipes).map(|_| v)
         }) {
         Ok((sv, ev)) => comind::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
         Err(e) => {

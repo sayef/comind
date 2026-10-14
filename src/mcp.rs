@@ -1071,10 +1071,11 @@ fn md_guide(d: &GuideDto) -> String {
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
-    let conventions = match crate::index::read_facts(uri).await {
+    let mut conventions = match crate::index::read_facts(uri).await {
         Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
         _ => Vec::new(),
     };
+    conventions.extend(crate::index::read_recipes(uri).await.unwrap_or_default());
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
     let by_id: HashMap<String, Symbol> =
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();

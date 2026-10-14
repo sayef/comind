@@ -934,6 +934,56 @@ pub async fn read_facts(uri: &str) -> Result<Option<Vec<FileFacts>>> {
     Ok(Some(out))
 }
 
+/// Persist derived conventions (e.g. history recipes), JSON per row.
+pub async fn write_recipes(uri: &str, rows: &[crate::conventions::Convention]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("row", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = rows
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize recipes")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build recipes batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "recipes", batch).await?;
+    Ok(())
+}
+
+pub async fn read_recipes(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("recipes").execute().await else {
+        return Ok(Vec::new());
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "row")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse recipe row")?);
+        }
+    }
+    Ok(out)
+}
+
+pub fn write_recipes_blocking(uri: &str, rows: &[crate::conventions::Convention]) -> Result<()> {
+    runtime()?.block_on(write_recipes(uri, rows))
+}
+
+pub fn read_recipes_blocking(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
+    runtime()?.block_on(read_recipes(uri))
+}
+
 /// Persist manifest/lockfile package rows (JSON per row).
 pub async fn write_packages(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
     let schema = Arc::new(Schema::new(vec![

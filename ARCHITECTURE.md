@@ -95,6 +95,7 @@ src/
   packages.rs importable module names: pyproject, package.json, tsconfig paths, go.mod, Cargo.toml.
   manifests.rs published packages + dependencies (requirement, locked version) for version skew.
   conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
+  recipes.rs  change recipes from commit history (what changes together when adding code).
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
   resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
   eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).

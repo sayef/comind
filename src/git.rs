@@ -82,3 +82,52 @@ pub fn changed_files(repo_path: &Path, base_sha: &str) -> Result<ChangeSet> {
     }
     Ok(cs)
 }
+
+/// One commit's file changes (first-parent history).
+#[derive(Debug, Clone)]
+pub struct CommitFiles {
+    pub sha: String,
+    pub subject: String,
+    pub added: Vec<String>,
+    pub changed: Vec<String>,
+}
+
+/// The last `limit` first-parent commits with their added and changed files.
+pub fn history(repo_path: &Path, limit: usize) -> Result<Vec<CommitFiles>> {
+    let repo = Repository::open(repo_path)
+        .with_context(|| format!("open git repo at {}", repo_path.display()))?;
+    let mut walk = repo.revwalk()?;
+    walk.push_head()?;
+    walk.simplify_first_parent()?;
+    let mut out = Vec::new();
+    for oid in walk.take(limit) {
+        let commit = repo.find_commit(oid?)?;
+        let tree = commit.tree()?;
+        let parent = commit.parents().next().map(|p| p.tree()).transpose()?;
+        let diff = repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), None)?;
+        let mut c = CommitFiles {
+            sha: commit.id().to_string(),
+            subject: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            added: Vec::new(),
+            changed: Vec::new(),
+        };
+        for d in diff.deltas() {
+            let Some(p) = path_string(d.new_file().path()) else {
+                continue;
+            };
+            if matches!(d.status(), Delta::Added | Delta::Copied | Delta::Renamed) {
+                c.added.push(p.clone());
+            }
+            if !matches!(d.status(), Delta::Deleted) {
+                c.changed.push(p);
+            }
+        }
+        out.push(c);
+    }
+    Ok(out)
+}
