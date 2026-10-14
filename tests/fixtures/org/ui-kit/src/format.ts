@@ -7,3 +7,7 @@ export class Formatter {
     return formatDate(d);
   }
 }
+
+export function createFormatter(): Formatter {
+  return new Formatter();
+}

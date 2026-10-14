@@ -142,6 +142,10 @@ impl LangSpec for Python {
             .unwrap_or_default()
     }
 
+    fn returns(&self, def: Node, src: &[u8]) -> Option<Vec<String>> {
+        type_path(def.child_by_field_name("return_type")?, src)
+    }
+
     fn params(&self, def: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
         let Some(ps) = def.child_by_field_name("parameters") else {
             return Vec::new();
@@ -203,7 +207,14 @@ fn type_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
         }
         "type_parameter" => type_path(named_children(node).into_iter().next()?, src),
         "binary_operator" => type_path(node.child_by_field_name("left")?, src),
-        "string" => None,
+        // Forward reference: `-> "Client"`.
+        "string" => {
+            let t = text(node, src).trim_matches(|c| c == '"' || c == '\'');
+            (!t.is_empty()
+                && t.chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '.'))
+            .then(|| t.split('.').map(str::to_string).collect())
+        }
         _ => path(node, src),
     }
 }

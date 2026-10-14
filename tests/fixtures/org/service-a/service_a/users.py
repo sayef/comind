@@ -2,6 +2,7 @@ from acme.common import get_logger, Client
 from acme.common.base import BaseService
 from acme.common.http import Client as HttpClient
 import acme.common.events as events
+from acme.common.http import from_env
 
 log = get_logger(__name__)
 
@@ -22,3 +23,8 @@ class UserService(BaseService):
 
 def normalize(body):
     return body
+
+
+def ping():
+    client = from_env()
+    return client.get("/ping")

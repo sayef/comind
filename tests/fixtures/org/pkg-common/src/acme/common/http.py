@@ -10,3 +10,7 @@ class Client:
 
     def post(self, path, body):
         return self._http.post(path, json=body)
+
+
+def from_env() -> "Client":
+    return Client("http://env")

@@ -1,6 +1,7 @@
 //! Per-language syntax adapters. The generic walk in [`crate::parse`] asks each question of the
 //! file's language; adding a language means implementing [`LangSpec`] for its grammar.
 
+pub mod go;
 pub mod python;
 pub mod typescript;
 
@@ -24,6 +25,11 @@ pub trait LangSpec: Sync {
     /// A definition node: its kind and name. `in_class` is true directly inside a class body.
     fn def(&self, node: Node, src: &[u8], in_class: bool) -> Option<(SymbolKind, String)>;
 
+    /// The type a definition declared outside it belongs to (Go method receivers).
+    fn owner(&self, _def: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
     /// A module-level variable binding's name (only asked at module scope).
     fn variable(&self, node: Node, src: &[u8]) -> Option<String>;
 
@@ -39,6 +45,9 @@ pub trait LangSpec: Sync {
     /// Base classes / implemented interfaces of a class-like definition.
     fn bases(&self, def: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)>;
 
+    /// Declared return type of a callable.
+    fn returns(&self, def: Node, src: &[u8]) -> Option<Vec<String>>;
+
     /// Typed parameters of a callable; `true` marks constructor parameter properties (TS).
     fn params(&self, def: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)>;
 }
@@ -47,6 +56,7 @@ pub fn spec(lang: &Language) -> Option<&'static dyn LangSpec> {
     match lang {
         Language::Python => Some(&python::Python),
         Language::TypeScript | Language::JavaScript => Some(&typescript::TypeScript),
+        Language::Go => Some(&go::Go),
         _ => None,
     }
 }

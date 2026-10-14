@@ -6,5 +6,6 @@ export class DarkTheme implements Theme {
 }
 
 export function render(): string {
-  return Button("ok") + kit.formatDate(new Date());
+  const f = kit.createFormatter();
+  return Button("ok") + kit.formatDate(new Date()) + f.format(new Date());
 }

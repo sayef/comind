@@ -18,6 +18,8 @@ pub struct RepoPackages {
     py_roots: Vec<String>,
     /// TS/JS packages, deepest directory first.
     ts_pkgs: Vec<TsPackage>,
+    /// Go modules as (repo-relative dir, module path), deepest first.
+    go_mods: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +46,7 @@ impl RepoPackages {
         let mut py_roots = vec![String::new()];
         let mut ts_pkgs = Vec::new();
         let mut tsconfigs = Vec::new();
+        let mut go_mods = Vec::new();
         let manifests = WalkBuilder::new(root)
             .hidden(false)
             .filter_entry(|e| e.file_name() != "node_modules")
@@ -55,6 +58,7 @@ impl RepoPackages {
                     || n == "package.json"
                     || n == "tsconfig.json"
                     || n == "jsconfig.json"
+                    || n == "go.mod"
             });
         for m in manifests {
             let Ok(rel_dir) = m.path().parent().unwrap_or(root).strip_prefix(root) else {
@@ -66,6 +70,10 @@ impl RepoPackages {
             };
             if m.file_name() == "pyproject.toml" {
                 py_roots.extend(python_roots(root, &dir, &text));
+            } else if m.file_name() == "go.mod" {
+                if let Some(module) = text.lines().find_map(|l| l.trim().strip_prefix("module ")) {
+                    go_mods.push((dir, module.trim().trim_matches('"').to_string()));
+                }
             } else if m.file_name() == "package.json" {
                 ts_pkgs.extend(ts_package(root, &dir, &text));
             } else {
@@ -79,8 +87,10 @@ impl RepoPackages {
         py_roots.dedup();
         ts_pkgs.sort_by_key(|p| std::cmp::Reverse(p.dir.len()));
         tsconfigs.sort_by_key(|c: &TsConfig| std::cmp::Reverse(c.dir.len()));
+        go_mods.sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
         RepoPackages {
             root: root.to_path_buf(),
+            go_mods,
             tsconfigs,
             py_roots,
             ts_pkgs,
@@ -135,6 +145,7 @@ impl RepoPackages {
         match lang {
             Language::Python => self.python_module(rel).into_iter().collect(),
             Language::TypeScript | Language::JavaScript => self.ts_specifiers(rel),
+            Language::Go => self.go_package(rel).into_iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -147,6 +158,18 @@ impl RepoPackages {
             .or_else(|| tail.strip_suffix(".py"))?;
         let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
         (stem != "__init__").then(|| stem.replace('/', "."))
+    }
+
+    /// Import path of the package (directory) a Go file belongs to.
+    fn go_package(&self, rel: &str) -> Option<String> {
+        let (dir, module) = self.go_mods.iter().find(|(d, _)| under(rel, d))?;
+        let file_dir = rel.rsplit_once('/').map_or("", |(d, _)| d);
+        let tail = file_dir.strip_prefix(dir.as_str())?.trim_start_matches('/');
+        Some(if tail.is_empty() {
+            module.clone()
+        } else {
+            format!("{module}/{tail}")
+        })
     }
 
     fn ts_specifiers(&self, rel: &str) -> Vec<String> {

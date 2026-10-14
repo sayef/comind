@@ -205,6 +205,14 @@ impl LangSpec for TypeScript {
         out
     }
 
+    fn returns(&self, def: Node, src: &[u8]) -> Option<Vec<String>> {
+        let r = def.child_by_field_name("return_type").or_else(|| {
+            def.child_by_field_name("value")
+                .and_then(|v| v.child_by_field_name("return_type"))
+        })?;
+        type_path(r, src)
+    }
+
     fn params(&self, def: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
         let ps = def.child_by_field_name("parameters").or_else(|| {
             def.child_by_field_name("value")

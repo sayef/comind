@@ -38,8 +38,12 @@ pub struct ResolveStats {
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     File(String),
-    /// A Python module by dotted name (a namespace package may have no file).
-    Module(String),
+    /// A module or package by name (a Python namespace package may have no file).
+    Module {
+        fam: Family,
+        name: String,
+        repo: String,
+    },
     Sym(String),
     Instance(String),
 }
@@ -91,7 +95,7 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
                     }
                     ImportItem::Module { .. } | ImportItem::All => base.clone(),
                 };
-                match target.and_then(|v| b.node_of(&v, &f.repo)) {
+                match target.and_then(|v| b.node_of(&v)) {
                     Some(t) if t != f.file_id => {
                         new_edges.push((f.file_id.clone(), t, EdgeKind::Imports, 0.95));
                         out.stats.resolved_imports += 1;
@@ -155,16 +159,33 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
     out
 }
 
+/// Languages sharing module semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Family {
+    Py,
+    Js,
+    Go,
+}
+
+fn family(lang: &Language) -> Option<Family> {
+    match lang {
+        Language::Python => Some(Family::Py),
+        Language::TypeScript | Language::JavaScript => Some(Family::Js),
+        Language::Go => Some(Family::Go),
+        _ => None,
+    }
+}
+
 struct Binder<'a> {
     syms: HashMap<String, &'a Symbol>,
     parent: HashMap<String, String>,
     /// Parent id → child name → child id.
     members: HashMap<String, HashMap<&'a str, String>>,
     facts: HashMap<&'a str, &'a FileFacts>,
-    py_modules: HashMap<&'a str, Vec<&'a FileFacts>>,
+    /// Module / package name → files (one per Python module, many per Go package).
+    modules: HashMap<(Family, &'a str), Vec<&'a FileFacts>>,
     /// Every dotted prefix of a Python module name (namespace packages).
     py_packages: HashSet<String>,
-    js_modules: HashMap<&'a str, Vec<&'a FileFacts>>,
     by_path: HashMap<(&'a str, &'a str), &'a FileFacts>,
     types: HashMap<(&'a str, &'a str), &'a TypeSource>,
     bases: RefCell<HashMap<String, Vec<String>>>,
@@ -190,9 +211,8 @@ impl<'a> Binder<'a> {
             parent,
             members,
             facts: HashMap::new(),
-            py_modules: HashMap::new(),
+            modules: HashMap::new(),
             py_packages: HashSet::new(),
-            js_modules: HashMap::new(),
             by_path: HashMap::new(),
             types: HashMap::new(),
             bases: RefCell::new(HashMap::new()),
@@ -200,9 +220,12 @@ impl<'a> Binder<'a> {
         for f in facts {
             b.facts.insert(f.file_id.as_str(), f);
             b.by_path.insert((f.repo.as_str(), f.path.as_str()), f);
+            let Some(fam) = family(&f.language) else {
+                continue;
+            };
             for m in &f.modules {
-                if matches!(f.language, Language::Python) {
-                    b.py_modules.entry(m.as_str()).or_default().push(f);
+                b.modules.entry((fam, m.as_str())).or_default().push(f);
+                if fam == Family::Py {
                     let mut prefix = String::new();
                     for part in m.split('.') {
                         if !prefix.is_empty() {
@@ -211,8 +234,6 @@ impl<'a> Binder<'a> {
                         prefix.push_str(part);
                         b.py_packages.insert(prefix.clone());
                     }
-                } else {
-                    b.js_modules.entry(m.as_str()).or_default().push(f);
                 }
             }
             for t in &f.types {
@@ -232,7 +253,11 @@ impl<'a> Binder<'a> {
         self.sym(id).is_some_and(|s| {
             matches!(
                 s.kind,
-                SymbolKind::Class | SymbolKind::Interface | SymbolKind::Struct | SymbolKind::Trait
+                SymbolKind::Class
+                    | SymbolKind::Interface
+                    | SymbolKind::Struct
+                    | SymbolKind::Trait
+                    | SymbolKind::Enum
             )
         })
     }
@@ -242,26 +267,34 @@ impl<'a> Binder<'a> {
             .is_some_and(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
     }
 
-    /// Prefer a definition in the importing repo; otherwise a unique one elsewhere.
-    fn pick(&self, cands: Option<&Vec<&'a FileFacts>>, repo: &str) -> Option<&'a FileFacts> {
-        let cands = cands?;
-        cands
-            .iter()
-            .find(|f| f.repo == repo)
-            .or_else(|| (cands.len() == 1).then(|| &cands[0]))
-            .copied()
-    }
-
-    fn py_file(&self, module: &str, repo: &str) -> Option<&'a FileFacts> {
-        self.pick(self.py_modules.get(module), repo)
+    /// Files of a module: those in the importing repo, else those of the only repo defining it.
+    fn module_files(&self, fam: Family, name: &str, repo: &str) -> Vec<&'a FileFacts> {
+        let Some(cands) = self.modules.get(&(fam, name)) else {
+            return Vec::new();
+        };
+        let local: Vec<_> = cands.iter().filter(|f| f.repo == repo).copied().collect();
+        if !local.is_empty() {
+            return local;
+        }
+        let first = &cands[0].repo;
+        if cands.iter().all(|f| &f.repo == first) {
+            cands.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     /// What an import statement's module refers to.
     fn import_target(&self, f: &FileFacts, imp: &Import) -> Option<Value> {
-        match f.language {
-            Language::Python => {
+        let module = |fam, name: String| Value::Module {
+            fam,
+            name,
+            repo: f.repo.clone(),
+        };
+        match family(&f.language)? {
+            Family::Py => {
                 if imp.level == 0 {
-                    return Some(Value::Module(imp.module.clone()));
+                    return Some(module(Family::Py, imp.module.clone()));
                 }
                 let own = f.modules.first()?;
                 let mut parts: Vec<&str> = own.split('.').collect();
@@ -271,13 +304,14 @@ impl<'a> Binder<'a> {
                 if !imp.module.is_empty() {
                     parts.push(&imp.module);
                 }
-                Some(Value::Module(parts.join(".")))
+                Some(module(Family::Py, parts.join(".")))
             }
-            _ if imp.file.is_some() => self
+            Family::Go => Some(module(Family::Go, imp.module.clone())),
+            Family::Js if imp.file.is_some() => self
                 .by_path
                 .get(&(f.repo.as_str(), imp.file.as_deref()?))
                 .map(|t| Value::File(t.file_id.clone())),
-            _ if imp.module.starts_with('.') => {
+            Family::Js if imp.module.starts_with('.') => {
                 let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d);
                 let base = normalize(dir, &imp.module)?;
                 let stem = strip_ts_ext(&base);
@@ -300,17 +334,28 @@ impl<'a> Binder<'a> {
                         .map(|t| Value::File(t.file_id.clone()))
                 })
             }
-            _ => self
-                .pick(self.js_modules.get(imp.module.as_str()), &f.repo)
-                .map(|t| Value::File(t.file_id.clone())),
+            Family::Js => {
+                let files = self.module_files(Family::Js, &imp.module, &f.repo);
+                (files.len() == 1).then(|| Value::File(files[0].file_id.clone()))
+            }
         }
     }
 
-    /// The graph node a value denotes (file or symbol id).
-    fn node_of(&self, v: &Value, repo: &str) -> Option<String> {
+    /// The graph node a value denotes (file or symbol id); a package maps to its main file.
+    fn node_of(&self, v: &Value) -> Option<String> {
         match v {
             Value::File(id) | Value::Sym(id) => Some(id.clone()),
-            Value::Module(m) => self.py_file(m, repo).map(|f| f.file_id.clone()),
+            Value::Module { fam, name, repo } => {
+                let files = self.module_files(*fam, name, repo);
+                let last = name.rsplit(['/', '.']).next().unwrap_or(name);
+                files
+                    .iter()
+                    .find(|f| {
+                        f.path.rsplit('/').next().and_then(|n| n.split('.').next()) == Some(last)
+                    })
+                    .or_else(|| files.iter().min_by_key(|f| &f.path))
+                    .map(|f| f.file_id.clone())
+            }
             Value::Instance(_) => None,
         }
     }
@@ -320,17 +365,23 @@ impl<'a> Binder<'a> {
             return None;
         }
         match v {
-            Value::File(f) => self.module_member(f, name, depth + 1),
-            Value::Module(m) => {
-                let file = self.py_modules.get(m.as_str()).and_then(|c| c.first());
-                if let Some(x) = file.and_then(|f| self.module_member(&f.file_id, name, depth + 1))
+            Value::File(f) => self.module_member(f, name, true, depth + 1),
+            Value::Module { fam, name: m, repo } => {
+                // Python/JS modules re-export what they import; Go packages don't.
+                let reexports = *fam != Family::Go;
+                if let Some(x) = self
+                    .module_files(*fam, m, repo)
+                    .iter()
+                    .find_map(|f| self.module_member(&f.file_id, name, reexports, depth + 1))
                 {
                     return Some(x);
                 }
                 let sub = format!("{m}.{name}");
-                self.py_packages
-                    .contains(&sub)
-                    .then_some(Value::Module(sub))
+                (*fam == Family::Py && self.py_packages.contains(&sub)).then(|| Value::Module {
+                    fam: Family::Py,
+                    name: sub,
+                    repo: repo.clone(),
+                })
             }
             Value::Sym(id) if self.is_type(id) => self.class_member(id, name, depth + 1),
             // A module variable: its members come from its inferred type.
@@ -355,13 +406,16 @@ impl<'a> Binder<'a> {
         }
     }
 
-    /// A name in a module's namespace: its definitions, then what its imports bind.
-    fn module_member(&self, file: &str, name: &str, depth: u32) -> Option<Value> {
+    /// A name in a file's namespace: its definitions, then (optionally) what its imports bind.
+    fn module_member(&self, file: &str, name: &str, imports: bool, depth: u32) -> Option<Value> {
         if depth > MAX_DEPTH {
             return None;
         }
         if let Some(id) = self.members.get(file).and_then(|m| m.get(name)) {
             return Some(Value::Sym(id.clone()));
+        }
+        if !imports {
+            return None;
         }
         let f = self.facts.get(file)?;
         for imp in f.imports.iter().rev() {
@@ -379,10 +433,14 @@ impl<'a> Binder<'a> {
                     }
                     // `import a.b` binds `a`.
                     ImportItem::Module { alias: None }
-                        if matches!(f.language, Language::Python)
+                        if f.language == Language::Python
                             && imp.module.split('.').next() == Some(name) =>
                     {
-                        Some(Value::Module(name.to_string()))
+                        Some(Value::Module {
+                            fam: Family::Py,
+                            name: name.to_string(),
+                            repo: f.repo.clone(),
+                        })
                     }
                     ImportItem::All => self
                         .import_target(f, imp)
@@ -416,10 +474,22 @@ impl<'a> Binder<'a> {
             return None;
         }
         match src {
-            TypeSource::Annotation(p) | TypeSource::Construct(p) => {
+            TypeSource::Annotation(p) => {
                 let f = self.file_facts_of(scope)?;
                 match self.resolve_path(p, scope, f, depth + 1)? {
                     Value::Sym(t) if self.is_type(&t) => Some(Value::Instance(t)),
+                    _ => None,
+                }
+            }
+            // `x = Cls(...)` is an instance; `x = make()` takes make's declared return type.
+            TypeSource::Construct(p) => {
+                let f = self.file_facts_of(scope)?;
+                match self.resolve_path(p, scope, f, depth + 1)? {
+                    Value::Sym(t) if self.is_type(&t) => Some(Value::Instance(t)),
+                    Value::Sym(t) if self.is_callable(&t) => {
+                        let ret = self.types.get(&(t.as_str(), crate::parse::RETURN))?;
+                        self.type_of(ret, &t, depth + 1)
+                    }
                     _ => None,
                 }
             }
@@ -433,14 +503,15 @@ impl<'a> Binder<'a> {
         }
     }
 
+    /// The file a scope is written in (a Go method's parent type may live elsewhere).
     fn file_facts_of(&self, id: &str) -> Option<&'a FileFacts> {
-        let mut cur = id;
-        loop {
-            if let Some(f) = self.facts.get(cur) {
-                return Some(f);
-            }
-            cur = self.parent.get(cur)?;
+        if let Some(f) = self.facts.get(id) {
+            return Some(f);
         }
+        let s = self.sym(id)?;
+        self.by_path
+            .get(&(s.repo.0.as_str(), s.file_path.as_str()))
+            .copied()
     }
 
     /// Scopes from `scope` outward to (and including) the file.
@@ -475,7 +546,19 @@ impl<'a> Binder<'a> {
                 }
             }
         }
-        self.module_member(&f.file_id, head, depth + 1)
+        if let Some(v) = self.module_member(&f.file_id, head, true, depth + 1) {
+            return Some(v);
+        }
+        // Go: the whole package (all files of the directory) shares one namespace.
+        let fam = family(&f.language)?;
+        if fam != Family::Go {
+            return None;
+        }
+        let own = f.modules.first()?;
+        self.module_files(fam, own, &f.repo)
+            .iter()
+            .filter(|s| s.file_id != f.file_id)
+            .find_map(|s| self.module_member(&s.file_id, head, false, depth + 1))
     }
 
     fn resolve_path(
@@ -498,6 +581,21 @@ impl<'a> Binder<'a> {
 fn top_module(f: &FileFacts, imp: &Import) -> String {
     if imp.level > 0 || imp.module.starts_with('.') {
         return format!("(relative in {})", f.repo);
+    }
+    // Go: host/org/repo identifies the module.
+    if f.language == Language::Go
+        && imp
+            .module
+            .split('/')
+            .next()
+            .is_some_and(|h| h.contains('.'))
+    {
+        return imp
+            .module
+            .splitn(4, '/')
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("/");
     }
     let mut parts = imp.module.split(['.', '/']);
     let first = parts.next().unwrap_or_default();

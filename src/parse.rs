@@ -20,6 +20,9 @@ use tree_sitter::{Node, Parser};
 
 const SCHEME: &str = "comind-treesitter";
 
+/// Type-hint name for a callable's declared return type.
+pub const RETURN: &str = "<return>";
+
 /// Symbols, structural edges and per-file facts extracted from a repo (or some files of it).
 #[derive(Debug, Default)]
 pub struct ParseOutput {
@@ -65,6 +68,7 @@ fn detect(path: &Path) -> Option<Language> {
         Some("py" | "pyi") => Some(Language::Python),
         Some("ts" | "tsx") => Some(Language::TypeScript),
         Some("js" | "jsx" | "mjs" | "cjs") => Some(Language::JavaScript),
+        Some("go") => Some(Language::Go),
         _ => None,
     }
 }
@@ -78,6 +82,7 @@ fn tree_sitter_language(lang: &Language, is_tsx: bool) -> Option<tree_sitter::La
         Language::TypeScript | Language::JavaScript => {
             Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
         }
+        Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -194,8 +199,14 @@ fn parse_file_with(
         rel_str: &rel_str,
         repo_name,
     };
+    // Go declarations live in the package (directory), not the file.
+    let core = if lang == Language::Go {
+        rel_str.rsplit_once('/').map_or("", |(d, _)| d).to_string()
+    } else {
+        module
+    };
     let scope = Scope {
-        core: module,
+        core,
         id: file_id.clone(),
         callable: file_id,
         class: None,
@@ -279,7 +290,16 @@ fn define(
     ctx: &Ctx,
     out: &mut ParseOutput,
 ) {
-    let core = format!("{}/{}", scope.core, name);
+    // A Go method belongs to its receiver type, wherever that type is declared.
+    let owner = ctx.spec.owner(node, ctx.source).map(|o| {
+        let core = join_core(&scope.core, &o);
+        (id(ctx.repo_name, &format!("{core}#")), core)
+    });
+    let (parent, parent_core, parent_class) = match &owner {
+        Some((oid, ocore)) => (oid.clone(), ocore.as_str(), Some(oid.clone())),
+        None => (scope.id.clone(), scope.core.as_str(), scope.class.clone()),
+    };
+    let core = join_core(parent_core, name);
     let sym_id = id(ctx.repo_name, &format!("{}{}", core, suffix(&kind)));
     out.symbols.push(Symbol {
         id: sym_id.clone(),
@@ -294,10 +314,17 @@ fn define(
         fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
     });
     out.edges
-        .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
+        .push(edge(&parent, &sym_id, EdgeKind::Contains, 1.0));
 
     let callable = is_callable(&kind);
-    let class_like = matches!(kind, SymbolKind::Class | SymbolKind::Interface);
+    let class_like = matches!(
+        kind,
+        SymbolKind::Class
+            | SymbolKind::Interface
+            | SymbolKind::Struct
+            | SymbolKind::Trait
+            | SymbolKind::Enum
+    );
     let rendered = sym_id.render();
     let line = lang::line(node);
     for (kind, path) in ctx.spec.bases(node, ctx.source) {
@@ -309,10 +336,17 @@ fn define(
         });
     }
     if callable {
+        if let Some(ty) = ctx.spec.returns(node, ctx.source) {
+            facts(out).types.push(TypeHint {
+                scope: rendered.clone(),
+                name: RETURN.into(),
+                source: TypeSource::Annotation(ty),
+            });
+        }
         for (param, ty, property) in ctx.spec.params(node, ctx.source) {
             let f = facts(out);
             if property {
-                if let Some(class) = &scope.class {
+                if let Some(class) = &parent_class {
                     f.types.push(TypeHint {
                         scope: class.render(),
                         name: format!("{}.{param}", ctx.spec.receiver()),
@@ -339,7 +373,7 @@ fn define(
         class: if class_like {
             Some(sym_id)
         } else {
-            scope.class.clone()
+            parent_class
         },
         in_class: class_like,
     };
@@ -359,7 +393,7 @@ fn variable(node: Node, name: &str, scope: &Scope, ctx: &Ctx, out: &mut ParseOut
     };
     let sym_id = id(
         ctx.repo_name,
-        &format!("{}/{}{}", scope.core, name, suffix(&kind)),
+        &format!("{}{}", join_core(&scope.core, name), suffix(&kind)),
     );
     out.symbols.push(Symbol {
         id: sym_id.clone(),
@@ -511,6 +545,14 @@ fn edge(src: &GlobalSymbolId, dst: &GlobalSymbolId, kind: EdgeKind, confidence: 
         kind,
         confidence,
         cross_repo: false,
+    }
+}
+
+fn join_core(core: &str, name: &str) -> String {
+    if core.is_empty() {
+        name.to_string()
+    } else {
+        format!("{core}/{name}")
     }
 }
 

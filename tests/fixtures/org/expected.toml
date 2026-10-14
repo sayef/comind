@@ -173,3 +173,138 @@ case = "implements"
 kind = "implements"
 src = "web-app:src/app.ts::DarkTheme"
 dst = "ui-kit:src/theme.ts::Theme"
+
+# ---- return-type flow ----
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "pkg-common:src/acme/common/http.py::from_env"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "src-layout-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/http.py::from_env"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "service-a:service_a/users.py::ping"
+dst = "pkg-common:src/acme/common/http.py::from_env"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "service-a:service_a/users.py::ping"
+dst = "pkg-common:src/acme/common/http.py::Client.get"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "ui-kit:src/format.ts::createFormatter"
+dst = "ui-kit:src/format.ts::Formatter"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/format.ts::createFormatter"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::createFormatter"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::Formatter.format"
+
+# ---- golib (Go: package = directory, methods declared outside their type) ----
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "golib:store/store.go::New"
+dst = "golib:store/store.go::Store"
+
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "golib:store/store.go::New"
+dst = "golib:store/db.go::DB"
+
+[[edge]]
+case = "go-field-type-call"
+kind = "calls"
+src = "golib:store/store.go::Store.Get"
+dst = "golib:store/db.go::DB.Query"
+
+[[edge]]
+case = "go-method-other-file"
+kind = "calls"
+src = "golib:store/db.go::Store.Count"
+dst = "golib:store/store.go::Store.Get"
+
+# ---- gosvc -> golib (cross-repo Go) ----
+[[edge]]
+case = "go-package-import"
+kind = "imports"
+src = "gosvc:main.go"
+dst = "golib:store/store.go"
+
+[[edge]]
+case = "go-package-import"
+kind = "imports"
+src = "gosvc:main.go"
+dst = "golib:model/model.go"
+
+[[edge]]
+case = "go-embedding"
+kind = "inherits"
+src = "gosvc:main.go::Handler"
+dst = "golib:model/model.go::Base"
+
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "gosvc:main.go::NewHandler"
+dst = "gosvc:main.go::Handler"
+
+[[edge]]
+case = "go-package-call"
+kind = "calls"
+src = "gosvc:main.go::NewHandler"
+dst = "golib:store/store.go::New"
+
+[[edge]]
+case = "go-field-type-call"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "golib:store/store.go::Store.Get"
+
+[[edge]]
+case = "go-embedded-method"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "golib:model/model.go::Base.Health"
+
+[[edge]]
+case = "go-same-package-call"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "gosvc:util.go::helper"
+
+[[edge]]
+case = "go-package-call"
+kind = "calls"
+src = "gosvc:main.go::main"
+dst = "gosvc:main.go::NewHandler"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "gosvc:main.go::main"
+dst = "gosvc:main.go::Handler.Serve"
