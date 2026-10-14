@@ -1,11 +1,12 @@
 //! Comind index — the versioned LanceDB store (local dir or S3).
 //!
-//! Tables: `symbols`, `edges`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
+//! Tables: `symbols`, `edges`, `file_facts`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
 //! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
 //! is the atomic "latest" pointer. S3 uses the standard AWS environment for credentials/region.
 
 use std::sync::Arc;
 
+use crate::facts::FileFacts;
 use crate::model::{Edge, Symbol};
 use anyhow::{Context, Result};
 use lancedb::arrow::arrow_array::{
@@ -402,6 +403,7 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
         "Contains" => EdgeKind::Contains,
         "Imports" => EdgeKind::Imports,
         "Calls" => EdgeKind::Calls,
+        "Instantiates" => EdgeKind::Instantiates,
         "Inherits" => EdgeKind::Inherits,
         "Implements" => EdgeKind::Implements,
         "References" => EdgeKind::References,
@@ -876,6 +878,61 @@ pub fn write_style_guide_blocking(uri: &str, rows: &[(String, String)]) -> Resul
 /// Blocking wrapper for [`read_style_guide`].
 pub fn read_style_guide_blocking(uri: &str) -> Result<Vec<(String, String)>> {
     runtime()?.block_on(read_style_guide(uri))
+}
+
+/// Persist per-file parse facts (JSON per file) so incremental runs can re-resolve everything.
+pub async fn write_facts(uri: &str, facts: &[FileFacts]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("path", DataType::Utf8, false),
+        Field::new("facts", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = facts
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize facts")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|f| f.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|f| f.path.as_str()),
+            )),
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build file_facts batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "file_facts", batch).await?;
+    Ok(())
+}
+
+/// Read persisted facts; `None` for indexes written before facts were stored.
+pub async fn read_facts(uri: &str) -> Result<Option<Vec<FileFacts>>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("file_facts").execute().await else {
+        return Ok(None);
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "facts")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse facts row")?);
+        }
+    }
+    Ok(Some(out))
+}
+
+pub fn write_facts_blocking(uri: &str, facts: &[FileFacts]) -> Result<()> {
+    runtime()?.block_on(write_facts(uri, facts))
+}
+
+pub fn read_facts_blocking(uri: &str) -> Result<Option<Vec<FileFacts>>> {
+    runtime()?.block_on(read_facts(uri))
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime> {

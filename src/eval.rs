@@ -81,13 +81,15 @@ pub fn eval_fixture(fixture: &Path) -> Result<EvalReport> {
 
     let mut symbols = Vec::new();
     let mut edges = Vec::new();
+    let mut facts = Vec::new();
     for r in repos {
         let name = r.file_name().to_string_lossy().to_string();
         let out = crate::parse::parse_repo(&r.path(), &name)?;
         symbols.extend(out.symbols);
         edges.extend(out.edges);
+        facts.extend(out.facts);
     }
-    let resolved = crate::resolve::resolve(&symbols, &edges);
+    let resolved = crate::resolve::resolve(&symbols, &edges, &facts);
     Ok(score(&gold.edge, &keyed_edges(&symbols, &resolved.edges)))
 }
 

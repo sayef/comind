@@ -371,14 +371,16 @@ fn tri(on: bool, off: bool) -> Option<bool> {
 fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String> {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
+    let mut facts = Vec::new();
     for path in repos {
         let name = repo_name(path);
         let o = comind::parse::parse_repo(Path::new(path), &name)
             .map_err(|e| format!("{name}: parse failed: {e:#}"))?;
         symbols.extend(o.symbols);
         edges.extend(o.edges);
+        facts.extend(o.facts);
     }
-    let resolved = comind::resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
     Ok((symbols, resolved.edges))
 }
 
@@ -977,6 +979,7 @@ fn cmd_link(
 ) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
+    let mut facts = Vec::new();
     if let Some(bad) = repos.iter().find(|p| !Path::new(p).is_dir()) {
         comind::ui::err(&format!("no such repo directory: {bad}"));
         return ExitCode::FAILURE;
@@ -988,10 +991,11 @@ fn cmd_link(
             Ok(o) => {
                 comind::ui::field(
                     &name,
-                    &format!("{} symbols, {} edges", o.symbols.len(), o.edges.len()),
+                    &format!("{} symbols, {} files", o.symbols.len(), o.facts.len()),
                 );
                 symbols.extend(o.symbols);
                 edges.extend(o.edges);
+                facts.extend(o.facts);
             }
             Err(e) => {
                 comind::ui::err(&format!("{name}: parse failed: {e:#}"));
@@ -1000,17 +1004,26 @@ fn cmd_link(
         }
     }
 
-    let resolved = comind::resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
     let s = &resolved.stats;
     comind::ui::ok(&format!(
-        "resolved: {} imports ({} cross-repo edges), {} calls; unresolved: {} imports, {} ambiguous + {} unknown calls",
-        s.resolved_imports,
-        s.cross_repo_edges,
-        s.resolved_calls,
-        s.unresolved_imports,
-        s.ambiguous_calls,
-        s.unknown_calls
+        "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges",
+        s.resolved_imports, s.resolved_calls, s.type_edges, s.cross_repo_edges
     ));
+    comind::ui::note(&format!(
+        "unresolved: {} imports, {} calls (mostly third-party or dynamic)",
+        s.unresolved_imports, s.unresolved_calls
+    ));
+    let mut top: Vec<_> = resolved.unresolved_modules.iter().collect();
+    top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let top: Vec<String> = top
+        .iter()
+        .take(12)
+        .map(|(m, n)| format!("{m} {n}"))
+        .collect();
+    if !top.is_empty() {
+        comind::ui::note(&format!("top unresolved: {}", top.join(", ")));
+    }
 
     // Rank cross-repo import targets by how many distinct repos depend on them.
     // (dst descriptor) -> (defining repo, set of importer repos, total refs)
@@ -1078,7 +1091,9 @@ fn cmd_link(
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
         comind::ui::header("Persisting");
         comind::ui::step(&format!("writing org graph to {dst}"));
-        match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
+        match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges)
+            .and_then(|v| comind::index::write_facts_blocking(&dst, &facts).map(|_| v))
+        {
             Ok((sv, ev)) => comind::ui::ok(&format!(
                 "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
             )),
@@ -1771,7 +1786,7 @@ fn cmd_index(
         }
     };
     // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
-    out.edges = comind::resolve::resolve(&out.symbols, &out.edges).edges;
+    out.edges = comind::resolve::resolve(&out.symbols, &out.edges, &out.facts).edges;
 
     let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
     for s in &out.symbols {
@@ -1798,7 +1813,9 @@ fn cmd_index(
 
     comind::ui::header("Persisting");
     comind::ui::step(&format!("writing graph to {dst}"));
-    match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges) {
+    match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges)
+        .and_then(|v| comind::index::write_facts_blocking(&dst, &out.facts).map(|_| v))
+    {
         Ok((sv, ev)) => comind::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
         Err(e) => {
             comind::ui::err(&format!("write failed: {e:#}"));
@@ -1904,16 +1921,17 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let to_parse: Vec<String> = cs.to_parse().cloned().collect();
     let newout = comind::parse::parse_files(root, repo_name, &to_parse);
 
-    // Map each symbol id to its file so we can drop edges owned by changed files.
+    // Map this repo's symbol ids to their files so we can drop edges owned by changed files.
     let file_of: HashMap<String, String> = prior_syms
         .iter()
+        .filter(|s| s.repo.0 == repo_name)
         .map(|s| (s.id.render(), s.file_path.clone()))
         .collect();
     let before = prior_syms.len();
 
     let mut symbols: Vec<Symbol> = prior_syms
         .into_iter()
-        .filter(|s| !dropped.contains(&s.file_path))
+        .filter(|s| !(s.repo.0 == repo_name && dropped.contains(&s.file_path)))
         .collect();
     let mut edges: Vec<Edge> = prior_edges
         .into_iter()
@@ -1925,10 +1943,30 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         .collect();
     symbols.extend(newout.symbols);
     edges.extend(newout.edges);
-    // Re-resolve so merged call edges bind to definitions (ripple/thread/context_pack).
-    let edges = comind::resolve::resolve(&symbols, &edges).edges;
+    // With stored facts, keep only structure and re-resolve everything (no stale edges).
+    let facts = match comind::index::read_facts_blocking(dst) {
+        Ok(Some(prior)) => {
+            edges.retain(|e| e.kind == EdgeKind::Contains);
+            let mut all: Vec<_> = prior
+                .into_iter()
+                .filter(|f| {
+                    f.repo != repo_name
+                        || !(dropped.contains(&f.path) || to_parse.contains(&f.path))
+                })
+                .collect();
+            all.extend(newout.facts);
+            all
+        }
+        _ => {
+            comind::ui::warn("index has no stored facts; run a full index for exact edges");
+            newout.facts
+        }
+    };
+    let edges = comind::resolve::resolve(&symbols, &edges, &facts).edges;
 
-    if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges) {
+    if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges)
+        .and_then(|_| comind::index::write_facts_blocking(dst, &facts))
+    {
         comind::ui::err(&format!("write failed: {e:#}"));
         return ExitCode::FAILURE;
     }

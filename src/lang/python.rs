@@ -1,0 +1,209 @@
+//! Python syntax adapter (tree-sitter-python).
+
+use tree_sitter::Node;
+
+use super::{field_text, line, named_children, text, LangSpec, Target};
+use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use crate::model::SymbolKind;
+
+pub struct Python;
+
+impl LangSpec for Python {
+    fn receiver(&self) -> &'static str {
+        "self"
+    }
+
+    fn def(&self, node: Node, src: &[u8], in_class: bool) -> Option<(SymbolKind, String)> {
+        let kind = match node.kind() {
+            "function_definition" if in_class => SymbolKind::Method,
+            "function_definition" => SymbolKind::Function,
+            "class_definition" => SymbolKind::Class,
+            _ => return None,
+        };
+        Some((kind, field_text(node, "name", src)?.to_string()))
+    }
+
+    fn variable(&self, node: Node, src: &[u8]) -> Option<String> {
+        let left = (node.kind() == "assignment").then(|| node.child_by_field_name("left"))??;
+        (left.kind() == "identifier").then(|| text(left, src).to_string())
+    }
+
+    fn import(&self, node: Node, src: &[u8]) -> Option<Vec<Import>> {
+        match node.kind() {
+            // import a.b, c as d — one Import per module so each keeps its alias
+            "import_statement" => {
+                let mut cur = node.walk();
+                let imports = node
+                    .children_by_field_name("name", &mut cur)
+                    .filter_map(|n| module_item(n, src))
+                    .map(|(module, alias)| Import {
+                        module,
+                        level: 0,
+                        items: vec![ImportItem::Module { alias }],
+                        line: line(node),
+                        file: None,
+                    })
+                    .collect();
+                Some(imports)
+            }
+            // from [..]m import a, b as c / *
+            "import_from_statement" => {
+                let m = node.child_by_field_name("module_name")?;
+                let (module, level) = if m.kind() == "relative_import" {
+                    let mut level = 0;
+                    let mut module = String::new();
+                    for c in named_children(m) {
+                        match c.kind() {
+                            "import_prefix" => level = text(c, src).len() as u32,
+                            "dotted_name" => module = text(c, src).to_string(),
+                            _ => {}
+                        }
+                    }
+                    (module, level)
+                } else {
+                    (text(m, src).to_string(), 0)
+                };
+                let mut items = Vec::new();
+                let mut cur = node.walk();
+                for n in node.children_by_field_name("name", &mut cur) {
+                    if let Some((name, alias)) = module_item(n, src) {
+                        items.push(ImportItem::Name { name, alias });
+                    }
+                }
+                if named_children(node)
+                    .iter()
+                    .any(|c| c.kind() == "wildcard_import")
+                {
+                    items.push(ImportItem::All);
+                }
+                Some(vec![Import {
+                    module,
+                    level,
+                    items,
+                    line: line(node),
+                    file: None,
+                }])
+            }
+            _ => None,
+        }
+    }
+
+    fn reference(&self, node: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
+        if node.kind() != "call" {
+            return None;
+        }
+        Some((
+            RefKind::Call,
+            path(node.child_by_field_name("function")?, src)?,
+        ))
+    }
+
+    fn assignment(&self, node: Node, src: &[u8]) -> Option<(Target, TypeSource)> {
+        if node.kind() != "assignment" {
+            return None;
+        }
+        let left = node.child_by_field_name("left")?;
+        let target = match left.kind() {
+            "identifier" => Target::Var(text(left, src).to_string()),
+            "attribute"
+                if left
+                    .child_by_field_name("object")
+                    .is_some_and(|o| text(o, src) == "self") =>
+            {
+                Target::Attr(field_text(left, "attribute", src)?.to_string())
+            }
+            _ => return None,
+        };
+        let source = if let Some(t) = node.child_by_field_name("type") {
+            TypeSource::Annotation(type_path(t, src)?)
+        } else {
+            let right = node.child_by_field_name("right")?;
+            match right.kind() {
+                "call" => TypeSource::Construct(path(right.child_by_field_name("function")?, src)?),
+                "identifier" => TypeSource::Alias {
+                    name: text(right, src).to_string(),
+                    scope: String::new(),
+                },
+                _ => return None,
+            }
+        };
+        Some((target, source))
+    }
+
+    fn bases(&self, def: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
+        def.child_by_field_name("superclasses")
+            .map(|a| {
+                named_children(a)
+                    .into_iter()
+                    .filter_map(|b| path(b, src))
+                    .map(|p| (RefKind::Inherits, p))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn params(&self, def: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
+        let Some(ps) = def.child_by_field_name("parameters") else {
+            return Vec::new();
+        };
+        named_children(ps)
+            .into_iter()
+            .filter(|p| matches!(p.kind(), "typed_parameter" | "typed_default_parameter"))
+            .filter_map(|p| {
+                let name = p.child_by_field_name("name").or_else(|| {
+                    named_children(p)
+                        .into_iter()
+                        .find(|c| c.kind() == "identifier")
+                })?;
+                let ty = type_path(p.child_by_field_name("type")?, src)?;
+                Some((text(name, src).to_string(), ty, false))
+            })
+            .collect()
+    }
+}
+
+/// `a.b` / `a.b as c` → (dotted module or name, alias).
+fn module_item(n: Node, src: &[u8]) -> Option<(String, Option<String>)> {
+    match n.kind() {
+        "aliased_import" => Some((
+            field_text(n, "name", src)?.to_string(),
+            field_text(n, "alias", src).map(str::to_string),
+        )),
+        "dotted_name" => Some((text(n, src).to_string(), None)),
+        _ => None,
+    }
+}
+
+/// Dotted path of an identifier/attribute chain; `None` for anything dynamic.
+fn path(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    match node.kind() {
+        "identifier" => Some(vec![text(node, src).to_string()]),
+        "attribute" => {
+            let mut p = path(node.child_by_field_name("object")?, src)?;
+            p.push(field_text(node, "attribute", src)?.to_string());
+            Some(p)
+        }
+        _ => None,
+    }
+}
+
+/// Path of a type annotation, unwrapping `Optional[X]`, `Annotated[X, …]` and `X | None`.
+fn type_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    match node.kind() {
+        "type" => type_path(named_children(node).into_iter().next()?, src),
+        "generic_type" | "subscript" => {
+            let head = named_children(node).into_iter().next()?;
+            let name = text(head, src);
+            if matches!(name, "Optional" | "Annotated" | "typing.Optional") {
+                let arg = named_children(node).into_iter().nth(1)?;
+                type_path(arg, src)
+            } else {
+                type_path(head, src)
+            }
+        }
+        "type_parameter" => type_path(named_children(node).into_iter().next()?, src),
+        "binary_operator" => type_path(node.child_by_field_name("left")?, src),
+        "string" => None,
+        _ => path(node, src),
+    }
+}

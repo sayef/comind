@@ -21,6 +21,15 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
+/// Edge kinds meaning "src depends on dst": what `ripple` and ranking traverse.
+pub const DEPENDENCY: &[EdgeKind] = &[
+    EdgeKind::Calls,
+    EdgeKind::Imports,
+    EdgeKind::Instantiates,
+    EdgeKind::Inherits,
+    EdgeKind::Implements,
+];
+
 /// A node as returned to callers — flat, printable, agent-friendly.
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -164,7 +173,7 @@ impl CodeGraph {
         };
         self.g
             .edges_directed(idx, Incoming)
-            .filter(|e| matches!(e.weight(), EdgeKind::Calls | EdgeKind::Imports))
+            .filter(|e| DEPENDENCY.contains(e.weight()))
             .count()
     }
 
@@ -187,21 +196,21 @@ impl CodeGraph {
         v.into_iter().take(limit).map(|i| self.node_of(i)).collect()
     }
 
-    /// *Who breaks if I change `focus`?* Reverse reachability over `Calls`/`Imports`
+    /// *Who breaks if I change `focus`?* Reverse reachability over [`DEPENDENCY`] edges
     /// (callers of callers, importers), multi-hop, cross-repo. Structural `Contains` is
     /// ignored — a containing module is not a dependency.
     pub fn ripple(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(
-            focus,
-            max_depth,
-            Incoming,
-            &[EdgeKind::Calls, EdgeKind::Imports],
-        )
+        self.bfs(focus, max_depth, Incoming, DEPENDENCY)
     }
 
     /// *What does `focus` do downstream?* Forward call trace.
     pub fn thread(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(focus, max_depth, Outgoing, &[EdgeKind::Calls])
+        self.bfs(
+            focus,
+            max_depth,
+            Outgoing,
+            &[EdgeKind::Calls, EdgeKind::Instantiates],
+        )
     }
 
     fn bfs(
@@ -249,7 +258,9 @@ impl CodeGraph {
         for e in self.g.edges_directed(focus, Incoming) {
             match e.weight() {
                 EdgeKind::Contains => z.container = Some(self.node_of(e.source())),
-                EdgeKind::Calls => z.callers.push(self.node_of(e.source())),
+                EdgeKind::Calls | EdgeKind::Instantiates => {
+                    z.callers.push(self.node_of(e.source()))
+                }
                 EdgeKind::Imports => z.importers.push(self.node_of(e.source())),
                 _ => {}
             }
@@ -257,7 +268,9 @@ impl CodeGraph {
         for e in self.g.edges_directed(focus, Outgoing) {
             match e.weight() {
                 EdgeKind::Contains => z.members.push(self.node_of(e.target())),
-                EdgeKind::Calls => z.callees.push(self.node_of(e.target())),
+                EdgeKind::Calls | EdgeKind::Instantiates => {
+                    z.callees.push(self.node_of(e.target()))
+                }
                 _ => {}
             }
         }
@@ -312,7 +325,7 @@ impl CodeGraph {
         // Undirected neighbor lists over dependency edges only.
         let mut neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
         for e in self.g.edge_references() {
-            if !matches!(e.weight(), EdgeKind::Calls | EdgeKind::Imports) {
+            if !DEPENDENCY.contains(e.weight()) {
                 continue;
             }
             let (a, b) = (e.source().index(), e.target().index());

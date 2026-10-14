@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-const MIN_PRECISION: f64 = 0.55;
-const MIN_RECALL: f64 = 0.17;
+const MIN_PRECISION: f64 = 1.0;
+const MIN_RECALL: f64 = 1.0;
 
 #[test]
 fn fixture_org_quality_does_not_regress() {

@@ -1,15 +1,18 @@
-//! Comind parse — tree-sitter extraction of symbols and intra-file edges.
+//! Comind parse — tree-sitter extraction of symbols, the `Contains` hierarchy and per-file facts.
 //!
-//! Emits definitions (functions, methods, classes, interfaces), the `Contains` hierarchy, and
-//! provisional `Imports`/`Calls` edges that [`crate::resolve`] binds to real definitions.
-//! Polyglot by construction: Python + TypeScript today, a new language is one match arm.
+//! The walk is language-agnostic; [`crate::lang`] answers the syntax questions per grammar.
+//! Imports, references and type hints go into [`FileFacts`], which [`crate::resolve`] binds.
 
+use std::collections::HashMap;
 use std::path::{Path, MAIN_SEPARATOR};
 
+use crate::facts::{FileFacts, Ref, TypeHint, TypeSource};
+use crate::lang::{self, LangSpec, Target};
 use crate::model::{
     Edge, EdgeKind, Fingerprint, GlobalSymbolId, Language, Position, Range, RepoId, Symbol,
     SymbolKind,
 };
+use crate::packages::RepoPackages;
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
@@ -17,25 +20,24 @@ use tree_sitter::{Node, Parser};
 
 const SCHEME: &str = "comind-treesitter";
 
-/// Symbols and edges extracted from a repo (or a single file).
+/// Symbols, structural edges and per-file facts extracted from a repo (or some files of it).
 #[derive(Debug, Default)]
 pub struct ParseOutput {
     pub symbols: Vec<Symbol>,
     pub edges: Vec<Edge>,
+    pub facts: Vec<FileFacts>,
 }
 
 impl ParseOutput {
     fn merge(&mut self, other: ParseOutput) {
         self.symbols.extend(other.symbols);
         self.edges.extend(other.edges);
+        self.facts.extend(other.facts);
     }
 
-    /// Collapse definitions that share a SCIP id — e.g. Python `@overload` stubs plus the real
-    /// implementation all render to the same descriptor — keeping the **last** (the
-    /// implementation, which carries the real body/range). Also drops duplicate edges. This
-    /// keeps the flat `symbols`/`search` tables 1:1 with the graph's node set.
+    /// Collapse definitions sharing a SCIP id (e.g. `@overload` stubs), keeping the last one.
     fn dedup(&mut self) {
-        use std::collections::{HashMap, HashSet};
+        use std::collections::HashSet;
 
         let mut last_idx: HashMap<String, usize> = HashMap::new();
         for (i, s) in self.symbols.iter().enumerate() {
@@ -61,8 +63,7 @@ impl ParseOutput {
 fn detect(path: &Path) -> Option<Language> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("py" | "pyi") => Some(Language::Python),
-        Some("ts") => Some(Language::TypeScript),
-        Some("tsx") => Some(Language::TypeScript), // parsed with the TSX grammar
+        Some("ts" | "tsx") => Some(Language::TypeScript),
         Some("js" | "jsx" | "mjs" | "cjs") => Some(Language::JavaScript),
         _ => None,
     }
@@ -83,38 +84,37 @@ fn tree_sitter_language(lang: &Language, is_tsx: bool) -> Option<tree_sitter::La
 
 /// Parse every supported source file under `root`, in parallel, respecting `.gitignore`.
 pub fn parse_repo(root: &Path, repo_name: &str) -> Result<ParseOutput> {
-    let files: Vec<_> = WalkBuilder::new(root)
+    let files: Vec<String> = WalkBuilder::new(root)
         .hidden(false)
         .build()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .map(|e| e.into_path())
-        .filter(|p| detect(p).is_some())
+        .filter(|e| detect(e.path()).is_some())
+        .filter_map(|e| {
+            e.path()
+                .strip_prefix(root)
+                .ok()
+                .map(|r| r.to_string_lossy().replace(MAIN_SEPARATOR, "/"))
+        })
         .collect();
-
-    let mut out = files
-        .par_iter()
-        .filter_map(|p| parse_file(p, repo_name, root).ok().flatten())
-        .reduce(ParseOutput::default, |mut acc, o| {
-            acc.merge(o);
-            acc
-        });
-    out.dedup();
-    Ok(out)
+    Ok(parse_files(root, repo_name, &files))
 }
 
 /// Parse a specific set of repo-relative files (for incremental indexing). Unsupported or
-/// missing files are skipped. Paths are relative to `root`.
+/// missing files are skipped.
 pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseOutput {
+    let packages = RepoPackages::discover(root);
     let mut out = rel_paths
         .par_iter()
         .filter_map(|rel| {
             let full = root.join(rel);
-            if full.is_file() {
-                parse_file(&full, repo_name, root).ok().flatten()
-            } else {
-                None
-            }
+            full.is_file()
+                .then(|| {
+                    parse_file_with(&full, repo_name, root, &packages)
+                        .ok()
+                        .flatten()
+                })
+                .flatten()
         })
         .reduce(ParseOutput::default, |mut acc, o| {
             acc.merge(o);
@@ -126,11 +126,21 @@ pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseO
 
 /// Parse a single file. `Ok(None)` means "unsupported language", not an error.
 pub fn parse_file(path: &Path, repo_name: &str, root: &Path) -> Result<Option<ParseOutput>> {
+    parse_file_with(path, repo_name, root, &RepoPackages::discover(root))
+}
+
+fn parse_file_with(
+    path: &Path,
+    repo_name: &str,
+    root: &Path,
+    packages: &RepoPackages,
+) -> Result<Option<ParseOutput>> {
     let Some(lang) = detect(path) else {
         return Ok(None);
     };
     let is_tsx = path.extension().and_then(|e| e.to_str()) == Some("tsx");
-    let Some(ts_lang) = tree_sitter_language(&lang, is_tsx) else {
+    let (Some(ts_lang), Some(spec)) = (tree_sitter_language(&lang, is_tsx), lang::spec(&lang))
+    else {
         return Ok(None);
     };
 
@@ -148,30 +158,38 @@ pub fn parse_file(path: &Path, repo_name: &str, root: &Path) -> Result<Option<Pa
 
     let repo = RepoId(repo_name.to_string());
     let module = module_path(&rel_str);
-
-    // The file node is the root of the Contains hierarchy.
     let file_id = id(repo_name, &module);
-    let file_symbol = Symbol {
-        id: file_id.clone(),
-        name: rel_str.clone(),
-        kind: SymbolKind::File,
-        language: lang.clone(),
-        repo: repo.clone(),
-        file_path: rel_str.clone(),
-        range: node_range(&tree.root_node()),
-        signature: None,
-        docstring: None,
-        fingerprint: Some(fingerprint(tree.root_node(), &source, &lang)),
-    };
-
     let mut out = ParseOutput {
-        symbols: vec![file_symbol],
+        symbols: vec![Symbol {
+            id: file_id.clone(),
+            name: rel_str.clone(),
+            kind: SymbolKind::File,
+            language: lang.clone(),
+            repo: repo.clone(),
+            file_path: rel_str.clone(),
+            range: node_range(&tree.root_node()),
+            signature: None,
+            docstring: None,
+            fingerprint: Some(fingerprint(tree.root_node(), &source, &lang)),
+        }],
         edges: Vec::new(),
+        facts: vec![FileFacts {
+            repo: repo_name.to_string(),
+            path: rel_str.clone(),
+            language: lang.clone(),
+            file_id: file_id.render(),
+            modules: packages.module_names(&rel_str, &lang),
+            imports: Vec::new(),
+            refs: Vec::new(),
+            types: Vec::new(),
+        }],
     };
 
     let ctx = Ctx {
         source: &source,
+        packages,
         lang: &lang,
+        spec,
         repo: &repo,
         rel_str: &rel_str,
         repo_name,
@@ -179,7 +197,9 @@ pub fn parse_file(path: &Path, repo_name: &str, root: &Path) -> Result<Option<Pa
     let scope = Scope {
         core: module,
         id: file_id.clone(),
-        enclosing_callable: file_id,
+        callable: file_id,
+        class: None,
+        in_class: false,
     };
     walk(tree.root_node(), &scope, &ctx, &mut out);
     Ok(Some(out))
@@ -187,7 +207,9 @@ pub fn parse_file(path: &Path, repo_name: &str, root: &Path) -> Result<Option<Pa
 
 struct Ctx<'a> {
     source: &'a [u8],
+    packages: &'a RepoPackages,
     lang: &'a Language,
+    spec: &'static dyn LangSpec,
     repo: &'a RepoId,
     rel_str: &'a str,
     repo_name: &'a str,
@@ -197,72 +219,51 @@ struct Ctx<'a> {
 struct Scope {
     /// Descriptor path without the kind suffix, e.g. `acme/foo/MyClass`.
     core: String,
-    /// Id of the symbol that owns this scope (the `Contains` parent).
+    /// The `Contains` parent.
     id: GlobalSymbolId,
-    /// Nearest enclosing function/method (or the file) — the source of `Calls` edges.
-    enclosing_callable: GlobalSymbolId,
+    /// Nearest enclosing function/method (or the file): where references and locals live.
+    callable: GlobalSymbolId,
+    /// Nearest enclosing class: what `self`/`this` refers to.
+    class: Option<GlobalSymbolId>,
+    /// Directly inside a class body.
+    in_class: bool,
 }
 
 fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
-    if let Some(kind) = def_kind(ctx.lang, node.kind()) {
-        if let Some(name) = child_text(node, "name", ctx.source) {
-            let core = format!("{}/{}", scope.core, name);
-            let sym_id = id(ctx.repo_name, &format!("{}{}", core, suffix(&kind)));
+    if let Some((kind, name)) = ctx.spec.def(node, ctx.source, scope.in_class) {
+        define(node, kind, &name, scope, ctx, out);
+        return;
+    }
 
-            out.symbols.push(Symbol {
-                id: sym_id.clone(),
-                name: name.to_string(),
-                kind: kind.clone(),
-                language: ctx.lang.clone(),
-                repo: ctx.repo.clone(),
-                file_path: ctx.rel_str.to_string(),
-                range: node_range(&node),
-                signature: Some(first_line(node, ctx.source)),
-                docstring: None,
-                fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
-            });
-            out.edges
-                .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
+    if let Some(mut imports) = ctx.spec.import(node, ctx.source) {
+        for imp in imports.iter_mut().filter(|i| {
+            matches!(ctx.lang, Language::TypeScript | Language::JavaScript)
+                && !i.module.starts_with('.')
+        }) {
+            imp.file = ctx.packages.ts_alias(ctx.rel_str, &imp.module);
+        }
+        facts(out).imports.extend(imports);
+        return; // imported names are not references
+    }
 
-            let enclosing = if is_callable(&kind) {
-                sym_id.clone()
-            } else {
-                scope.enclosing_callable.clone()
-            };
-            let child_scope = Scope {
-                core,
-                id: sym_id,
-                enclosing_callable: enclosing,
-            };
-            for c in children(node) {
-                walk(c, &child_scope, ctx, out);
-            }
-            return;
+    if let Some((kind, path)) = ctx.spec.reference(node, ctx.source) {
+        facts(out).refs.push(Ref {
+            kind,
+            from: scope.callable.render(),
+            path,
+            line: lang::line(node),
+        });
+    }
+
+    let module_level = scope.callable == scope.id && scope.class.is_none();
+    if module_level {
+        if let Some(name) = ctx.spec.variable(node, ctx.source) {
+            variable(node, &name, scope, ctx, out);
         }
     }
 
-    if let Some(cores) = import_targets(node, ctx.lang, ctx.source) {
-        // Import statement: emit provisional Imports edges (external target, package "?").
-        // comind-resolve binds these to real definitions — including cross-repo.
-        for core in cores {
-            let target = external_id(&core);
-            out.edges
-                .push(edge(&scope.id, &target, EdgeKind::Imports, 0.5));
-        }
-        return; // don't descend — imported names are not calls
-    }
-
-    if is_call(ctx.lang, node.kind()) {
-        if let Some(callee) = callee_name(node, ctx.lang, ctx.source) {
-            // Provisional target: name only, unresolved scope. Rebound in comind-resolve.
-            let target = id(ctx.repo_name, &format!("?/{}()", callee));
-            out.edges.push(edge(
-                &scope.enclosing_callable,
-                &target,
-                EdgeKind::Calls,
-                0.4,
-            ));
-        }
+    if let Some((target, source)) = ctx.spec.assignment(node, ctx.source) {
+        type_hint(target, source, scope, ctx, out);
     }
 
     for c in children(node) {
@@ -270,132 +271,144 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
     }
 }
 
-// ---- language-specific tables -------------------------------------------------------
+fn define(
+    node: Node,
+    kind: SymbolKind,
+    name: &str,
+    scope: &Scope,
+    ctx: &Ctx,
+    out: &mut ParseOutput,
+) {
+    let core = format!("{}/{}", scope.core, name);
+    let sym_id = id(ctx.repo_name, &format!("{}{}", core, suffix(&kind)));
+    out.symbols.push(Symbol {
+        id: sym_id.clone(),
+        name: name.to_string(),
+        kind: kind.clone(),
+        language: ctx.lang.clone(),
+        repo: ctx.repo.clone(),
+        file_path: ctx.rel_str.to_string(),
+        range: node_range(&node),
+        signature: Some(first_line(node, ctx.source)),
+        docstring: None,
+        fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
+    });
+    out.edges
+        .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
 
-fn def_kind(lang: &Language, node_kind: &str) -> Option<SymbolKind> {
-    match (lang, node_kind) {
-        (Language::Python, "function_definition") => Some(SymbolKind::Function),
-        (Language::Python, "class_definition") => Some(SymbolKind::Class),
-        (Language::TypeScript | Language::JavaScript, "function_declaration") => {
-            Some(SymbolKind::Function)
-        }
-        (Language::TypeScript | Language::JavaScript, "method_definition") => {
-            Some(SymbolKind::Method)
-        }
-        (Language::TypeScript | Language::JavaScript, "class_declaration") => {
-            Some(SymbolKind::Class)
-        }
-        (Language::TypeScript | Language::JavaScript, "interface_declaration") => {
-            Some(SymbolKind::Interface)
-        }
-        _ => None,
+    let callable = is_callable(&kind);
+    let class_like = matches!(kind, SymbolKind::Class | SymbolKind::Interface);
+    let rendered = sym_id.render();
+    let line = lang::line(node);
+    for (kind, path) in ctx.spec.bases(node, ctx.source) {
+        facts(out).refs.push(Ref {
+            kind,
+            from: rendered.clone(),
+            path,
+            line,
+        });
     }
-}
-
-fn is_call(lang: &Language, node_kind: &str) -> bool {
-    matches!(
-        (lang, node_kind),
-        (Language::Python, "call")
-            | (
-                Language::TypeScript | Language::JavaScript,
-                "call_expression"
-            )
-    )
-}
-
-/// Extract import targets as descriptor "cores" (e.g. `acme/const/Settings`).
-/// `None` when `node` is not an import statement. Relative imports are skipped (they
-/// resolve within the same package, not cross-repo).
-fn import_targets(node: Node, lang: &Language, src: &[u8]) -> Option<Vec<String>> {
-    // TypeScript/JavaScript: `import … from "mod"` / `export … from "mod"`. The module specifier
-    // is the `source` string child. Skip relative (`./`, `../`) imports.
-    if matches!(lang, Language::TypeScript | Language::JavaScript) {
-        match node.kind() {
-            "import_statement" | "export_statement" => {
-                let s = node.child_by_field_name("source")?;
-                let m = s
-                    .utf8_text(src)
-                    .ok()?
-                    .trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                if m.is_empty() || m.starts_with('.') {
-                    return Some(vec![]);
+    if callable {
+        for (param, ty, property) in ctx.spec.params(node, ctx.source) {
+            let f = facts(out);
+            if property {
+                if let Some(class) = &scope.class {
+                    f.types.push(TypeHint {
+                        scope: class.render(),
+                        name: format!("{}.{param}", ctx.spec.receiver()),
+                        source: TypeSource::Annotation(ty.clone()),
+                    });
                 }
-                return Some(vec![m.to_string()]);
             }
-            _ => return None,
+            f.types.push(TypeHint {
+                scope: rendered.clone(),
+                name: param,
+                source: TypeSource::Annotation(ty),
+            });
         }
     }
-    if !matches!(lang, Language::Python) {
-        return None;
+
+    let child = Scope {
+        core,
+        id: sym_id.clone(),
+        callable: if callable {
+            sym_id.clone()
+        } else {
+            scope.callable.clone()
+        },
+        class: if class_like {
+            Some(sym_id)
+        } else {
+            scope.class.clone()
+        },
+        in_class: class_like,
+    };
+    for c in children(node) {
+        walk(c, &child, ctx, out);
     }
-    match node.kind() {
-        // from <module> import a, b as c
-        "import_from_statement" => {
-            let module = node.child_by_field_name("module_name")?;
-            let mtext = module.utf8_text(src).ok()?;
-            if mtext.starts_with('.') {
-                return Some(vec![]); // relative import
+}
+
+/// A module-level binding: `Constant` when SCREAMING_CASE, else `Variable`.
+fn variable(node: Node, name: &str, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
+    let kind = if name.chars().any(|c| c.is_ascii_uppercase())
+        && !name.chars().any(|c| c.is_ascii_lowercase())
+    {
+        SymbolKind::Constant
+    } else {
+        SymbolKind::Variable
+    };
+    let sym_id = id(
+        ctx.repo_name,
+        &format!("{}/{}{}", scope.core, name, suffix(&kind)),
+    );
+    out.symbols.push(Symbol {
+        id: sym_id.clone(),
+        name: name.to_string(),
+        kind,
+        language: ctx.lang.clone(),
+        repo: ctx.repo.clone(),
+        file_path: ctx.rel_str.to_string(),
+        range: node_range(&node),
+        signature: Some(first_line(node, ctx.source)),
+        docstring: None,
+        fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
+    });
+    out.edges
+        .push(edge(&scope.id, &sym_id, EdgeKind::Contains, 1.0));
+}
+
+fn type_hint(target: Target, source: TypeSource, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
+    // An alias is read in the scope where the assignment happens.
+    let source = match source {
+        TypeSource::Alias { name, .. } => TypeSource::Alias {
+            name,
+            scope: scope.callable.render(),
+        },
+        s => s,
+    };
+    let hint = match target {
+        Target::Var(name) => TypeHint {
+            scope: scope.callable.render(),
+            name,
+            source,
+        },
+        Target::Attr(name) => {
+            let Some(class) = &scope.class else {
+                return;
+            };
+            TypeHint {
+                scope: class.render(),
+                name: format!("{}.{name}", ctx.spec.receiver()),
+                source,
             }
-            let mcore = mtext.replace('.', "/");
-            let mut cur = node.walk();
-            let cores = node
-                .children_by_field_name("name", &mut cur)
-                .filter_map(|n| import_name_text(n, src))
-                .map(|name| format!("{}/{}", mcore, name.replace('.', "/")))
-                .collect();
-            Some(cores)
         }
-        // import x.y, z as w
-        "import_statement" => {
-            let mut cur = node.walk();
-            let cores = node
-                .children_by_field_name("name", &mut cur)
-                .filter_map(|n| import_name_text(n, src))
-                .filter(|name| !name.starts_with('.'))
-                .map(|name| name.replace('.', "/"))
-                .collect();
-            Some(cores)
-        }
-        _ => None,
-    }
+    };
+    facts(out).types.push(hint);
 }
 
-fn import_name_text(n: Node, src: &[u8]) -> Option<String> {
-    match n.kind() {
-        // `a as b` -> the imported name is `a`
-        "aliased_import" => n
-            .child_by_field_name("name")
-            .and_then(|x| x.utf8_text(src).ok())
-            .map(String::from),
-        _ => n.utf8_text(src).ok().map(String::from),
-    }
-}
-
-/// Provisional external reference: package `?`, descriptor = the import core. Resolved to a
-/// real (possibly cross-repo) definition in comind-resolve.
-fn external_id(core: &str) -> GlobalSymbolId {
-    GlobalSymbolId {
-        scheme: SCHEME.to_string(),
-        package_manager: ".".to_string(),
-        package: "?".to_string(),
-        version: ".".to_string(),
-        descriptor: core.to_string(),
-    }
-}
-
-/// Extract the callee's simple name from a call node.
-fn callee_name<'a>(node: Node, lang: &Language, src: &'a [u8]) -> Option<&'a str> {
-    let _ = lang;
-    let func = node.child_by_field_name("function")?;
-    match func.kind() {
-        // bare name: foo(...)
-        "identifier" => func.utf8_text(src).ok(),
-        // Python method call: obj.method(...)
-        "attribute" => child_text(func, "attribute", src),
-        // TS/JS member call: obj.method(...)
-        "member_expression" => child_text(func, "property", src),
-        _ => None,
-    }
+/// The single file's facts (a fresh `ParseOutput` from `parse_file_with` holds exactly one).
+fn facts(out: &mut ParseOutput) -> &mut FileFacts {
+    out.facts.last_mut().expect("file facts initialised")
 }
 
 // ---- helpers ------------------------------------------------------------------------
@@ -410,7 +423,7 @@ fn fingerprint(node: Node, src: &[u8], lang: &Language) -> Fingerprint {
         blake3::Hasher::new(),
         blake3::Hasher::new(),
     );
-    let mut renames: std::collections::HashMap<&[u8], u32> = std::collections::HashMap::new();
+    let mut renames: HashMap<&[u8], u32> = HashMap::new();
     let mut stack = vec![node];
     while let Some(n) = stack.pop() {
         if n.kind().contains("comment") || is_docstring(n, lang) {
@@ -463,8 +476,6 @@ fn is_docstring(n: Node, lang: &Language) -> bool {
             .is_some_and(|p| matches!(p.kind(), "block" | "module"))
 }
 
-/// Python: a `function_definition` is really a method when nested under a class — but we
-/// key off `SymbolKind` from the def table, so treat both Function and Method as callable.
 fn is_callable(kind: &SymbolKind) -> bool {
     matches!(kind, SymbolKind::Function | SymbolKind::Method)
 }
@@ -475,8 +486,10 @@ fn suffix(kind: &SymbolKind) -> &'static str {
         | SymbolKind::Interface
         | SymbolKind::Struct
         | SymbolKind::Enum
-        | SymbolKind::Trait => "#",
+        | SymbolKind::Trait
+        | SymbolKind::TypeAlias => "#",
         SymbolKind::Function | SymbolKind::Method => "().",
+        SymbolKind::Variable | SymbolKind::Constant => ".",
         _ => "",
     }
 }
@@ -507,10 +520,6 @@ fn module_path(rel: &str) -> String {
         .strip_suffix("/__init__")
         .unwrap_or(no_ext)
         .to_string()
-}
-
-fn child_text<'a>(node: Node, field: &str, src: &'a [u8]) -> Option<&'a str> {
-    node.child_by_field_name(field)?.utf8_text(src).ok()
 }
 
 fn children(node: Node) -> Vec<Node> {
@@ -546,6 +555,7 @@ fn node_range(node: &Node) -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facts::RefKind;
     use std::io::Write;
 
     fn write(dir: &Path, name: &str, body: &str) {
@@ -565,21 +575,32 @@ mod tests {
         );
 
         let out = parse_repo(&dir, "demo").unwrap();
-        let names: Vec<_> = out.symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"Service"), "got {names:?}");
-        assert!(names.contains(&"run"), "got {names:?}");
-        assert!(names.contains(&"helper"), "got {names:?}");
+        std::fs::remove_dir_all(&dir).ok();
+        let kinds: Vec<_> = out
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind.clone()))
+            .collect();
+        assert!(
+            kinds.contains(&("Service", SymbolKind::Class)),
+            "got {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&("run", SymbolKind::Method)),
+            "got {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&("helper", SymbolKind::Function)),
+            "got {kinds:?}"
+        );
 
-        // Service --contains--> run
         assert!(out.edges.iter().any(|e| e.kind == EdgeKind::Contains
             && e.src.descriptor.contains("Service#")
             && e.dst.descriptor.contains("run().")));
-        // run --calls--> helper (provisional)
-        assert!(out.edges.iter().any(|e| e.kind == EdgeKind::Calls
-            && e.src.descriptor.contains("run().")
-            && e.dst.descriptor.contains("helper")));
-
-        std::fs::remove_dir_all(&dir).ok();
+        let refs = &out.facts[0].refs;
+        assert!(refs
+            .iter()
+            .any(|r| r.kind == RefKind::Call && r.from.contains("run().") && r.path == ["helper"]));
     }
 
     fn fp_of(body: &str, name: &str) -> Fingerprint {
@@ -617,5 +638,74 @@ mod tests {
         assert_eq!(base.sig, changed.sig);
         assert_ne!(base.body, changed.body);
         assert_ne!(base.shape, changed.shape);
+    }
+
+    #[test]
+    fn python_facts_capture_imports_types_and_refs() {
+        let out = parse_repo(Path::new("tests/fixtures/org/service-a"), "service-a").unwrap();
+        let users = out
+            .facts
+            .iter()
+            .find(|f| f.path == "service_a/users.py")
+            .unwrap();
+        assert_eq!(users.modules, vec!["service_a.users"]);
+        assert!(users.imports.iter().any(|i| i.module == "acme.common.http"
+            && i.items
+                == vec![crate::facts::ImportItem::Name {
+                    name: "Client".into(),
+                    alias: Some("HttpClient".into())
+                }]));
+        assert!(users.refs.iter().any(|r| r.path == ["self", "api", "get"]));
+        assert!(users
+            .refs
+            .iter()
+            .any(|r| r.kind == RefKind::Inherits && r.path == ["BaseService"]));
+        assert!(users.types.iter().any(|t| t.name == "self.api"
+            && matches!(&t.source, TypeSource::Alias { name, .. } if name == "api")));
+        assert!(users
+            .types
+            .iter()
+            .any(|t| t.name == "client"
+                && t.source == TypeSource::Construct(vec!["HttpClient".into()])));
+    }
+
+    #[test]
+    fn tsx_components_are_references() {
+        let dir = std::env::temp_dir().join(format!("comind-tsx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write(
+            &dir,
+            "page.tsx",
+            "export function Page() {\n  return <Layout><ui.Button label=\"x\" /><div /></Layout>;\n}\n",
+        );
+        let out = parse_repo(&dir, "demo").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        let paths: Vec<_> = out.facts[0].refs.iter().map(|r| r.path.join(".")).collect();
+        assert!(paths.contains(&"Layout".to_string()), "{paths:?}");
+        assert!(paths.contains(&"ui.Button".to_string()), "{paths:?}");
+        assert!(!paths.iter().any(|p| p == "div"), "{paths:?}");
+    }
+
+    #[test]
+    fn typescript_facts_capture_reexports_and_heritage() {
+        let kit = parse_repo(Path::new("tests/fixtures/org/ui-kit"), "ui-kit").unwrap();
+        let index = kit.facts.iter().find(|f| f.path == "src/index.ts").unwrap();
+        assert_eq!(index.imports.len(), 3);
+        assert!(index
+            .imports
+            .iter()
+            .any(|i| i.module == "./button" && i.items == vec![crate::facts::ImportItem::All]));
+
+        let app = parse_repo(Path::new("tests/fixtures/org/web-app"), "web-app").unwrap();
+        let f = &app.facts[0];
+        assert!(f
+            .refs
+            .iter()
+            .any(|r| r.kind == RefKind::Implements && r.path == ["Theme"]));
+        assert!(f.refs.iter().any(|r| r.path == ["kit", "formatDate"]));
+        assert!(f.imports.iter().any(|i| i.items
+            == vec![crate::facts::ImportItem::Module {
+                alias: Some("kit".into())
+            }]));
     }
 }
