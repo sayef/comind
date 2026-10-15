@@ -133,8 +133,15 @@ comind-preflight:
     - exit ${STATUS:-0}
 ```
 
-The scheduled index job should also run `comind ledger --compact --index-dir "$COMIND_INDEX"`
-and, optionally, `comind ledger --check` to fail on org-wide violations.
+After linking, the scheduled index job should also run, against the same `--index-dir`:
+
+```bash
+comind harvest <repos…> --index-dir "$COMIND_INDEX"     # reverts and commit trailers → records (no LLM)
+comind ledger --compact --index-dir "$COMIND_INDEX"     # fold new records into the snapshot
+comind ledger --check --index-dir "$COMIND_INDEX"       # optional: fail on violated `must` rules
+```
+
+Harvested ids are deterministic, so re-running it never duplicates records.
 
 
 ## Distil the merged MR (forward only)
