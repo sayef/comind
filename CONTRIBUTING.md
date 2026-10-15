@@ -33,6 +33,8 @@ Tests that need a bucket or an LLM key are opt-in; everything else runs offline.
   precision and recall.
 - Real-world changes are checked on real repositories as well: no new spurious contracts, and a note in
   the pull request of what changed.
+- Performance changes include criterion results (`cargo bench --bench graph`); CI also posts a
+  base-against-head comparison to the job summary of each pull request.
 - Determinism holds: the same repositories give the same graph, ids and ordering.
 - Changes to stored formats (Lance tables, ledger records, facts) keep reading what older versions wrote
   (`#[serde(default)]` on new fields).
