@@ -25,6 +25,17 @@ pub(crate) const REST_TEMPLATE: &[(&str, &str)] = &[
     ("exchange", ""),
 ];
 
+/// Receiver marking a WebClient request (`client.get().uri(url)`); the method is the verb.
+pub(crate) const WEBCLIENT: &str = "<webclient>";
+const VERBS: &[&str] = &["get", "post", "put", "patch", "delete"];
+
+/// `x.get().uri(...)`: the verb of the call a `uri(...)` call is chained on.
+pub(crate) fn webclient_verb(inner_method: &str) -> Option<String> {
+    VERBS
+        .contains(&inner_method)
+        .then(|| inner_method.to_uppercase())
+}
+
 struct Annotation<'t> {
     name: String,
     args: Vec<(Option<String>, Node<'t>)>,

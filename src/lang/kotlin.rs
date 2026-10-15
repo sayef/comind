@@ -24,6 +24,20 @@ impl LangSpec for Kotlin {
         let callee = kids
             .first()
             .filter(|k| k.kind() == "navigation_expression")?;
+        let parts = named_children(*callee);
+        if parts.last().is_some_and(|l| text(*l, src) == "uri") {
+            let inner = parts.first().filter(|p| p.kind() == "call_expression")?;
+            let inner_nav = named_children(*inner)
+                .into_iter()
+                .find(|k| k.kind() == "navigation_expression")?;
+            let verb = spring::webclient_verb(text(*named_children(inner_nav).last()?, src))?;
+            let list = kids.iter().find(|k| k.kind() == "value_arguments")?;
+            return Some(RawContract::Op {
+                receiver: vec![spring::WEBCLIENT.into()],
+                method: verb,
+                args: spring::args(*list, src),
+            });
+        }
         let mut receiver = path(*callee, src)?;
         let method = receiver.pop()?;
         if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {

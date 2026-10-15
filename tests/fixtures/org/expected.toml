@@ -968,3 +968,16 @@ case = "contract-go-default-mux"
 kind = "serves"
 src = "gosvc:routes.go::metrics"
 dst = "contract:http:ANY /metrics"
+
+# ---- Spring WebClient ----
+[[edge]]
+case = "contract-webclient"
+kind = "consumes"
+src = "jvm-svc:src/main/kotlin/com/acme/app/AccountsGateway.kt::AccountsGateway.roles"
+dst = "contract:http:DELETE /api/accounts/{}/roles"
+
+[[edge]]
+case = "contract-webclient"
+kind = "consumes"
+src = "spring-svc:src/main/java/com/acme/users/ItemsGateway.java::ItemsGateway.item"
+dst = "contract:http:GET /api/items/{}"

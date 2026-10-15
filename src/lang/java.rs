@@ -47,6 +47,17 @@ impl LangSpec for Java {
             return None;
         }
         let method = field_text(node, "name", src)?;
+        if method == "uri" {
+            let inner = node
+                .child_by_field_name("object")
+                .filter(|o| o.kind() == "method_invocation")?;
+            let verb = spring::webclient_verb(field_text(inner, "name", src)?)?;
+            return Some(RawContract::Op {
+                receiver: vec![spring::WEBCLIENT.into()],
+                method: verb,
+                args: spring::args(node.child_by_field_name("arguments")?, src),
+            });
+        }
         if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {
             return None;
         }

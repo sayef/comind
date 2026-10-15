@@ -672,6 +672,19 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             return;
         }
+        if matches!(f.language, Language::Java | Language::Kotlin)
+            && receiver == [crate::lang::spring::WEBCLIENT]
+        {
+            let url = args.positional.first().and_then(Option::as_ref);
+            if let Some(url) = url.and_then(|u| self.value(u, from, 0)) {
+                emit(
+                    from,
+                    format!("http:{method} {}", http_path(&url)),
+                    EdgeKind::Consumes,
+                );
+            }
+            return;
+        }
         if matches!(f.language, Language::Java | Language::Kotlin) {
             if let Some((_, verb)) = crate::lang::spring::REST_TEMPLATE
                 .iter()
