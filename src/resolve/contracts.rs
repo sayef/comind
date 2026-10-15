@@ -87,8 +87,8 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                         continue;
                     };
                     // File-routed handlers (Next.js) carry their full path and no router.
-                    let full = if receiver.is_empty() {
-                        p
+                    let fulls = if receiver.is_empty() {
+                        vec![p]
                     } else {
                         let Some(router) = cx.var_of(receiver, &f.file_id, f) else {
                             continue;
@@ -96,14 +96,23 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                         if !cx.routers.contains_key(&router) {
                             continue;
                         }
-                        format!("{}{p}", cx.prefix(&router, 0))
+                        cx.prefixes(&router, 0)
+                            .into_iter()
+                            .map(|pre| format!("{pre}{p}"))
+                            .collect()
                     };
                     let kind = if *client {
                         EdgeKind::Consumes
                     } else {
                         EdgeKind::Serves
                     };
-                    emit(handler, format!("http:{method} {}", http_path(&full)), kind);
+                    for full in fulls {
+                        emit(
+                            handler,
+                            format!("http:{method} {}", http_path(&full)),
+                            kind.clone(),
+                        );
+                    }
                 }
                 ContractFact::Handle {
                     from,
@@ -289,7 +298,7 @@ struct Cx<'b, 'a> {
     /// Router variable id → own prefix.
     routers: HashMap<String, String>,
     /// Router variable id → (parent app/router id, include prefix).
-    mounts: HashMap<String, (String, String)>,
+    mounts: HashMap<String, Vec<(String, String)>>,
     /// Classes/interfaces whose methods (transitively) perform HTTP, plus their supertypes.
     http_types: std::collections::HashSet<String>,
     /// Go route groups: (scope, variable) → (parent receiver, prefix).
@@ -504,7 +513,9 @@ impl<'b, 'a> Cx<'b, 'a> {
                 };
                 if let (Some(parent), Some(router)) = (parent, router) {
                     cx.mounts
-                        .insert(router, (parent, prefix.unwrap_or_default()));
+                        .entry(router)
+                        .or_default()
+                        .push((parent, prefix.unwrap_or_default()));
                 }
             }
         }
@@ -580,11 +591,25 @@ impl<'b, 'a> Cx<'b, 'a> {
     }
 
     /// Full mount prefix of a router: parents' include prefixes, then its own prefix.
-    fn prefix(&self, router: &str, depth: u32) -> String {
+    /// Every full mount prefix of a router (a router can be mounted in several places).
+    fn prefixes(&self, router: &str, depth: u32) -> Vec<String> {
         let own = self.routers.get(router).cloned().unwrap_or_default();
         match self.mounts.get(router) {
-            Some((parent, p)) if depth < 8 => format!("{}{p}{own}", self.prefix(parent, depth + 1)),
-            _ => own,
+            Some(ms) if depth < 8 => {
+                let mut out: Vec<String> = ms
+                    .iter()
+                    .flat_map(|(parent, p)| {
+                        self.prefixes(parent, depth + 1)
+                            .into_iter()
+                            .map(move |pp| format!("{pp}{p}"))
+                    })
+                    .map(|pre| format!("{pre}{own}"))
+                    .collect();
+                out.sort();
+                out.dedup();
+                out
+            }
+            _ => vec![own],
         }
     }
 
@@ -732,15 +757,17 @@ impl<'b, 'a> Cx<'b, 'a> {
                         }
                         _ => from.to_string(),
                     };
-                    emit(
-                        &handler,
-                        format!(
-                            "http:{} {}",
-                            method.to_uppercase(),
-                            http_path(&format!("{}{p}", self.prefix(&router, 0)))
-                        ),
-                        EdgeKind::Serves,
-                    );
+                    for pre in self.prefixes(&router, 0) {
+                        emit(
+                            &handler,
+                            format!(
+                                "http:{} {}",
+                                method.to_uppercase(),
+                                http_path(&format!("{pre}{p}"))
+                            ),
+                            EdgeKind::Serves,
+                        );
+                    }
                 }
                 return;
             }

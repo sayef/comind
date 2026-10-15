@@ -34,3 +34,17 @@ func ginRoutes(r *engine) {
 	v1.GET("/orders", listOrders)
 	v1.GET("/orders/:id", showOrder)
 }
+
+type chiRouter struct{}
+
+func (c *chiRouter) Route(prefix string, fn func(r *chiRouter)) {}
+func (c *chiRouter) Get(path string, h func(c *engine))          {}
+func listInvoices(c *engine)                                     {}
+
+func chiRoutes(root *chiRouter) {
+	root.Route("/billing", func(r *chiRouter) {
+		r.Route("/v2", func(r *chiRouter) {
+			r.Get("/invoices", listInvoices)
+		})
+	})
+}

@@ -1013,3 +1013,29 @@ case = "same-file-instantiate"
 kind = "instantiates"
 src = "service-a:service_a/completion.py::build"
 dst = "service-a:service_a/completion.py::CompletionPublisher"
+
+# ---- chi nested Route closures ----
+[[edge]]
+case = "contract-chi-route"
+kind = "serves"
+src = "gosvc:routes.go::listInvoices"
+dst = "contract:http:GET /billing/v2/invoices"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::chiRoutes"
+dst = "gosvc:routes.go::chiRouter.Route"
+
+# ---- A router mounted under two prefixes ----
+[[edge]]
+case = "contract-express-multi-mount"
+kind = "serves"
+src = "web-app:src/server.ts::listJobs"
+dst = "contract:http:GET /api/legacy/jobs"
+
+[[edge]]
+case = "contract-express-multi-mount"
+kind = "serves"
+src = "web-app:src/server.ts"
+dst = "contract:http:POST /api/legacy/jobs"

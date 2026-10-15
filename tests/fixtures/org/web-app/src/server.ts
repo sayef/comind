@@ -10,3 +10,4 @@ api.post("/jobs", (req: unknown, res: unknown) => {});
 
 const app = express();
 app.use("/api/v2", api);
+app.use("/api/legacy", api);

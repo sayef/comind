@@ -84,10 +84,11 @@ impl LangSpec for Go {
             .filter(|h| h.kind() != "func_literal")
             .and_then(|h| path(*h, src))
             .unwrap_or_default();
+        let (prefix, receiver) = route_scope(node, receiver.to_vec(), src);
         Some(RawContract::Handle {
-            receiver: receiver.to_vec(),
+            receiver,
             method: verb,
-            path: ValueExpr::Lit(route.to_string()),
+            path: ValueExpr::Lit(format!("{prefix}{route}")),
             handler,
         })
     }
@@ -337,6 +338,53 @@ fn value_type(v: Node, src: &[u8]) -> Option<TypeSource> {
         }),
         _ => None,
     }
+}
+
+/// chi's `r.Route("/api", func(r chi.Router) { r.Get(...) })`: the prefixes of the enclosing
+/// `Route` closures whose parameter is this receiver, and the outermost receiver.
+fn route_scope(node: Node, mut receiver: Vec<String>, src: &[u8]) -> (String, Vec<String>) {
+    let mut prefix = String::new();
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        cur = n.parent();
+        if n.kind() != "func_literal" {
+            continue;
+        }
+        let param = n
+            .child_by_field_name("parameters")
+            .and_then(|ps| named_children(ps).into_iter().next())
+            .and_then(|p| p.child_by_field_name("name"))
+            .map(|i| text(i, src).to_string());
+        let call = n
+            .parent()
+            .filter(|a| a.kind() == "argument_list")
+            .and_then(|a| a.parent())
+            .filter(|c| c.kind() == "call_expression");
+        let (Some(param), Some(call)) = (param, call) else {
+            continue;
+        };
+        if receiver != [param] {
+            continue;
+        }
+        let Some(p) = call
+            .child_by_field_name("function")
+            .and_then(|f| path(f, src))
+        else {
+            continue;
+        };
+        let Some((m, outer)) = p.split_last() else {
+            continue;
+        };
+        let lit = call
+            .child_by_field_name("arguments")
+            .and_then(|a| named_children(a).into_iter().next())
+            .and_then(|a| value(a, src));
+        if let (true, Some(ValueExpr::Lit(l))) = (m == "Route", lit) {
+            prefix = format!("{l}{prefix}");
+            receiver = outer.to_vec();
+        }
+    }
+    (prefix, receiver)
 }
 
 fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
