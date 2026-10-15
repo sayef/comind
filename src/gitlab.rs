@@ -1,6 +1,6 @@
-//! GitLab merge requests as distiller evidence: which MRs carry reasoning worth keeping
-//! (reverted, closed unmerged, or discussed), their discussion with people removed, and the
-//! files they touched. Uses the REST API with `GITLAB_TOKEN` (or `CI_JOB_TOKEN` in CI).
+//! GitLab merge requests as distiller evidence, one MR at a time as it merges (no backfill):
+//! its description and human discussion with people removed, and the files it touched. Uses
+//! the REST API with `GITLAB_TOKEN` (or `CI_JOB_TOKEN` in CI).
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -31,58 +31,15 @@ struct Diff {
     new_path: String,
 }
 
-/// Words that mark a discussion about something that did not work or was decided against.
-const SIGNALS: &[&str] = &[
-    "tried",
-    "doesn't work",
-    "does not work",
-    "didn't work",
-    "won't work",
-    "instead",
-    "revert",
-    "rollback",
-    "roll back",
-    "broke",
-    "breaks",
-    "regression",
-    "alternative",
-    "rejected",
-    "abandon",
-    "workaround",
-    "gotcha",
-    "must not",
-    "never ",
-    "race condition",
-    "deadlock",
-    "leak",
-    "flaky",
-    "too slow",
-    "timeout",
-];
-
-/// Worth sending to the distiller: a revert, or a human discussion that gives a reason (a
-/// failure or a choice). Closing an MR "in favour of !528" alone says nothing worth keeping.
-pub fn worth_reading(mr: &MergeRequest, notes: Option<&[Note]>) -> bool {
-    if mr.title.to_lowercase().starts_with("revert") {
-        return true;
-    }
-    let Some(notes) = notes else {
-        // Before fetching notes: only MRs with a discussion can qualify.
-        return mr.user_notes_count >= if mr.state == "closed" { 1 } else { 3 };
-    };
-    let human: Vec<&Note> = notes.iter().filter(|n| !n.system).collect();
-    let text = format!(
-        "{} {}",
-        mr.description.as_deref().unwrap_or(""),
-        human
-            .iter()
-            .map(|n| n.body.as_str())
-            .collect::<Vec<_>>()
-            .join(" ")
-    )
-    .to_lowercase();
-    let enough = human.len() >= if mr.state == "closed" { 1 } else { 3 };
-    enough && SIGNALS.iter().any(|s| text.contains(s))
+/// Structural check only (no keyword guessing): a revert, or an MR with human discussion or a
+/// real description. Whether it holds anything worth keeping is the model's call.
+pub fn eligible(mr: &MergeRequest, notes: &[Note]) -> bool {
+    mr.title.to_lowercase().starts_with("revert")
+        || notes.iter().any(|n| !n.system && n.body.trim().len() > 20)
+        || mr
+            .description
+            .as_deref()
+            .is_some_and(|d| d.trim().len() >= 200)
 }
 
 /// Evidence spans for one MR; mentions of people are removed (records describe code, not people).
@@ -193,23 +150,16 @@ impl Client {
         Ok(resp.json().await?)
     }
 
-    /// The most recently updated merged or closed MRs, up to `limit`.
-    pub async fn merge_requests(&self, limit: usize) -> Result<Vec<MergeRequest>> {
-        let mut out = Vec::new();
-        for page in 1..=limit.div_ceil(100).max(1) {
-            let batch: Vec<MergeRequest> = self
-                .get(&format!(
-                    "merge_requests?state=all&order_by=updated_at&per_page=100&page={page}"
-                ))
-                .await?;
-            let done = batch.len() < 100;
-            out.extend(batch.into_iter().filter(|m| m.state != "opened"));
-            if done || out.len() >= limit {
-                break;
-            }
-        }
-        out.truncate(limit);
-        Ok(out)
+    pub async fn merge_request(&self, iid: u64) -> Result<MergeRequest> {
+        self.get(&format!("merge_requests/{iid}")).await
+    }
+
+    /// Merged MRs that contain a commit (the merge commit of a main-branch pipeline).
+    pub async fn merged_for_commit(&self, sha: &str) -> Result<Vec<MergeRequest>> {
+        let all: Vec<MergeRequest> = self
+            .get(&format!("repository/commits/{sha}/merge_requests"))
+            .await?;
+        Ok(all.into_iter().filter(|m| m.state == "merged").collect())
     }
 
     pub async fn notes(&self, iid: u64) -> Result<Vec<Note>> {
@@ -249,39 +199,26 @@ mod tests {
     }
 
     #[test]
-    fn only_reasoning_heavy_mrs_are_read() {
-        assert!(worth_reading(
+    fn eligibility_is_structural() {
+        assert!(eligible(
             &mr("merged", "Revert \"cache competencies\"", 0),
-            None
+            &[]
         ));
-        assert!(
-            worth_reading(&mr("closed", "Cache competencies", 2), None),
-            "worth fetching notes"
-        );
-        let superseded = [note("closing in favor of my PR !528")];
-        assert!(!worth_reading(
-            &mr("closed", "Cache titles", 1),
-            Some(&superseded)
+        let short = MergeRequest {
+            description: Some("bump".into()),
+            ..mr("merged", "Bump deps", 0)
+        };
+        assert!(!eligible(&short, &[]));
+        assert!(!eligible(
+            &short,
+            &[Note {
+                body: "added 2 commits to the branch".into(),
+                system: true
+            }]
         ));
-        let reason = [note("closing: the cache leaked titles across customers")];
-        assert!(worth_reading(
-            &mr("closed", "Cache titles", 1),
-            Some(&reason)
-        ));
-        assert!(!worth_reading(&mr("merged", "Bump deps", 0), None));
-        let talk = [
-            note("@alice we tried an LRU here before and it leaked across customers"),
-            note("ok, scoping by customer instead"),
-            note("LGTM"),
-        ];
-        assert!(worth_reading(
-            &mr("merged", "Speed up lookups", 3),
-            Some(&talk)
-        ));
-        let chat = [note("nice"), note("LGTM"), note("thanks")];
-        assert!(!worth_reading(
-            &mr("merged", "Speed up lookups", 3),
-            Some(&chat)
+        assert!(eligible(
+            &short,
+            &[note("Diese Variante hat im Lasttest nicht gereicht.")]
         ));
     }
 

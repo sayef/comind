@@ -366,21 +366,21 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum DistillWhat {
-    /// GitLab merge requests of a repo: reverted, closed unmerged, or with a discussion about
-    /// what failed or was decided (needs `GITLAB_TOKEN` with read_api)
+    /// A merged GitLab MR (default: the one that merged the repo's HEAD commit, as in a
+    /// main-branch CI pipeline). Needs `GITLAB_TOKEN` (read_api) or `CI_JOB_TOKEN`
     Mr {
         /// Local checkout of the repo (for anchoring to indexed symbols)
         repo: String,
-        /// GitLab project path, e.g. `group/sub/repo`
+        /// GitLab project path, e.g. `group/sub/repo` (default: `CI_PROJECT_PATH`)
         #[arg(long)]
-        project: String,
-        /// How many recent merged/closed MRs to scan
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
-        /// At most this many MRs go to the LLM (cost cap)
-        #[arg(long, default_value_t = 30)]
-        max_calls: usize,
-        /// Only list the MRs that would be sent; no LLM call
+        project: Option<String>,
+        /// MR number; default: the merged MR containing `--commit`
+        #[arg(long)]
+        iid: Option<u64>,
+        /// Commit to look up (default: the repo's HEAD)
+        #[arg(long)]
+        commit: Option<String>,
+        /// Show what would be sent; no LLM call
         #[arg(long)]
         list: bool,
         #[arg(long)]
@@ -609,17 +609,17 @@ fn main() -> ExitCode {
                 DistillWhat::Mr {
                     repo,
                     project,
-                    limit,
-                    max_calls,
+                    iid,
+                    commit,
                     list,
                     dry_run,
                     index_dir,
                 },
         } => cmd_distill_mr(
             &repo,
-            &project,
-            limit,
-            max_calls,
+            project.or_else(|| std::env::var("CI_PROJECT_PATH").ok()),
+            iid,
+            commit,
             list,
             dry_run,
             index_dir.as_deref(),
@@ -1670,23 +1670,38 @@ fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: 
 
 fn cmd_distill_mr(
     repo: &str,
-    project: &str,
-    limit: usize,
-    max_calls: usize,
+    project: Option<String>,
+    iid: Option<u64>,
+    commit: Option<String>,
     list: bool,
     dry_run: bool,
     from: Option<&str>,
 ) -> ExitCode {
+    let Some(project) = project else {
+        comind::ui::err("pass --project group/repo (or run in GitLab CI)");
+        return ExitCode::FAILURE;
+    };
     let name = std::fs::canonicalize(repo)
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
         .unwrap_or_else(|| repo_name(repo));
-    let client = match comind::gitlab::Client::from_env(project) {
+    let client = match comind::gitlab::Client::from_env(&project) {
         Ok(c) => c,
         Err(e) => {
             comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
+    };
+    let commit = match (iid, commit) {
+        (Some(_), _) => None,
+        (None, Some(c)) => Some(c),
+        (None, None) => match comind::git::head_commit(Path::new(repo)) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                comind::ui::err(&format!("{e:#}"));
+                return ExitCode::FAILURE;
+            }
+        },
     };
     let cfg = comind::config::Config::load();
     let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
@@ -1695,12 +1710,6 @@ fn cmd_distill_mr(
     };
     let root = cfg.index_dir(from);
     let records = comind::ledger::all_blocking(&root).unwrap_or_default();
-    let cited: HashSet<String> = records
-        .iter()
-        .flat_map(|r| r.evidence.iter())
-        .filter(|e| e.starts_with("mr:!"))
-        .cloned()
-        .collect();
     let entries = comind::ledger::derive(&records, &symbols);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -1709,63 +1718,63 @@ fn cmd_distill_mr(
             return ExitCode::FAILURE;
         }
     };
-    // Deterministic selection first; only selected MRs reach the LLM.
-    let picked = rt.block_on(async {
-        let mrs = client.merge_requests(limit).await?;
-        let scanned = mrs.len();
-        let mut picked = Vec::new();
+    let fetched = rt.block_on(async {
+        let mrs = match (iid, &commit) {
+            (Some(i), _) => vec![client.merge_request(i).await?],
+            (None, Some(sha)) => client.merged_for_commit(sha).await?,
+            _ => Vec::new(),
+        };
+        let mut out = Vec::new();
         for mr in mrs {
-            if picked.len() >= max_calls || cited.contains(&format!("mr:!{}", mr.iid)) {
-                continue;
-            }
-            let quick = comind::gitlab::worth_reading(&mr, None);
-            if !quick && mr.user_notes_count < 3 {
-                continue;
-            }
             let notes = client.notes(mr.iid).await?;
-            if !comind::gitlab::worth_reading(&mr, Some(&notes)) {
-                continue;
-            }
             let files = client.files(mr.iid).await.unwrap_or_default();
-            picked.push((mr, notes, files));
+            out.push((mr, notes, files));
         }
-        anyhow::Ok((scanned, picked))
+        anyhow::Ok(out)
     });
-    let (scanned, picked) = match picked {
+    let fetched = match fetched {
         Ok(x) => x,
         Err(e) => {
             comind::ui::err(&format!("{e:#}"));
             return ExitCode::FAILURE;
         }
     };
-    let bundles: Vec<comind::distill::Bundle> = picked
-        .iter()
-        .filter_map(|(mr, notes, files)| {
-            let touched = comind::distill::touched(&symbols, Some(&name), files);
-            (!touched.is_empty()).then(|| {
-                let spans = comind::gitlab::spans(mr, notes, 1);
-                comind::distill::bundle(spans, touched, &entries, "gitlab")
-            })
-        })
-        .collect();
-    comind::ui::note(&format!(
-        "{scanned} MR(s) scanned, {} worth reading, {} touch indexed code and go to the configured LLM",
-        picked.len(),
-        bundles.len()
-    ));
-    if list {
-        for (mr, notes, _) in &picked {
-            println!(
-                "- !{} [{}] {} ({} comments)",
-                mr.iid,
-                mr.state,
-                mr.title,
-                notes.iter().filter(|n| !n.system).count()
-            );
+    let mut bundles = Vec::new();
+    for (mr, notes, files) in &fetched {
+        let used = records
+            .iter()
+            .any(|r| r.evidence.contains(&format!("mr:!{}", mr.iid)));
+        let touched = comind::distill::touched(&symbols, Some(&name), files);
+        let why_not = if used {
+            Some("already distilled")
+        } else if !comind::gitlab::eligible(mr, notes) {
+            Some("no discussion or description to learn from")
+        } else if touched.is_empty() {
+            Some("touches no indexed code")
+        } else {
+            None
+        };
+        if let Some(w) = why_not {
+            comind::ui::note(&format!("skip !{} {}: {w}", mr.iid, mr.title));
+            continue;
         }
-        return ExitCode::SUCCESS;
+        if list {
+            println!(
+                "- !{} {} ({} comments, {} indexed symbols)",
+                mr.iid,
+                mr.title,
+                notes.iter().filter(|n| !n.system).count(),
+                touched.len()
+            );
+            continue;
+        }
+        let spans = comind::gitlab::spans(mr, notes, 1);
+        bundles.push(comind::distill::bundle(spans, touched, &entries, "gitlab"));
     }
-    if bundles.is_empty() {
+    if fetched.is_empty() {
+        comind::ui::ok("no merged MR for this commit");
+    }
+    if list || bundles.is_empty() {
         return ExitCode::SUCCESS;
     }
     distill_and_record(&bundles, dry_run, &root)
