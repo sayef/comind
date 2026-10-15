@@ -1,0 +1,45 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# CI passes `--warn unmaintained`, so unmaintained crates are reported but do not fail the check.
+unmaintained = "all"
+yanked = "deny"
+ignore = [
+    # quick-xml 0.39 comes with object_store 0.13, pinned by the lancedb 0.37 stack; it only parses
+    # responses from the object store the user configures. Drop once lancedb moves to object_store 0.14.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml via object_store 0.13 (lancedb pin); trusted storage only" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml via object_store 0.13 (lancedb pin); trusted storage only" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    # option-ext (via dirs): file-level copyleft, used unmodified.
+    "MPL-2.0",
+    # tiny-keccak (via arrow's const-random): public-domain dedication.
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

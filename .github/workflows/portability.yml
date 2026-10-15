@@ -9,20 +9,47 @@ name: portability
 # the portability check that matters right before binaries ship, not on a nightly timer.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*.*.*"]
+  # Right after a release PR is merged (release-plz tags with GITHUB_TOKEN, so `push: tags` never fires).
+  workflow_run:
+    workflows: [Release-plz]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   # ---- Linux: build a portable glibc binary, then exec it on several distros --------------
+  # Only when the triggering release-plz run actually tagged a release.
+  tag:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.tag.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: tag
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || git tag --points-at HEAD --list 'v*' | grep -q .; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-linux:
+    needs: tag
+    if: needs.tag.outputs.release == 'true'
     runs-on: ubuntu-latest
     # Debian 11 (glibc 2.31) → binary runs on Ubuntu 20.04+, Rocky 9, Debian 11/12, etc.
     container: rust:1.97-bullseye
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: apt-get update && apt-get install -y protobuf-compiler cmake
       - run: cargo build --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: comind-linux
           path: target/release/comind
@@ -42,7 +69,7 @@ jobs:
           - image: alpine:3.20
             musl: true # glibc binary on musl — expected to fail until we ship a musl build
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: comind-linux }
       - run: chmod +x comind
       - name: Smoke test on ${{ matrix.image }}
@@ -58,13 +85,15 @@ jobs:
   # ---- macOS: build + smoke on Apple Silicon; x86_64 built there too and run under Rosetta ---
   # (Intel macos-13 runners are being retired and stall in the queue.)
   build-test-macos:
+    needs: tag
+    if: needs.tag.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: brew install protobuf cmake
       - name: Ensure Rosetta (run x86_64 binary on arm)
         if: matrix.target == 'x86_64-apple-darwin'

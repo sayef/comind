@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout comind (the engine)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: comind
 
@@ -84,7 +84,7 @@ jobs:
           "$BIN" ledger --compact --index-dir "$INDEX_DIR"
 
       - name: Upload index artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: comind-index
           # Upload the index dir (contains _graph) so consumers point --index-dir at it.

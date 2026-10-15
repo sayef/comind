@@ -53,7 +53,7 @@ Prebuilt binaries (macOS arm64/x64, Linux x64/arm64) are published to
 curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
 ```
 
-Or from source (needs Rust — pinned via `rust-toolchain.toml` — plus `protoc` and `cmake`):
+Or from source (needs Rust 1.94.1 or newer, plus `protoc` and `cmake`):
 
 ```bash
 git clone https://github.com/sayef/comind && cd comind

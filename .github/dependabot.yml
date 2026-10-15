@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust:
+        patterns: ["*"]
+    ignore:
+      # Pinned: 0.38–0.40 need the heavy `remote` feature to compile.
+      - dependency-name: lancedb
+      - dependency-name: lance-index
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
