@@ -15,6 +15,7 @@ pub mod distill;
 
 pub mod facts;
 pub mod git;
+pub mod gitlab;
 pub mod lang;
 pub mod manifests;
 pub mod packages;

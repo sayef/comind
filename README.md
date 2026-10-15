@@ -135,7 +135,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
 | `comind ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comind erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
-| `comind distill git <repo> [--dry-run]` | Propose ledger records (failed attempts, decisions, constraints, gotchas) from commit messages; sends them to the configured LLM; proposals land at T1 in the review inbox. Agent sessions are never read |
+| `comind distill git <repo> \| mr <repo> --project <group/repo> [--list] [--dry-run]` | Propose ledger records (failed attempts, decisions, constraints, gotchas) from commit messages or GitLab merge requests (only reverted MRs or discussions that give a reason; `@mentions` removed; `--max-calls` caps LLM use; `--list` shows what would be sent). Needs `GITLAB_TOKEN` for `mr`. Proposals land at T1 in the review inbox. Agent sessions are never read |
 | `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |

@@ -102,8 +102,8 @@ pub fn bundle<'a>(
     }
 }
 
-pub const SYSTEM: &str = "You extract durable engineering knowledge from commit messages \
-Default output is an empty list.\n\
+pub const SYSTEM: &str = "You extract durable engineering knowledge from commit messages and merge-request \
+discussions. Default output is an empty list.\n\
 Emit a record ONLY for:\n\
 - an approach that was tried and failed, reverted or abandoned (kind=attempt)\n\
 - an explicit choice between alternatives, with the reason (kind=decision)\n\
@@ -256,6 +256,9 @@ fn check(
     if evidence.is_empty() {
         return Err("no evidence span cited".into());
     }
+    let mut evidence = evidence;
+    evidence.sort();
+    evidence.dedup();
     let anchor_ids: HashSet<&str> = anchors.iter().map(|a| a.symbol.as_str()).collect();
     let dup = b
         .known
@@ -326,7 +329,7 @@ fn similar(a: &str, b: &str) -> bool {
 }
 
 /// Lines that look like secrets never leave the machine.
-fn redact(t: &str) -> String {
+pub(crate) fn redact(t: &str) -> String {
     t.lines()
         .map(|l| {
             if crate::ledger::suspicious(l).is_some() {
