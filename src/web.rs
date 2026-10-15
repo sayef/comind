@@ -43,6 +43,7 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/find", get(find))
         .route("/api/node", get(node))
         .route("/api/review", post(review))
+        .layer(axum::middleware::from_fn(local_only))
         .with_state(state);
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
@@ -53,6 +54,28 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         crate::ui::ok(&format!("comind web UI on http://{addr} (Ctrl-C to stop)"));
         axum::serve(listener, app).await.context("serve")
     })
+}
+
+/// Reject requests whose `Host` is not loopback, so a DNS-rebinding page cannot read the API.
+async fn local_only(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let name = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    if matches!(name, "127.0.0.1" | "localhost" | "[::1]") {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            "comind web UI answers on localhost only",
+        )
+            .into_response()
+    }
 }
 
 async fn page() -> impl IntoResponse {
