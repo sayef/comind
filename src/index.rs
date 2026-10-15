@@ -286,13 +286,26 @@ fn u32_col<'a>(
 /// Load the persisted org graph back into core types. This is the fast consumer path:
 /// `serve`/`explore` load once from Lance (local mmap or S3) instead of re-parsing.
 pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
+    read_graph_at(uri, None).await
+}
+
+/// The graph at given `(symbols, edges)` table versions, or the latest.
+pub async fn read_graph_at(uri: &str, at: Option<(u64, u64)>) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     let db = lancedb::connect(uri).execute().await?;
+    let open = |name: &'static str, v: Option<u64>| {
+        let db = &db;
+        async move {
+            let t = db.open_table(name).execute().await?;
+            if let Some(v) = v {
+                t.checkout(v).await?;
+            }
+            anyhow::Ok(t)
+        }
+    };
 
     // symbols
     let mut symbols = Vec::new();
-    let mut st = db
-        .open_table("symbols")
-        .execute()
+    let mut st = open("symbols", at.map(|a| a.0))
         .await?
         .query()
         .execute()
@@ -366,9 +379,7 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 
     // edges
     let mut edges = Vec::new();
-    let mut st = db
-        .open_table("edges")
-        .execute()
+    let mut st = open("edges", at.map(|a| a.1))
         .await?
         .query()
         .execute()
@@ -422,6 +433,28 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
 }
 
 /// Blocking wrapper for [`read_graph`].
+/// Graph versions as `(symbols version, edges version, UTC time)`, oldest first. Each graph
+/// write commits both tables, so the n-th versions of each belong together.
+pub async fn graph_versions(uri: &str) -> Result<Vec<(u64, u64, String)>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let s = db
+        .open_table("symbols")
+        .execute()
+        .await?
+        .list_versions()
+        .await?;
+    let e = db
+        .open_table("edges")
+        .execute()
+        .await?
+        .list_versions()
+        .await?;
+    Ok(s.iter()
+        .zip(e.iter())
+        .map(|(a, b)| (a.version, b.version, a.timestamp.to_rfc3339()))
+        .collect())
+}
+
 pub fn read_graph_blocking(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     runtime()?.block_on(read_graph(uri))
 }

@@ -159,6 +159,7 @@ async function loadOverview() {
     <h2>Org map</h2>
     <canvas id="org"></canvas>
     <div class="legend">Click a repo to see what a change there can affect · arrows point from dependent to dependency · solid: code (imports, calls, inheritance) · dashed: service contracts (HTTP, queues, tables) · label = edge count</div>
+    <div id="orgtime"></div>
     <div id="orglens"></div>
     <h2>Ledger</h2><p>${led}</p>
     <h2>Repos</h2>
@@ -168,7 +169,38 @@ async function loadOverview() {
     ${o.skew.length ? `<table><tr><th>Package</th><th>Published by</th><th>Consumer</th><th>Locked</th></tr>
       ${o.skew.map(s => `<tr><td>${esc(s.package)}</td><td>${esc(s.publisher)} @ ${esc(s.published)}</td><td>${esc(s.consumer)}</td><td class="mono">${esc(s.locked)}</td></tr>`).join("")}</table>`
       : '<p class="muted">No internal dependency pins a version other than its publisher.</p>'}`;
-  const org = await api("/api/orgmap");
+  const latest = await api("/api/orgmap");
+  showOrg(latest);
+  const versions = await api("/api/versions");
+  if (versions.length > 1) {
+    const last = versions.length - 1;
+    $("#orgtime").innerHTML = `<div class="toolbar"><input type="range" id="orgv" min="0" max="${last}" value="${last}" style="flex:1">
+      <span class="muted mono" id="orgvl">${esc(versions[last].slice(0, 16).replace("T", " "))} · latest</span></div><div id="orgdiff"></div>`;
+    let t;
+    $("#orgv").oninput = () => {
+      const i = +$("#orgv").value;
+      $("#orgvl").textContent = versions[i].slice(0, 16).replace("T", " ") + (i === last ? " · latest" : ` · version ${i + 1} of ${last + 1}`);
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        const g = i === last ? latest : await api("/api/orgmap?at=" + i);
+        showOrg(g);
+        $("#orgdiff").innerHTML = i === last ? "" : linkDiff(g, latest, versions[i].slice(0, 10));
+      }, 250);
+    };
+  }
+}
+
+// Repo links that appeared or disappeared between an earlier map and the latest.
+function linkDiff(then, now, when) {
+  const key = e => `${e.src} → ${e.dst} (${e.kind})`;
+  const a = new Set(then.edges.map(key)), b = new Set(now.edges.map(key));
+  const added = [...b].filter(k => !a.has(k)), gone = [...a].filter(k => !b.has(k));
+  if (!added.length && !gone.length) return `<p class="muted">No repo links changed since ${esc(when)}.</p>`;
+  const chips = xs => xs.map(x => `<span class="chip">${esc(x)}</span>`).join(" ");
+  return `<p>Since ${esc(when)}: ${added.length ? "new " + chips(added) : ""} ${gone.length ? " · gone " + chips(gone) : ""}</p>`;
+}
+
+function showOrg(org) {
   let selected = null;
   const pick = id => {
     selected = selected === id ? null : id;
@@ -320,6 +352,8 @@ function drawGraph(cv, g, opt = {}) {
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
   const edges = g.edges.map(e => ({...e, a: byId[e.src], b: byId[e.dst]})).filter(e => e.a && e.b);
   let drag = null, ticks = 0, lensOn = null, lensSet = null;
+  // A redraw on the same canvas retires the previous animation loop.
+  const gen = (cv._gen = (cv._gen || 0) + 1);
   const lit = id => !lensOn || id === lensOn || lensSet.has(id);
   function step() {
     for (const a of nodes) for (const b of nodes) {
@@ -375,7 +409,12 @@ function drawGraph(cv, g, opt = {}) {
       ctx.globalAlpha = 1;
     }
   }
-  function loop() { if (ticks++ < 260 || drag) step(); draw(); if (ticks < 260 || drag) requestAnimationFrame(loop); }
+  function loop() {
+    if (cv._gen !== gen) return;
+    if (ticks++ < 260 || drag) step();
+    draw();
+    if (ticks < 260 || drag) requestAnimationFrame(loop);
+  }
   const at = ev => { const b = cv.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
   const hit = (x, y) => nodes.find(n => Math.hypot(n.x - x, n.y - y) < 12);
   let moved = false;

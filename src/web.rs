@@ -37,6 +37,7 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/", get(page))
         .route("/api/overview", get(overview))
         .route("/api/orgmap", get(orgmap))
+        .route("/api/versions", get(versions))
         .route("/api/contracts", get(contracts))
         .route("/api/ledger", get(ledger))
         .route("/api/conventions", get(conventions))
@@ -122,16 +123,69 @@ async fn overview(State(s): State<Shared>) -> Json<Value> {
     }))
 }
 
-/// Repos as nodes; edges aggregate cross-repo code dependencies and contract links.
-async fn orgmap(State(s): State<Shared>) -> Json<Value> {
+#[derive(Deserialize)]
+struct AtQ {
+    /// Index into `/api/versions` (oldest first); absent = the loaded (latest) graph.
+    at: Option<usize>,
+}
+
+fn graph_uri(s: &AppState) -> Option<String> {
+    s.data
+        .root
+        .as_ref()
+        .map(|r| format!("{}/_graph", r.trim_end_matches('/')))
+}
+
+async fn versions(State(s): State<Shared>) -> Json<Value> {
+    let list = match graph_uri(&s) {
+        Some(u) => crate::index::graph_versions(&u).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    Json(json!(list
+        .into_iter()
+        .map(|(_, _, t)| t)
+        .collect::<Vec<_>>()))
+}
+
+async fn orgmap(State(s): State<Shared>, Query(q): Query<AtQ>) -> impl IntoResponse {
     let d = &s.data;
-    let repo_of: std::collections::HashMap<String, &str> = d
-        .symbols
+    let Some(i) = q.at else {
+        return (
+            StatusCode::OK,
+            Json(org(&d.graph, &d.symbols, &d.edges, &d.contracts)),
+        );
+    };
+    let past = async {
+        let uri = graph_uri(&s).context("read-only UI has no index root")?;
+        let list = crate::index::graph_versions(&uri).await?;
+        let (sv, ev, _) = *list.get(i).context("no such version")?;
+        let (symbols, edges) = crate::index::read_graph_at(&uri, Some((sv, ev))).await?;
+        let graph = crate::graph::CodeGraph::build(&symbols, &edges);
+        let contracts = graph.contracts(None, false);
+        anyhow::Ok(org(&graph, &symbols, &edges, &contracts))
+    };
+    match past.await {
+        Ok(v) => (StatusCode::OK, Json(v)),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("{e:#}")})),
+        ),
+    }
+}
+
+/// Repos as nodes; edges aggregate cross-repo code dependencies and contract links.
+fn org(
+    graph: &crate::graph::CodeGraph,
+    symbols: &[crate::model::Symbol],
+    edges: &[crate::model::Edge],
+    contracts: &[crate::graph::ContractView],
+) -> Value {
+    let repo_of: std::collections::HashMap<String, &str> = symbols
         .iter()
         .map(|x| (x.id.render(), x.repo.0.as_str()))
         .collect();
     let mut links: BTreeMap<(String, String, &str), usize> = BTreeMap::new();
-    for e in d.edges.iter().filter(|e| e.cross_repo) {
+    for e in edges.iter().filter(|e| e.cross_repo) {
         if let (Some(a), Some(b)) = (repo_of.get(&e.src.render()), repo_of.get(&e.dst.render())) {
             if *a != crate::resolve::CONTRACTS && *b != crate::resolve::CONTRACTS && a != b {
                 *links
@@ -143,12 +197,11 @@ async fn orgmap(State(s): State<Shared>) -> Json<Value> {
     let real = |n: &&Node| n.repo != crate::resolve::CONTRACTS;
     // A queue subscribed to a topic is a contract consuming a contract: its own consumers are
     // the topic's consumers too.
-    let by_id: std::collections::HashMap<&str, &crate::graph::ContractView> = d
-        .contracts
+    let by_id: std::collections::HashMap<&str, &crate::graph::ContractView> = contracts
         .iter()
         .map(|c| (c.contract.id.as_str(), c))
         .collect();
-    for c in &d.contracts {
+    for c in contracts {
         let mut consumers: Vec<&Node> = c.consumers.iter().filter(real).collect();
         for via in c.consumers.iter().filter(|n| !real(n)) {
             if let Some(q) = by_id.get(via.id.as_str()) {
@@ -163,8 +216,7 @@ async fn orgmap(State(s): State<Shared>) -> Json<Value> {
             }
         }
     }
-    let nodes: Vec<Value> = d
-        .graph
+    let nodes: Vec<Value> = graph
         .repos()
         .into_iter()
         .map(|(r, n)| json!({"id": r, "name": format!("{r} ({n})"), "repo": r, "location": ""}))
@@ -173,7 +225,7 @@ async fn orgmap(State(s): State<Shared>) -> Json<Value> {
         .into_iter()
         .map(|((a, b, k), n)| json!({"src": a, "dst": b, "kind": k, "weight": n}))
         .collect();
-    Json(json!({"nodes": nodes, "edges": edges}))
+    json!({"nodes": nodes, "edges": edges})
 }
 
 async fn contracts(State(s): State<Shared>) -> Json<Value> {
