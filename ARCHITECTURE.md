@@ -103,6 +103,7 @@ src/
   gitlab.rs   GitLab MRs as distiller evidence: selection, depersonalised discussion, touched files.
   distill.rs  LLM distiller: commit-message evidence → validated ledger proposals (T1). Never reads agent sessions.
   signing.rs  optional SSH signatures on ledger records; verification against allowed_signers.
+  cache.rs    local mirror of a remote (S3) index for hooks, refreshed in the background.
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
   preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
   tui.rs      `comind ui`: overview, contracts, ledger, explorer, conventions (ratatui).

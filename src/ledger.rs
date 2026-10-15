@@ -645,7 +645,9 @@ pub fn harvest(repo: &str, history: &[crate::git::CommitFiles], symbols: &[Symbo
 /// Blocking helpers for the CLI.
 pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
     let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.put(rec))
+    runtime()?.block_on(ledger.put(rec))?;
+    crate::cache::invalidate(index_root);
+    Ok(())
 }
 
 pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {

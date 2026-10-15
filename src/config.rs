@@ -37,6 +37,8 @@ pub struct Config {
     pub signing_key: Option<String>,
     /// `allowed_signers` file for verifying records (default: git `gpg.ssh.allowedSignersFile`).
     pub allowed_signers: Option<String>,
+    /// Seconds between freshness checks of the local mirror of a remote index (default 300).
+    pub cache_ttl_secs: Option<u64>,
 }
 
 impl Config {

@@ -307,6 +307,11 @@ enum Cmd {
         index_dir: Option<String>,
     },
     /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
+    /// Local mirror of a remote index (used by hooks)
+    Cache {
+        #[command(subcommand)]
+        what: CacheWhat,
+    },
     Hook {
         /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
         /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
@@ -361,6 +366,15 @@ enum Cmd {
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheWhat {
+    /// Bring the local mirror of a remote index up to date
+    Refresh {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
     },
 }
 
@@ -604,6 +618,29 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+        Cmd::Cache {
+            what: CacheWhat::Refresh { index_dir },
+        } => {
+            let root = comind::config::Config::load().index_dir(index_dir.as_deref());
+            let Some(dir) = comind::cache::dir(&root) else {
+                comind::ui::err("no HOME for the cache");
+                return ExitCode::FAILURE;
+            };
+            match comind::cache::refresh(&root, &dir) {
+                Ok(copied) => {
+                    comind::ui::ok(if copied {
+                        "mirror updated (graph copied)"
+                    } else {
+                        "mirror up to date"
+                    });
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    comind::ui::err(&format!("{e:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Cmd::Distill {
             what:
                 DistillWhat::Mr {
@@ -1599,6 +1636,30 @@ fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
 
 /// Claude Code hook: emit `additionalContext` with ledger records relevant to the session/edit.
 /// Never blocks or approves anything; any failure prints nothing and exits 0.
+/// Graph symbols and ledger records for a hook: a remote (S3) index is read from its local
+/// mirror, refreshed in the background when stale, so the agent never waits on the network.
+fn hook_data(
+    cfg: &comind::config::Config,
+    from: Option<&str>,
+) -> Option<(Vec<Symbol>, Vec<comind::ledger::Record>)> {
+    let root = cfg.index_dir(from);
+    if comind::cache::is_remote(&root) {
+        let dir = comind::cache::dir(&root)?;
+        let ttl = std::time::Duration::from_secs(
+            cfg.cache_ttl_secs.unwrap_or(comind::cache::DEFAULT_TTL),
+        );
+        if comind::cache::stale(&dir, ttl) {
+            comind::cache::refresh_in_background(&root);
+        }
+        if let Some((symbols, _, records)) = comind::cache::read(&dir) {
+            return Some((symbols, records));
+        }
+    }
+    let (symbols, _) = comind::index::read_graph_blocking(&cfg.graph_dir(from)).ok()?;
+    let records = comind::ledger::all_blocking(&root).ok()?;
+    Some((symbols, records))
+}
+
 /// The first string under `key` anywhere in a hook payload (agents nest tool input differently).
 fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
     match v {
@@ -1864,10 +1925,7 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     .unwrap_or("default")
     .to_string();
     let cfg = comind::config::Config::load();
-    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
-        return ExitCode::SUCCESS;
-    };
-    let Ok(records) = comind::ledger::all_blocking(&cfg.index_dir(from)) else {
+    let Some((symbols, records)) = hook_data(&cfg, from) else {
         return ExitCode::SUCCESS;
     };
     if records.is_empty() {

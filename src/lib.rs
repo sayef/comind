@@ -7,6 +7,7 @@
 
 pub mod model;
 
+pub mod cache;
 pub mod checks;
 pub mod config;
 pub mod configvals;
