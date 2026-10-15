@@ -20,6 +20,8 @@ comind link ../shared-lib ../service-a ../service-b --index-dir s3://your-bucket
 - `--no-llm` keeps indexing free and local; drop it to add LLM summaries, flow walkthroughs and
   a style guide (sends code to your configured LLM).
 
+Each developer can run `comind doctor` to check their setup (index, hooks, keys, signing).
+
 ## 2. Give agents the index
 
 ```bash

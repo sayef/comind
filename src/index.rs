@@ -455,6 +455,10 @@ pub async fn graph_versions(uri: &str) -> Result<Vec<(u64, u64, String)>> {
         .collect())
 }
 
+pub fn graph_versions_blocking(uri: &str) -> Result<Vec<(u64, u64, String)>> {
+    runtime()?.block_on(graph_versions(uri))
+}
+
 pub fn read_graph_blocking(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     runtime()?.block_on(read_graph(uri))
 }

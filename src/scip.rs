@@ -143,7 +143,7 @@ fn run_indexers(root: &Path, tmp: &Path) -> Vec<(PathBuf, String)> {
     out
 }
 
-fn which(bin: &str) -> Option<PathBuf> {
+pub fn which(bin: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|d| d.join(bin))
         .find(|p| p.is_file())
