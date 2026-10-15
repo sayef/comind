@@ -15,7 +15,14 @@ use crate::ledger::{Entry, Status, Trust};
 use crate::manifests::InternalDep;
 use crate::model::{Edge, Symbol};
 
-const TABS: [&str; 5] = ["Overview", "Contracts", "Ledger", "Explorer", "Conventions"];
+const TABS: [&str; 6] = [
+    "Overview",
+    "Contracts",
+    "Ledger",
+    "Explorer",
+    "Conventions",
+    "Timeline",
+];
 
 /// Everything the UI shows, loaded from an index.
 pub struct Data {
@@ -33,7 +40,7 @@ pub struct Data {
 pub struct App {
     data: Data,
     tab: usize,
-    lists: [ListState; 5],
+    lists: [ListState; 6],
     /// Second-level selection (conventions of the selected repo).
     inner: ListState,
     filter: String,
@@ -47,7 +54,7 @@ pub struct App {
 
 impl App {
     pub fn new(data: Data) -> App {
-        let mut lists: [ListState; 5] = Default::default();
+        let mut lists: [ListState; 6] = Default::default();
         for l in &mut lists {
             l.select(Some(0));
         }
@@ -110,7 +117,7 @@ impl App {
             KeyCode::Left | KeyCode::BackTab => {
                 self.switch((self.tab + TABS.len() - 1) % TABS.len())
             }
-            KeyCode::Char(c @ '1'..='5') => self.switch(c as usize - '1' as usize),
+            KeyCode::Char(c @ '1'..='6') => self.switch(c as usize - '1' as usize),
             KeyCode::Down | KeyCode::Char('j') => self.step(1),
             KeyCode::Up | KeyCode::Char('k') => self.step(-1),
             KeyCode::PageDown => self.step(10),
@@ -198,6 +205,7 @@ impl App {
             2 => self.entries().len(),
             3 => self.found.len(),
             4 => self.repos().len(),
+            5 => self.timeline().len(),
             _ => 0,
         }
     }
@@ -219,6 +227,18 @@ impl App {
             .into_iter()
             .filter(|e| self.matches(&e.record.title))
             .collect()
+    }
+
+    /// Every record, newest first (retracted and superseded included: the history).
+    fn timeline(&self) -> Vec<&Entry> {
+        let mut v: Vec<&Entry> = self
+            .data
+            .entries
+            .iter()
+            .filter(|e| self.matches(&e.record.title))
+            .collect();
+        v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
+        v
     }
 
     fn repos(&self) -> Vec<String> {
@@ -254,7 +274,8 @@ impl App {
             1 => self.contracts_tab(f, body),
             2 => self.ledger_tab(f, body),
             3 => self.explorer_tab(f, body),
-            _ => self.conventions_tab(f, body),
+            4 => self.conventions_tab(f, body),
+            _ => self.timeline_tab(f, body),
         }
         let help = if self.typing {
             format!(" typing: {}▏  Enter/Esc done", self.input_ref())
@@ -429,6 +450,59 @@ impl App {
             None => {
                 "no ledger records — add some with `comind remember` or `comind harvest`".into()
             }
+        };
+        f.render_widget(
+            detail_box(
+                text.lines().map(|l| Line::from(l.to_string())).collect(),
+                " detail ",
+            ),
+            right,
+        );
+    }
+
+    fn timeline_tab(&mut self, f: &mut Frame, area: Rect) {
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .areas(area);
+        let entries = self.timeline();
+        let mut month = "";
+        let items: Vec<ListItem> = entries
+            .iter()
+            .map(|e| {
+                let r = &e.record;
+                let m = r.created.get(..7).unwrap_or("");
+                let shown = if m == month { "       " } else { m };
+                month = m;
+                let dim = matches!(e.status, Status::Retracted | Status::Superseded);
+                let at = r
+                    .anchors
+                    .first()
+                    .map(|a| format!("  {}:{}", a.repo, a.name))
+                    .unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{shown} "), Style::new().fg(Color::Magenta)),
+                    Span::styled(
+                        format!("{} ", r.created.get(8..10).unwrap_or("  ")),
+                        Style::new().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{:<10} ", r.kind.as_str()),
+                        Style::new().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        r.title.clone(),
+                        Style::new().fg(if dim { Color::DarkGray } else { Color::Reset }),
+                    ),
+                    Span::styled(at, Style::new().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
+        let title = format!(" timeline ({}) — newest first ", items.len());
+        f.render_stateful_widget(list(items, &title), left, &mut self.lists[5]);
+        let selected = self.lists[5].selected().unwrap_or(0);
+        let text = match self.timeline().get(selected) {
+            Some(e) => crate::ledger::markdown("record", &[e]),
+            None => "no ledger records yet".into(),
         };
         f.render_widget(
             detail_box(
