@@ -152,6 +152,9 @@ pub struct Record {
     pub provenance: Provenance,
     /// RFC 3339, UTC.
     pub created: String,
+    /// Optional SSH signature over the rest of the record (see [`crate::signing`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<crate::signing::Signature>,
 }
 
 impl Record {
@@ -169,6 +172,7 @@ impl Record {
             relation: None,
             provenance,
             created: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            signature: None,
         }
     }
 
@@ -304,6 +308,9 @@ impl Ledger {
     /// Write one record, create-only: an existing key is an error, never an overwrite.
     pub async fn put(&self, rec: &Record) -> Result<()> {
         rec.validate()?;
+        let mut signed = rec.clone();
+        crate::signing::sign(&mut signed)?;
+        let rec = &signed;
         let bytes = serde_json::to_vec_pretty(rec)?;
         let hash = blake3::hash(&bytes).to_hex();
         let key = self
@@ -714,6 +721,8 @@ pub struct Entry {
     pub current: Vec<String>,
     /// Ids of records that supersede, retract, confirm or dispute this one.
     pub related: Vec<(RelationKind, String)>,
+    /// Signature check: verified, failed (record treated as T0), or unsigned/unchecked.
+    pub verified: Option<bool>,
 }
 
 /// Derive status and trust for every non-relation record.
@@ -729,7 +738,11 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
         }
     }
     let mut related: HashMap<&str, Vec<(RelationKind, String, AuthorKind)>> = HashMap::new();
-    for r in records {
+    // A relation whose signature fails counts for nothing (no forged confirmations).
+    for r in records
+        .iter()
+        .filter(|r| crate::signing::verify(r) != Some(false))
+    {
         if let Some(rel) = &r.relation {
             related.entry(rel.target.as_str()).or_default().push((
                 rel.kind,
@@ -768,12 +781,18 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
                 AuthorKind::Harvested => Trust::T0,
                 AuthorKind::Distilled => Trust::T1,
             };
+            let verified = crate::signing::verify(r);
             Entry {
                 record: r.clone(),
                 status,
-                trust,
+                trust: if verified == Some(false) {
+                    Trust::T0
+                } else {
+                    trust
+                },
                 current,
                 related: rels.into_iter().map(|(k, id, _)| (k, id)).collect(),
+                verified,
             }
         })
         .collect()
@@ -904,9 +923,16 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
                 AuthorKind::Distilled => "the distiller",
             },
             r.provenance.source,
-            &r.created[..r.created.len().min(10)],
+            r.created.get(..10).unwrap_or(&r.created),
             r.id
         ));
+        match e.verified {
+            Some(true) => o.push_str("- signature: verified\n"),
+            Some(false) => {
+                o.push_str("- signature: INVALID (forged or edited) — do not rely on this\n")
+            }
+            None => {}
+        }
     }
     o
 }

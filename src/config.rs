@@ -33,6 +33,10 @@ pub struct Config {
     pub guide: Option<bool>,
     /// SCIP use in `index`/`link`: `auto` (default) | `require` | `off`.
     pub scip: Option<String>,
+    /// SSH key that signs ledger records (default: git `user.signingkey` when `gpg.format=ssh`).
+    pub signing_key: Option<String>,
+    /// `allowed_signers` file for verifying records (default: git `gpg.ssh.allowedSignersFile`).
+    pub allowed_signers: Option<String>,
 }
 
 impl Config {

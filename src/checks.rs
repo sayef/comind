@@ -432,6 +432,7 @@ mod tests {
             trust: Trust::T3,
             current: Vec::new(),
             related: Vec::new(),
+            verified: None,
         }];
         assert!(revivals(&e, &[row("1.0.1")]).is_empty());
         assert_eq!(revivals(&e, &[row("1.3.0")]).len(), 1);
