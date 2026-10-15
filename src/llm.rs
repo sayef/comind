@@ -176,6 +176,11 @@ impl LlmClient {
         self.complete(system, &user, 900).await
     }
 
+    /// Distiller call: JSON proposals for ledger records (see [`crate::distill`]).
+    pub async fn distill(&self, system: &str, user: &str) -> Result<String> {
+        self.complete(system, user, 1500).await
+    }
+
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a
     /// concise markdown walkthrough plus a few flow-oriented questions the flow answers.
     pub async fn narrate_flow(

@@ -289,6 +289,12 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
+    /// Propose ledger records from a session transcript or commit history (sends them to the
+    /// configured LLM; proposals land at T1 for human review)
+    Distill {
+        #[command(subcommand)]
+        what: DistillWhat,
+    },
     /// Seed the ledger from git history: reverts → failed attempts, commit trailers → records
     Harvest {
         /// Repository paths (already indexed)
@@ -305,7 +311,7 @@ enum Cmd {
         /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
         /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
         agent: String,
-        /// Event: `session-start` | `pre-edit`
+        /// Event: `session-start` | `pre-edit` | `session-end` (distils the transcript in the background)
         event: String,
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
@@ -355,6 +361,33 @@ enum Cmd {
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DistillWhat {
+    /// A Claude Code session transcript (JSONL)
+    Transcript {
+        path: String,
+        /// The session's working directory (default: read from the transcript)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Print proposals without recording them
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Commit messages of a repo (squash-merged MR descriptions, reverts with reasons)
+    Git {
+        repo: String,
+        /// How many first-parent commits to read
+        #[arg(long, default_value_t = 300)]
+        limit: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
     },
 }
 
@@ -561,6 +594,24 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+        Cmd::Distill {
+            what:
+                DistillWhat::Transcript {
+                    path,
+                    cwd,
+                    dry_run,
+                    index_dir,
+                },
+        } => cmd_distill_transcript(&path, cwd.as_deref(), dry_run, index_dir.as_deref()),
+        Cmd::Distill {
+            what:
+                DistillWhat::Git {
+                    repo,
+                    limit,
+                    dry_run,
+                    index_dir,
+                },
+        } => cmd_distill_git(&repo, limit, dry_run, index_dir.as_deref()),
         Cmd::Harvest {
             repos,
             limit,
@@ -1539,6 +1590,157 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
     }
 }
 
+/// Run the distiller over bundles and record (or print) what passes validation.
+fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: &str) -> ExitCode {
+    let llm = match comind::llm::LlmClient::from_env() {
+        Ok(l) => l,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            comind::ui::err(&format!("runtime: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let (mut kept, mut dropped) = (0, 0);
+    for b in bundles {
+        let out = match rt.block_on(comind::distill::run(&llm, b)) {
+            Ok(o) => o,
+            Err(e) => {
+                comind::ui::err(&format!("distiller: {e:#}"));
+                return ExitCode::FAILURE;
+            }
+        };
+        for (rec, why) in out {
+            if let Some(why) = why {
+                dropped += 1;
+                comind::ui::note(&format!("dropped `{}`: {why}", rec.title));
+                continue;
+            }
+            kept += 1;
+            println!(
+                "- [{}] {} — evidence {}",
+                rec.kind.as_str(),
+                rec.title,
+                rec.evidence.join(", ")
+            );
+            if !dry_run {
+                if let Err(e) = comind::ledger::put_blocking(root, &rec) {
+                    comind::ui::err(&format!("not recorded: {e:#}"));
+                }
+            }
+        }
+    }
+    let (i, o) = llm.token_usage();
+    let verb = if dry_run {
+        "proposed"
+    } else {
+        "recorded for review (T1)"
+    };
+    comind::ui::ok(&format!(
+        "{kept} {verb}, {dropped} dropped · tokens {i} in / {o} out"
+    ));
+    ExitCode::SUCCESS
+}
+
+fn cmd_distill_transcript(
+    path: &str,
+    cwd: Option<&str>,
+    dry_run: bool,
+    from: Option<&str>,
+) -> ExitCode {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            comind::ui::err(&format!("read {path}: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let cwd = cwd.map(str::to_string).or_else(|| {
+        text.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .find_map(|v| v.get("cwd").and_then(|c| c.as_str()).map(str::to_string))
+    });
+    let cfg = comind::config::Config::load();
+    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
+        comind::ui::err("no index; run `comind link` first");
+        return ExitCode::FAILURE;
+    };
+    let (spans, edited, session) = comind::distill::transcript(&text);
+    let repo = cwd.and_then(|c| repo_at(&symbols, Path::new(&c)));
+    let touched = comind::distill::touched(&symbols, repo.as_deref(), &edited);
+    if touched.is_empty() {
+        comind::ui::ok("the session edited no indexed code; nothing to distill");
+        return ExitCode::SUCCESS;
+    }
+    let root = cfg.index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let b = comind::distill::bundle(spans, touched, &entries, "claude-code", session);
+    distill_and_record(std::slice::from_ref(&b), dry_run, &root)
+}
+
+fn cmd_distill_git(repo: &str, limit: usize, dry_run: bool, from: Option<&str>) -> ExitCode {
+    let name = std::fs::canonicalize(repo)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| repo_name(repo));
+    let history = match comind::git::history(Path::new(repo), limit) {
+        Ok(h) => h,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let cfg = comind::config::Config::load();
+    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
+        comind::ui::err("no index; run `comind link` first");
+        return ExitCode::FAILURE;
+    };
+    let root = cfg.index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    // Commits already cited by a record are not sent again.
+    let cited: HashSet<String> = records
+        .iter()
+        .flat_map(|r| r.evidence.iter())
+        .filter_map(|e| e.strip_prefix("commit:"))
+        .map(|s| s.chars().take(10).collect())
+        .collect();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let spans = comind::distill::commits(&history, &cited);
+    if spans.is_empty() {
+        comind::ui::ok("no new commits with an explanatory message");
+        return ExitCode::SUCCESS;
+    }
+    let by_sha: HashMap<String, &comind::git::CommitFiles> = history
+        .iter()
+        .map(|c| (c.sha.chars().take(10).collect(), c))
+        .collect();
+    let bundles: Vec<comind::distill::Bundle> = spans
+        .chunks(8)
+        .map(|chunk| {
+            let files: Vec<String> = chunk
+                .iter()
+                .filter_map(|s| s.cite.strip_prefix("commit:"))
+                .filter_map(|sha| by_sha.get(sha))
+                .flat_map(|c| c.changed.iter().cloned())
+                .collect();
+            let touched = comind::distill::touched(&symbols, Some(&name), &files);
+            comind::distill::bundle(chunk.to_vec(), touched, &entries, "git", None)
+        })
+        .collect();
+    comind::ui::note(&format!(
+        "{} commit(s) in {} batch(es) go to the configured LLM",
+        spans.len(),
+        bundles.len()
+    ));
+    distill_and_record(&bundles, dry_run, &root)
+}
+
 fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     use std::io::Read;
     let claude = agent == "claude";
@@ -1549,6 +1751,25 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let v: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    if event == "session-end" {
+        // Distil in the background; the agent never waits on the LLM.
+        if let (Some(t), Ok(exe)) = (find_str(&v, "transcript_path"), std::env::current_exe()) {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args(["distill", "transcript", t]);
+            if let Some(c) = find_str(&v, "cwd") {
+                cmd.args(["--cwd", c]);
+            }
+            if let Some(d) = from {
+                cmd.args(["--index-dir", d]);
+            }
+            let _ = cmd
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+        return ExitCode::SUCCESS;
+    }
     let cwd = v
         .get("cwd")
         .and_then(|c| c.as_str())
@@ -1677,6 +1898,12 @@ fn cmd_init_hooks(agent: &str) -> ExitCode {
             "PreToolUse": [{
                 "matcher": "Edit|MultiEdit|Write",
                 "hooks": [{"type": "command", "command": "comind hook claude pre-edit"}]
+            }],
+            "PreCompact": [{
+                "hooks": [{"type": "command", "command": "comind hook claude session-end"}]
+            }],
+            "SessionEnd": [{
+                "hooks": [{"type": "command", "command": "comind hook claude session-end"}]
             }]
         }
     });

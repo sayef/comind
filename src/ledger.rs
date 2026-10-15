@@ -88,6 +88,8 @@ pub enum AuthorKind {
     Human,
     Agent,
     Harvested,
+    /// Proposed by the distiller from a transcript or commits; T1 until a human confirms.
+    Distilled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,7 +221,7 @@ impl Record {
 }
 
 /// Secrets and invisible/bidi characters never enter the shared ledger.
-fn suspicious(text: &str) -> Option<&'static str> {
+pub(crate) fn suspicious(text: &str) -> Option<&'static str> {
     if text
         .chars()
         .any(|c| matches!(c as u32, 0x202A..=0x202E | 0x2066..=0x2069 | 0xE0000..=0xE007F))
@@ -764,6 +766,7 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
                 AuthorKind::Agent | AuthorKind::Harvested if !r.evidence.is_empty() => Trust::T2,
                 AuthorKind::Agent => Trust::T1,
                 AuthorKind::Harvested => Trust::T0,
+                AuthorKind::Distilled => Trust::T1,
             };
             Entry {
                 record: r.clone(),
@@ -898,6 +901,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
                 AuthorKind::Human => "a human",
                 AuthorKind::Agent => "an agent",
                 AuthorKind::Harvested => "harvesting",
+                AuthorKind::Distilled => "the distiller",
             },
             r.provenance.source,
             &r.created[..r.created.len().min(10)],

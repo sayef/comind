@@ -99,6 +99,7 @@ src/
   recipes.rs  change recipes from commit history (what changes together when adding code).
   ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
   configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
+  distill.rs  LLM distiller: transcript / commit evidence → validated ledger proposals (T1).
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
   preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
   tui.rs      `comind ui`: overview, contracts, ledger, explorer, conventions (ratatui).

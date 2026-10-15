@@ -256,6 +256,9 @@ One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 
 ## 6. The distiller — the prompt that matters most
 
+> Implemented in `src/distill.rs` (`comind distill`, session-end hook). Ops are limited to `new`
+> for now; proposals land in the shared inbox at T1 (author `distilled`) instead of local drafts.
+
 Runs on turn-end/compaction, MR merge, or on demand. Provider-agnostic via Rig; works with local
 models through any OpenAI-compatible endpoint.
 
