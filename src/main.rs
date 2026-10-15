@@ -52,6 +52,9 @@ enum Cmd {
         guide: bool,
         #[arg(long = "no-guide", overrides_with = "guide")]
         no_guide: bool,
+        /// Skip every LLM step (enrich, flows, guide), whatever the config says
+        #[arg(long = "no-llm")]
+        no_llm: bool,
         /// Reparse only files changed since the last indexed commit
         #[arg(long)]
         incremental: bool,
@@ -90,6 +93,9 @@ enum Cmd {
         guide: bool,
         #[arg(long = "no-guide", overrides_with = "guide")]
         no_guide: bool,
+        /// Skip every LLM step (enrich, flows, guide), whatever the config says
+        #[arg(long = "no-llm")]
+        no_llm: bool,
         /// Recompute only symbols in files changed since the last index
         #[arg(long)]
         incremental: bool,
@@ -396,6 +402,7 @@ fn main() -> ExitCode {
             no_flows,
             guide,
             no_guide,
+            no_llm,
             incremental,
             since,
             scip,
@@ -408,9 +415,9 @@ fn main() -> ExitCode {
                 &repo,
                 index_dir.as_deref(),
                 tri(embed, no_embed).unwrap_or(cfg.embed()),
-                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                tri(flows, no_flows).unwrap_or(cfg.flows()),
-                tri(guide, no_guide).unwrap_or(cfg.guide()),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
+                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
                 since.as_deref(),
                 scip,
@@ -427,6 +434,7 @@ fn main() -> ExitCode {
             no_flows,
             guide,
             no_guide,
+            no_llm,
             incremental,
             scip,
         } => {
@@ -439,9 +447,9 @@ fn main() -> ExitCode {
                 &repos,
                 index_dir.as_deref(),
                 tri(embed, no_embed).unwrap_or(cfg.embed()),
-                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                tri(flows, no_flows).unwrap_or(cfg.flows()),
-                tri(guide, no_guide).unwrap_or(cfg.guide()),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
+                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
                 scip,
             )

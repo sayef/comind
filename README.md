@@ -79,7 +79,7 @@ builds and reads it (comind manages the internal dataset layout):
 
 ```bash
 # 1. Build the org index from several repos (embeddings + LLM enrichment/flows/guide run by
-#    default when OPENAI_API_KEY is set; add --no-enrich / --no-flows / --no-guide to skip)
+#    default when OPENAI_API_KEY is set; add --no-enrich / --no-flows / --no-guide to skip, or --no-llm for all)
 comind link ../pkg-common ../service-a --index-dir ./comind-index/org
 
 # 2. Explore / search the prebuilt index (instant, no re-parse)

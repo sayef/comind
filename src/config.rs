@@ -26,7 +26,7 @@ pub struct Config {
     /// `serve`: `md` | `json`. Absent = `md`.
     pub format: Option<String>,
     /// Default for `index`/`link` steps; `--x` / `--no-x` on the CLI override these.
-    /// Built-in defaults: embed on (local, cheap); enrich/flows/guide off (LLM cost + egress).
+    /// Built-in defaults: all on; the LLM steps skip without a key, and `--no-llm` skips them all.
     pub embed: Option<bool>,
     pub enrich: Option<bool>,
     pub flows: Option<bool>,
