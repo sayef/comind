@@ -109,7 +109,7 @@ Add to your MCP client (e.g. Claude Code):
 - **Before a change:** `ripple` (blast radius, across repos and service contracts), `context_pack` (minimal read-set + known constraints), `preflight` (constraints, dead ends, contracts, missing companions for a planned edit), `contracts` (HTTP routes, queues, buckets, tables and who uses them), `guide` (measured conventions and recipes).
 - **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
 
-Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). A constraint can carry a check that is evaluated on the graph and on manifests, e.g. `comind remember constraint --on get_user --title "Handlers never call raw SQL" --field "check=forbid calls from svc/app/handlers/** to **::raw_*"` or `--field "check=forbid dep lance =1.0.1"`; passing checks rank as T4, and `preflight` lists violations in the changed files. An attempt recorded with `--field "dep=lance =1.0.1"` is listed under *Retry conditions met* once no manifest uses that version any more. `comind init-hooks claude` prints Claude Code hooks that inject relevant ledger records at session start and just before an edit. With a remote (S3) index, hooks read a local mirror (`~/.cache/comind`) that refreshes itself in the background every `cache_ttl_secs` (default 300), so they stay fast; `comind cache refresh` updates it on demand. Other agents can call `comind hook generic pre-edit` (also `cursor`, `gemini`, `codex`) from their own hook config: it reads the hook payload on stdin, finds the edited file (or `COMIND_HOOK_FILE`), and prints plain markdown. Records are signed with your SSH signing key when one is configured (`signing_key` in config, or git `user.signingkey` with `gpg.format=ssh`) and verified against `allowed_signers` (config or git `gpg.ssh.allowedSignersFile`); a record whose signature fails drops to T0.
+Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, the distiller, signing and privacy are described in the **[team guide](docs/GUIDE.md)**.
 
 ## Commands
 
@@ -220,7 +220,7 @@ file → built-in default**.
 
 ```toml
 index_dir   = "~/.local/share/comind"   # default --index-dir (local path or s3://…)
-llm_model   = "gpt-4o-mini"
+llm_model   = "gpt-4o-mini"   # any OpenAI-compatible model id
 embed_model = "minishlab/potion-base-8M"
 format      = "md"    # default when --format is absent (search: md|table, serve: md|json)
 embed       = true    # index/link step defaults; CLI --x / --no-x override
@@ -230,6 +230,10 @@ guide       = true    # evidence-based style guide (cost + sends code)
 # llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
 # max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
 # max_flows   = 50    # cap --flows narrations (omit = no cap)
+# scip        = "auto"   # auto | require | off
+# cache_ttl_secs = 300   # freshness checks of the local mirror of a remote index (hooks)
+# signing_key = "~/.ssh/id_ed25519.pub"   # sign ledger records (default: git user.signingkey)
+# allowed_signers = "~/.config/git/allowed_signers"   # verify them (default: git config)
 ```
 
 Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`,
@@ -242,10 +246,11 @@ Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MOD
 
 ## Status
 
-Feature-complete: parse → resolve → index → graph → embed → enrich → search → serve, with
-git-incremental indexing at repo and org level, hybrid search (BM25 + vector + centrality), flow
-walkthroughs, and CI. Roadmap: service-contract graph (HTTP, queues, tables), a conventions engine,
-and the reasoning ledger — see [`docs/design/roadmap.md`](docs/design/roadmap.md).
+Engine: parse → resolve (tree-sitter + SCIP) → index → graph → embed → enrich → search → serve,
+git-incremental at repo and org level. On top: the service-contract graph (HTTP, queues, topics,
+buckets, tables, Terraform), conventions and recipes, the reasoning ledger (records, staleness,
+harvest, MR distiller, self-enforcing checks, signing, erasure), preflight, and terminal and web
+UIs. Progress and open items: [`docs/design/roadmap.md`](docs/design/roadmap.md).
 
 ## Development
 
