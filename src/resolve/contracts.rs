@@ -205,6 +205,8 @@ struct Cx<'b, 'a> {
     http_types: std::collections::HashSet<String>,
     /// Go route groups: (scope, variable) → (parent receiver, prefix).
     groups: HashMap<(String, String), (Vec<String>, String)>,
+    /// Repo → (dotted config key, value), from YAML config files, in file order.
+    config: HashMap<&'a str, Vec<(&'a str, &'a str)>>,
     /// Callable id → parameter names (receiver excluded).
     params: HashMap<&'a str, &'a [String]>,
     /// Callable id → what it does with its parameters (`send_message(QueueUrl=<param>)`).
@@ -289,7 +291,21 @@ impl<'b, 'a> Cx<'b, 'a> {
             groups: HashMap::new(),
             params: HashMap::new(),
             summaries: Default::default(),
+            config: HashMap::new(),
         };
+        for f in facts
+            .iter()
+            .filter(|f| f.file_id.starts_with(crate::configvals::SCOPE))
+        {
+            for v in &f.values {
+                if let ValueExpr::Lit(lit) = &v.value {
+                    cx.config
+                        .entry(f.repo.as_str())
+                        .or_default()
+                        .push((v.name.as_str(), lit.as_str()));
+                }
+            }
+        }
         for f in facts {
             for p in &f.params {
                 cx.params.insert(p.func.as_str(), p.names.as_slice());
@@ -995,10 +1011,10 @@ impl<'b, 'a> Cx<'b, 'a> {
                     })
                     .collect(),
             ),
-            ValueExpr::Name(path) => {
-                let (expr, at) = self.locate(path, scope, depth + 1)?;
-                self.value(&expr, &at, depth + 1)
-            }
+            ValueExpr::Name(path) => match self.locate(path, scope, depth + 1) {
+                Some((expr, at)) => self.value(&expr, &at, depth + 1),
+                None => self.config_value(path, scope),
+            },
             ValueExpr::Join { sep, parts } => {
                 let vals: Vec<String> = parts
                     .iter()
@@ -1026,6 +1042,38 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             ValueExpr::Record(_) => None,
         }
+    }
+
+    /// A settings path the code cannot resolve, read from the repo's YAML config: the path below
+    /// a settings root (`config.task_queue.queue`), or a unique match of its last 2+ segments.
+    fn config_value(&self, path: &[String], scope: &str) -> Option<String> {
+        let repo = self.b.file_facts_of(scope)?.repo.as_str();
+        let entries = self.config.get(repo)?;
+        let segs: Vec<&str> = path.iter().map(String::as_str).collect();
+        let root = segs.first()?.to_ascii_lowercase();
+        if segs.len() >= 2
+            && (root.contains("settings") || root.contains("config") || root == "cfg")
+        {
+            let key = segs[1..].join(".");
+            if let Some((_, v)) = entries.iter().find(|(k, _)| *k == key) {
+                return Some(v.to_string());
+            }
+        }
+        for k in (2..=segs.len()).rev() {
+            let suffix = segs[segs.len() - k..].join(".");
+            let dotted = format!(".{suffix}");
+            let hits: std::collections::BTreeSet<&str> = entries
+                .iter()
+                .filter(|(key, _)| *key == suffix || key.ends_with(&dotted))
+                .map(|(_, v)| *v)
+                .collect();
+            match hits.len() {
+                0 => continue,
+                1 => return hits.into_iter().next().map(str::to_string),
+                _ => return None,
+            }
+        }
+        None
     }
 
     /// The expression a dotted name denotes and the scope to read it in, following module

@@ -349,12 +349,29 @@ impl CodeGraph {
         let (mut p, mut c) = (Vec::new(), Vec::new());
         for e in self.g.edges_directed(contract, Incoming) {
             if PROVIDES.contains(e.weight()) {
-                p.push(self.node_of(e.source()));
+                p.push(self.qualified(e.source()));
             } else if is_contract_role(e.weight()) {
-                c.push(self.node_of(e.source()));
+                c.push(self.qualified(e.source()));
             }
         }
         (p, c)
+    }
+
+    /// A node named `Class.method` when it is a method, so `__init__` and `get` read clearly.
+    fn qualified(&self, idx: NodeIndex) -> Node {
+        let mut n = self.node_of(idx);
+        if self.g[idx].sym.kind == crate::model::SymbolKind::Method {
+            if let Some(owner) = self
+                .g
+                .edges_directed(idx, Incoming)
+                .find(|e| *e.weight() == EdgeKind::Contains)
+                .map(|e| &self.g[e.source()].sym)
+                .filter(|o| o.kind != crate::model::SymbolKind::File)
+            {
+                n.name = format!("{}.{}", owner.name, n.name);
+            }
+        }
+        n
     }
 
     /// All contracts, optionally of one type (`http`, `sqs`, …) or only those missing a side.

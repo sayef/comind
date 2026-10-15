@@ -943,3 +943,22 @@ kind = "publishes"
 src = "service-a:service_a/users.py::UserService.create"
 dst = "contract:sqs:users-queue"
 
+
+# ---- Settings paths resolved from YAML config files ----
+[[edge]]
+case = "contract-config-yaml"
+kind = "writes"
+src = "service-a:service_a/uploads.py::store"
+dst = "contract:s3:user-uploads"
+
+[[edge]]
+case = "module-call"
+kind = "calls"
+src = "service-a:service_a/cfg.py"
+dst = "service-a:service_a/cfg.py::load_config"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/uploads.py"
+dst = "service-a:service_a/cfg.py::config"

@@ -9,6 +9,7 @@ pub mod model;
 
 pub mod checks;
 pub mod config;
+pub mod configvals;
 pub mod conventions;
 
 pub mod facts;

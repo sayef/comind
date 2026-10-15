@@ -1,0 +1,3 @@
+aws:
+  uploads_bucket: user-uploads
+  region: ${AWS_REGION}

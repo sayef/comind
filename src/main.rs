@@ -1760,51 +1760,32 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
             return ExitCode::FAILURE;
         }
     };
-    let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
-    // contract id → (providers, consumers) as `repo:name`
-    let mut roles: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
-    for s in symbols.iter().filter(|s| s.kind == SymbolKind::Contract) {
-        roles.entry(s.name.clone()).or_default();
-    }
-    for e in &edges {
-        let (Some(src), Some(dst)) = (by_id.get(&e.src.render()), by_id.get(&e.dst.render()))
-        else {
-            continue;
-        };
-        if dst.kind != SymbolKind::Contract {
-            continue;
-        }
-        let who = format!("{}:{}", src.repo.0, src.name);
-        let slot = roles.entry(dst.name.clone()).or_default();
-        if comind::graph::PROVIDES.contains(&e.kind) {
-            slot.0.insert(who);
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let total = g.contracts(None, false).len();
+    let views = g.contracts(kind, dangling);
+    let list = |ns: &[comind::graph::Node]| {
+        let set: BTreeSet<String> = ns
+            .iter()
+            .map(|n| format!("{}:{}", n.repo, n.name))
+            .collect();
+        if set.is_empty() {
+            "—".to_string()
         } else {
-            slot.1.insert(who);
+            set.into_iter().collect::<Vec<_>>().join("\n")
         }
-    }
+    };
     let mut table = comfy_table::Table::new();
     table
         .load_preset(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["contract", "provided by", "used by"]);
-    let mut shown = 0;
-    for (name, (prov, cons)) in &roles {
-        if kind.is_some_and(|k| !name.starts_with(&format!("{k}:"))) {
-            continue;
-        }
-        if dangling && !prov.is_empty() && !cons.is_empty() {
-            continue;
-        }
-        let list = |s: &BTreeSet<String>| {
-            if s.is_empty() {
-                "—".to_string()
-            } else {
-                s.iter().cloned().collect::<Vec<_>>().join("\n")
-            }
-        };
-        table.add_row(vec![name.clone(), list(prov), list(cons)]);
-        shown += 1;
+    for v in &views {
+        table.add_row(vec![
+            v.contract.name.clone(),
+            list(&v.providers),
+            list(&v.consumers),
+        ]);
     }
-    comind::ui::header(&format!("Contracts — {shown} shown of {}", roles.len()));
+    comind::ui::header(&format!("Contracts — {} shown of {total}", views.len()));
     println!("{table}");
     ExitCode::SUCCESS
 }

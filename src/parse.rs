@@ -108,7 +108,9 @@ pub fn parse_repo(root: &Path, repo_name: &str) -> Result<ParseOutput> {
                 .map(|r| r.to_string_lossy().replace(MAIN_SEPARATOR, "/"))
         })
         .collect();
-    Ok(parse_files(root, repo_name, &files))
+    let mut out = parse_files(root, repo_name, &files);
+    out.facts.extend(crate::configvals::scan(root, repo_name));
+    Ok(out)
 }
 
 /// Parse a specific set of repo-relative files (for incremental indexing). Unsupported or
@@ -132,6 +134,13 @@ pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseO
             acc
         });
     out.dedup();
+    // Config files only reach here on incremental runs (a full parse scans them separately).
+    out.facts.extend(
+        rel_paths
+            .iter()
+            .filter(|r| crate::configvals::is_config(r) && detect(&root.join(r)).is_none())
+            .filter_map(|r| crate::configvals::file(root, repo_name, r)),
+    );
     out
 }
 
