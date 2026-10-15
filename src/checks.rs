@@ -197,6 +197,53 @@ impl Rule {
     }
 }
 
+/// Live attempts anchored to a dependency version (`dep=<pkg> <version>`) whose condition no
+/// longer holds: the package is still used, but no manifest matches that version any more.
+pub fn revivals<'e>(entries: &'e [Entry], packages: &[PackageRow]) -> Vec<(&'e Entry, String)> {
+    let mut out = Vec::new();
+    for e in entries {
+        if e.record.kind != Kind::Attempt
+            || matches!(e.status, Status::Retracted | Status::Superseded)
+        {
+            continue;
+        }
+        let Some(dep) = e.record.fields.get("dep").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Ok(Rule::Dep {
+            name,
+            version: Some(v),
+        }) = Rule::parse(&format!("forbid dep {dep}"))
+        else {
+            continue;
+        };
+        let pinned = Rule::Dep {
+            name: name.clone(),
+            version: Some(v),
+        };
+        let none = HashMap::new();
+        let used = Rule::Dep {
+            name,
+            version: None,
+        }
+        .violations(&none, &[], packages);
+        if !used.is_empty() && pinned.violations(&none, &[], packages).is_empty() {
+            let now: std::collections::BTreeSet<&str> = used
+                .iter()
+                .filter_map(|u| u.what.rsplit(' ').next())
+                .collect();
+            out.push((
+                e,
+                format!(
+                    "failed under `{dep}`; now on {}",
+                    now.into_iter().collect::<Vec<_>>().join(", ")
+                ),
+            ));
+        }
+    }
+    out
+}
+
 /// The rule text of a record, if it is a live constraint with a check.
 pub fn rule_of(e: &Entry) -> Option<&str> {
     if e.record.kind != Kind::Constraint
@@ -352,6 +399,43 @@ mod tests {
         assert_eq!(hit("forbid from svc/app/handlers/** to svc/app/db/*"), 1);
         assert_eq!(hit("forbid imports from svc/** to svc/**"), 0);
         assert_eq!(hit("forbid calls from svc/app/db/** to **"), 0);
+    }
+
+    #[test]
+    fn revival_when_pinned_version_is_gone() {
+        use crate::ledger::{Anchor, AuthorKind, Provenance, Record};
+        let row = |l: &str| PackageRow {
+            repo: "r".into(),
+            ecosystem: "cargo".into(),
+            name: "lance".into(),
+            publishes: false,
+            version: Some(l.into()),
+            locked: Some(l.into()),
+            manifest: "Cargo.toml".into(),
+        };
+        let mut rec = Record::new(
+            Kind::Attempt,
+            "lance fragment reuse",
+            Vec::<Anchor>::new(),
+            Provenance {
+                author: AuthorKind::Human,
+                actor: "a".into(),
+                source: "t".into(),
+                agent: None,
+                session: None,
+            },
+        );
+        rec.fields.insert("dep".into(), "lance =1.0.1".into());
+        let e = vec![Entry {
+            record: rec,
+            status: Status::Active,
+            trust: Trust::T3,
+            current: Vec::new(),
+            related: Vec::new(),
+        }];
+        assert!(revivals(&e, &[row("1.0.1")]).is_empty());
+        assert_eq!(revivals(&e, &[row("1.3.0")]).len(), 1);
+        assert!(revivals(&e, &[]).is_empty());
     }
 
     #[test]

@@ -1267,6 +1267,13 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
     let shown = comind::ledger::inbox(&entries, inbox);
     let title = if inbox { "Ledger inbox" } else { "Ledger" };
     println!("{}", comind::ledger::markdown(title, &shown));
+    let revived = comind::checks::revivals(&entries, &packages);
+    if !revived.is_empty() {
+        println!("## Retry conditions met\n");
+        for (e, why) in revived {
+            println!("- {} — {why}", comind::ledger::line(e));
+        }
+    }
     ExitCode::SUCCESS
 }
 
