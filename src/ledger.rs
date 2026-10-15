@@ -551,6 +551,13 @@ pub fn harvest(repo: &str, history: &[crate::git::CommitFiles], symbols: &[Symbo
             )
             .to_string();
             r.evidence.push(format!("commit:{short}"));
+            // When it happened (`created` is when it was recorded).
+            if let Some(t) = chrono::DateTime::from_timestamp(c.time, 0) {
+                r.fields.insert(
+                    "at".into(),
+                    serde_json::Value::String(t.format("%Y-%m-%d").to_string()),
+                );
+            }
             r
         };
         // A manual revert ("Reverted the X changes") without git's marker.

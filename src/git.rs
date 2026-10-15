@@ -90,6 +90,8 @@ pub struct CommitFiles {
     pub subject: String,
     /// Full commit message (for revert markers and trailers).
     pub message: String,
+    /// Commit time, seconds since the Unix epoch.
+    pub time: i64,
     pub added: Vec<String>,
     pub changed: Vec<String>,
 }
@@ -127,6 +129,7 @@ fn walk(repo_path: &Path, limit: usize, first_parent: bool) -> Result<Vec<Commit
                 .unwrap_or_default()
                 .to_string(),
             message: commit.message().unwrap_or_default().to_string(),
+            time: commit.time().seconds(),
             added: Vec::new(),
             changed: Vec::new(),
         };

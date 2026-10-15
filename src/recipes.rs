@@ -127,6 +127,7 @@ mod tests {
             sha: sha.into(),
             subject: format!("commit {sha}"),
             message: String::new(),
+            time: 0,
             added: added.iter().map(|s| s.to_string()).collect(),
             changed: changed.iter().map(|s| s.to_string()).collect(),
         }

@@ -237,7 +237,7 @@ impl App {
             .iter()
             .filter(|e| self.matches(&e.record.title))
             .collect();
-        v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
+        v.sort_by(|a, b| when(&b.record).cmp(when(&a.record)));
         v
     }
 
@@ -465,13 +465,18 @@ impl App {
             Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
                 .areas(area);
         let entries = self.timeline();
-        let mut month = "";
+        let mut month = String::new();
         let items: Vec<ListItem> = entries
             .iter()
             .map(|e| {
                 let r = &e.record;
-                let m = r.created.get(..7).unwrap_or("");
-                let shown = if m == month { "       " } else { m };
+                let w = when(r);
+                let m = w.get(..7).unwrap_or("").to_string();
+                let shown = if m == month {
+                    "       ".to_string()
+                } else {
+                    m.clone()
+                };
                 month = m;
                 let dim = matches!(e.status, Status::Retracted | Status::Superseded);
                 let at = r
@@ -482,7 +487,7 @@ impl App {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{shown} "), Style::new().fg(Color::Magenta)),
                     Span::styled(
-                        format!("{} ", r.created.get(8..10).unwrap_or("  ")),
+                        format!("{} ", w.get(8..10).unwrap_or("  ")),
                         Style::new().fg(Color::DarkGray),
                     ),
                     Span::styled(
@@ -683,6 +688,14 @@ fn detail_box<'a>(lines: Vec<Line<'a>>, title: &str) -> Paragraph<'a> {
     Paragraph::new(lines)
         .block(Block::bordered().title(title.to_string()))
         .wrap(Wrap { trim: false })
+}
+
+/// When a record's fact happened: harvested commit date, else when it was recorded.
+fn when(r: &crate::ledger::Record) -> &str {
+    r.fields
+        .get("at")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&r.created)
 }
 
 #[cfg(test)]
