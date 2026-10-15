@@ -296,7 +296,8 @@ enum Cmd {
     },
     /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
     Hook {
-        /// Agent: `claude`
+        /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
+        /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
         agent: String,
         /// Event: `session-start` | `pre-edit`
         event: String,
@@ -305,7 +306,8 @@ enum Cmd {
     },
     /// Print the hook configuration to add to an agent's settings
     InitHooks {
-        /// Agent: `claude`
+        /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
+        /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
         agent: String,
     },
     /// Measured coding conventions per repo and org-wide, with exemplars and deviations
@@ -1503,10 +1505,24 @@ fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
 
 /// Claude Code hook: emit `additionalContext` with ledger records relevant to the session/edit.
 /// Never blocks or approves anything; any failure prints nothing and exits 0.
+/// The first string under `key` anywhere in a hook payload (agents nest tool input differently).
+fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
+    match v {
+        serde_json::Value::Object(m) => m
+            .get(key)
+            .and_then(|x| x.as_str())
+            .or_else(|| m.values().find_map(|x| find_str(x, key))),
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_str(x, key)),
+        _ => None,
+    }
+}
+
 fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     use std::io::Read;
-    if agent != "claude" {
-        return ExitCode::SUCCESS;
+    let claude = agent == "claude";
+    if !claude && !matches!(agent, "generic" | "cursor" | "gemini" | "codex") {
+        comind::ui::err("agent must be claude, cursor, gemini, codex or generic");
+        return ExitCode::FAILURE;
     }
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
@@ -1517,11 +1533,16 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_default();
-    let session = v
-        .get("session_id")
-        .and_then(|s| s.as_str())
-        .unwrap_or("default")
-        .to_string();
+    let session = [
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+    ]
+    .iter()
+    .find_map(|k| find_str(&v, k))
+    .unwrap_or("default")
+    .to_string();
     let cfg = comind::config::Config::load();
     let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
         return ExitCode::SUCCESS;
@@ -1545,11 +1566,12 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
             ("SessionStart", ids)
         }
         "pre-edit" => {
-            let Some(path) = v
-                .get("tool_input")
-                .and_then(|t| t.get("file_path"))
-                .and_then(|p| p.as_str())
-            else {
+            let env = std::env::var("COMIND_HOOK_FILE").ok();
+            let Some(path) = env.as_deref().or_else(|| {
+                ["file_path", "filePath", "target_file", "path", "file"]
+                    .iter()
+                    .find_map(|k| find_str(&v, k))
+            }) else {
                 return ExitCode::SUCCESS;
             };
             let ids = symbols
@@ -1586,11 +1608,21 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     }
     let mut text =
         comind::ledger::markdown("comind ledger: reasoning recorded about this code", &fresh);
-    text.truncate(9_000);
+    if text.len() > 9_000 {
+        let cut = (0..=9_000)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        text.truncate(cut);
+    }
     let _ = std::fs::create_dir_all(seen_file.parent().unwrap_or(std::path::Path::new(".")));
     let mut lines: Vec<String> = seen.into_iter().collect();
     lines.extend(fresh.iter().map(|e| e.record.id.clone()));
     let _ = std::fs::write(&seen_file, lines.join("\n"));
+    if !claude {
+        println!("{text}");
+        return ExitCode::SUCCESS;
+    }
     let out = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": hook_event,
