@@ -241,6 +241,9 @@ enum Cmd {
         /// Evaluate constraint checks; exits non-zero when a `must` constraint is violated (CI)
         #[arg(long)]
         check: bool,
+        /// Fold new inbox records into the Lance snapshot and drop erased ones
+        #[arg(long)]
+        compact: bool,
     },
     /// Terminal UI: overview, contracts, ledger, explorer and conventions
     Ui {
@@ -519,7 +522,8 @@ fn main() -> ExitCode {
             index_dir,
             inbox,
             check,
-        } => cmd_ledger(index_dir.as_deref(), inbox, check),
+            compact,
+        } => cmd_ledger(index_dir.as_deref(), inbox, check, compact),
         Cmd::Hook {
             agent,
             event,
@@ -1210,8 +1214,22 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
     }
 }
 
-fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool) -> ExitCode {
+fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> ExitCode {
     let cfg = comind::config::Config::load();
+    if compact {
+        return match comind::ledger::compact_blocking(&cfg.index_dir(from)) {
+            Ok((added, removed)) => {
+                comind::ui::ok(&format!(
+                    "ledger compacted: {added} added, {removed} erased record(s) dropped"
+                ));
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                comind::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        };
+    }
     let (symbols, edges) =
         comind::index::read_graph_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let records = match comind::ledger::all_blocking(&cfg.index_dir(from)) {

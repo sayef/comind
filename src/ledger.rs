@@ -263,7 +263,11 @@ pub fn actor() -> String {
 pub struct Ledger {
     store: Arc<dyn ObjectStore>,
     root: ObjPath,
+    /// LanceDB uri of the compacted snapshot (`ledger_records`).
+    tables: String,
 }
+
+const SNAPSHOT: &str = "ledger_records";
 
 impl Ledger {
     pub fn open(index_root: &str) -> Result<Ledger> {
@@ -277,6 +281,7 @@ impl Ledger {
             return Ok(Ledger {
                 store: Arc::new(store),
                 root: ObjPath::from(format!("{prefix}/_ledger").trim_start_matches('/')),
+                tables: format!("{root}/_ledger/tables"),
             });
         }
         let dir = std::path::Path::new(root).join("_ledger");
@@ -286,6 +291,7 @@ impl Ledger {
         Ok(Ledger {
             store: Arc::new(store),
             root: ObjPath::from(""),
+            tables: dir.join("tables").to_string_lossy().to_string(),
         })
     }
 
@@ -312,29 +318,121 @@ impl Ledger {
         Ok(())
     }
 
-    pub async fn all(&self) -> Result<Vec<Record>> {
+    async fn keys(&self) -> Result<Vec<ObjPath>> {
         let metas: Vec<_> = self.store.list(Some(&self.inbox())).try_collect().await?;
-        let mut out = Vec::with_capacity(metas.len());
-        for m in metas {
-            if !m.location.as_ref().ends_with(".json") {
+        Ok(metas
+            .into_iter()
+            .map(|m| m.location)
+            .filter(|l| l.as_ref().ends_with(".json"))
+            .collect())
+    }
+
+    async fn fetch(&self, key: &ObjPath) -> Result<String> {
+        let bytes = self
+            .store
+            .get_opts(key, object_store::GetOptions::default())
+            .await?
+            .bytes()
+            .await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// `key -> json` rows of the compacted snapshot (empty when never compacted).
+    async fn snapshot(&self) -> Result<HashMap<String, String>> {
+        use lancedb::query::ExecutableQuery;
+        let mut out = HashMap::new();
+        let db = lancedb::connect(&self.tables).execute().await?;
+        let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
+            return Ok(out);
+        };
+        let mut st = tbl.query().execute().await?;
+        while let Some(b) = st.try_next().await? {
+            let (Some(k), Some(j)) = (strings(&b, "key"), strings(&b, "json")) else {
                 continue;
+            };
+            for i in 0..b.num_rows() {
+                out.insert(k.value(i).to_string(), j.value(i).to_string());
             }
-            let bytes = self
-                .store
-                .get_opts(&m.location, object_store::GetOptions::default())
-                .await?
-                .bytes()
-                .await?;
-            match serde_json::from_slice::<Record>(&bytes) {
+        }
+        Ok(out)
+    }
+
+    /// Every record: the snapshot plus inbox objects not yet compacted. The inbox listing is
+    /// authoritative, so an erased object disappears even before the next compaction.
+    pub async fn all(&self) -> Result<Vec<Record>> {
+        let keys = self.keys().await?;
+        let snap = self.snapshot().await.unwrap_or_default();
+        let mut out = Vec::with_capacity(keys.len());
+        for key in keys {
+            let json = match snap.get(key.as_ref()) {
+                Some(j) => j.clone(),
+                None => self.fetch(&key).await?,
+            };
+            match serde_json::from_str::<Record>(&json) {
                 Ok(r) => out.push(r),
-                Err(e) => eprintln!(
-                    "comind: skipping unreadable ledger record {}: {e}",
-                    m.location
-                ),
+                Err(e) => eprintln!("comind: skipping unreadable ledger record {key}: {e}"),
             }
         }
         out.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(out)
+    }
+
+    /// Fold new inbox objects into the snapshot and drop rows whose object was erased.
+    /// Idempotent; returns `(added, removed)`.
+    pub async fn compact(&self) -> Result<(usize, usize)> {
+        use lancedb::arrow::arrow_array::{RecordBatch, StringArray};
+        use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
+        let keys = self.keys().await?;
+        let snap = self.snapshot().await?;
+        let listed: std::collections::HashSet<&str> = keys.iter().map(|k| k.as_ref()).collect();
+        let mut new_keys = Vec::new();
+        let mut new_json = Vec::new();
+        for key in keys.iter().filter(|k| !snap.contains_key(k.as_ref())) {
+            new_json.push(self.fetch(key).await?);
+            new_keys.push(key.to_string());
+        }
+        let gone: Vec<&String> = snap
+            .keys()
+            .filter(|k| !listed.contains(k.as_str()))
+            .collect();
+        let db = lancedb::connect(&self.tables).execute().await?;
+        if !new_keys.is_empty() {
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("key", DataType::Utf8, false),
+                Field::new("json", DataType::Utf8, false),
+            ]));
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(StringArray::from(new_keys.clone())),
+                    Arc::new(StringArray::from(new_json)),
+                ],
+            )?;
+            match db.open_table(SNAPSHOT).execute().await {
+                Ok(tbl) => {
+                    let reader = lancedb::arrow::arrow_array::RecordBatchIterator::new(
+                        vec![Ok(batch)],
+                        schema,
+                    );
+                    let mut m = tbl.merge_insert(&["key"]);
+                    m.when_not_matched_insert_all();
+                    m.execute(Box::new(reader)).await?;
+                }
+                Err(_) => {
+                    db.create_table(SNAPSHOT, batch).execute().await?;
+                }
+            }
+        }
+        if !gone.is_empty() {
+            let tbl = db.open_table(SNAPSHOT).execute().await?;
+            let list: Vec<String> = gone
+                .iter()
+                .map(|k| format!("'{}'", k.replace('\'', "''")))
+                .collect();
+            let pred = format!("key IN ({})", list.join(","));
+            tbl.delete(pred.as_str()).await?;
+        }
+        Ok((new_keys.len(), gone.len()))
     }
 }
 
@@ -458,6 +556,18 @@ pub fn harvest(repo: &str, history: &[crate::git::CommitFiles], symbols: &[Symbo
 pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
     let ledger = Ledger::open(index_root)?;
     runtime()?.block_on(ledger.put(rec))
+}
+
+pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {
+    let ledger = Ledger::open(index_root)?;
+    runtime()?.block_on(ledger.compact())
+}
+
+fn strings<'a>(
+    b: &'a lancedb::arrow::arrow_array::RecordBatch,
+    name: &str,
+) -> Option<&'a lancedb::arrow::arrow_array::StringArray> {
+    b.column_by_name(name)?.as_any().downcast_ref()
 }
 
 pub fn all_blocking(index_root: &str) -> Result<Vec<Record>> {
@@ -879,5 +989,47 @@ mod tests {
         let back = ledger.all().await.unwrap();
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(back, vec![rec]);
+    }
+
+    #[tokio::test]
+    async fn compaction_folds_and_forgets() {
+        let dir = std::env::temp_dir().join(format!("comind-compact-{}", std::process::id()));
+        let ledger = Ledger::open(dir.to_str().unwrap()).unwrap();
+        let s = sym("f", 1, 1);
+        let rec = |t: &str| {
+            Record::new(
+                Kind::Gotcha,
+                t,
+                vec![Anchor::of(&s)],
+                prov(AuthorKind::Human),
+            )
+        };
+        let (a, b) = (rec("a"), rec("b"));
+        ledger.put(&a).await.unwrap();
+        ledger.put(&b).await.unwrap();
+        assert_eq!(ledger.compact().await.unwrap(), (2, 0));
+        assert_eq!(ledger.compact().await.unwrap(), (0, 0));
+        let c = rec("c");
+        ledger.put(&c).await.unwrap();
+        assert_eq!(ledger.all().await.unwrap().len(), 3);
+        // Erasing an inbox object hides it at once and drops it on the next compaction.
+        let inbox = dir.join("_ledger/inbox");
+        let victim = std::fs::read_dir(&inbox)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_name().to_string_lossy().starts_with(&a.id))
+            .unwrap();
+        std::fs::remove_file(victim.path()).unwrap();
+        let ids: Vec<String> = ledger
+            .all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, vec![b.id.clone(), c.id.clone()]);
+        assert_eq!(ledger.compact().await.unwrap(), (1, 1));
+        assert_eq!(ledger.snapshot().await.unwrap().len(), 2);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

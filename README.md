@@ -133,7 +133,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
 | `comind why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
-| `comind ledger [--inbox] [--check]` | All ledger records, only those needing review, or evaluate constraint checks (non-zero exit on a violated `must`, for CI) |
+| `comind ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |

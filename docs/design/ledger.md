@@ -163,8 +163,7 @@ graph. Nothing is pushed to git remotes, and nothing goes anywhere the user did 
 
 ```text
 <store>/_ledger/inbox/<uuid>-<blake3>.json     one object per record, written once
-<store>/_ledger/tables/…                       Lance tables (derived, §4.3)
-<store>/_ledger/watermark                      last inbox key folded into Lance
+<store>/_ledger/tables/ledger_records         Lance snapshot: inbox key → record (derived, §4.3)
 ```
 
 - Writers `PUT` with create-only semantics (`If-None-Match: *`, `object_store` `PutMode::Create`).
@@ -182,12 +181,13 @@ graph. Nothing is pushed to git remotes, and nothing goes anywhere the user did 
 
 ### 4.2 Compaction and freshness
 
-- `comind ledger compact` (run by the CI index job, or by anyone) folds inbox objects newer than the
-  watermark into Lance via `merge_insert` on `id` — idempotent, so a retried or duplicated
-  compaction is harmless. Lance resolves concurrent commits itself, so CI and clients may both
-  run it.
-- Readers load the Lance snapshot **plus** any inbox objects past the watermark (a cheap `LIST`),
-  so a record is visible to the whole team seconds after it is written, before compaction.
+- `comind ledger --compact` (run by the CI index job, or by anyone) folds inbox objects missing
+  from the snapshot into Lance via `merge_insert` on the inbox key, and deletes snapshot rows whose
+  object is gone — idempotent, so a retried or duplicated compaction is harmless. Lance resolves
+  concurrent commits itself, so CI and clients may both run it. (Implemented.)
+- Readers `LIST` the inbox (authoritative) and `GET` only keys missing from the snapshot, so a
+  record is visible to the whole team seconds after it is written, and erasing its object
+  removes it everywhere at once. No watermark is needed (harvested ids are UUIDv5, not ordered).
 - One store per org already holds every repo's graph, so cross-repo and org-scope records need no
   special home — scope comes from the anchors.
 
