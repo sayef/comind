@@ -257,6 +257,10 @@ struct Scope {
 }
 
 fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
+    // Before defs: annotated definitions (Spring) declare contracts in their enclosing scope.
+    if let Some(raw) = ctx.spec.contract(node, ctx.source) {
+        contract(raw, node, scope, ctx, out);
+    }
     if let Some((kind, name)) = ctx.spec.def(node, ctx.source, scope.in_class) {
         define(node, kind, &name, scope, ctx, out);
         return;
@@ -326,10 +330,6 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
             }
         }
     }
-    if let Some(raw) = ctx.spec.contract(node, ctx.source) {
-        contract(raw, node, scope, ctx, out);
-    }
-
     if let Some((target, source)) = ctx.spec.assignment(node, ctx.source) {
         type_hint(target, source, scope, ctx, out);
     }
@@ -477,6 +477,7 @@ fn contract(raw: RawContract, node: Node, scope: &Scope, ctx: &Ctx, out: &mut Pa
             receiver,
             method,
             path,
+            client,
         } => ContractFact::Route {
             handler: id(
                 ctx.repo_name,
@@ -490,6 +491,18 @@ fn contract(raw: RawContract, node: Node, scope: &Scope, ctx: &Ctx, out: &mut Pa
             receiver,
             method,
             path,
+            line,
+            client,
+        },
+        RawContract::Handle {
+            method,
+            path,
+            handler,
+        } => ContractFact::Handle {
+            from: scope.callable.render(),
+            method,
+            path,
+            handler,
             line,
         },
         RawContract::Construct { target, ctor, args } => {
@@ -582,6 +595,7 @@ fn next_routes(rel: &str, out: &mut ParseOutput) {
             method,
             path: crate::facts::ValueExpr::Lit(path.clone()),
             line,
+            client: false,
         });
     }
 }

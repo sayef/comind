@@ -308,6 +308,7 @@ impl Python {
                             receiver: path(f.child_by_field_name("object")?, src)?,
                             method: method.to_uppercase(),
                             path: args.get("path", 0)?.clone(),
+                            client: false,
                         })
                     })
             }

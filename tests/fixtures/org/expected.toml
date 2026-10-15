@@ -739,3 +739,70 @@ case = "contract-table-pypika"
 kind = "writes"
 src = "profile-svc:profile_svc/queries.py::SkillQueries.rename"
 dst = "contract:table:skills"
+
+# ---- Spring MVC / Feign / RestTemplate (Java + Kotlin) and Go net/http ----
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.getUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.createUser"
+dst = "contract:http:POST /api/accounts"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.dropRoles"
+dst = "contract:http:DELETE /api/accounts/{}/roles"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "jvm-svc:src/main/kotlin/com/acme/app/OrderController.kt::OrderController.order"
+dst = "contract:http:GET /api/orders/{}"
+
+[[edge]]
+case = "contract-feign-client"
+kind = "consumes"
+src = "jvm-svc:src/main/kotlin/com/acme/app/UsersClient.kt::UsersClient.getUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "contract-rest-template"
+kind = "consumes"
+src = "spring-svc:src/main/java/com/acme/users/OrdersClient.java::OrdersClient.order"
+dst = "contract:http:GET /api/orders/{}"
+
+[[edge]]
+case = "contract-go-route"
+kind = "serves"
+src = "gosvc:routes.go::getItem"
+dst = "contract:http:GET /api/items/{}"
+
+[[edge]]
+case = "contract-go-route"
+kind = "serves"
+src = "gosvc:routes.go::routes"
+dst = "contract:http:ANY /healthz"
+
+[[edge]]
+case = "contract-go-client"
+kind = "consumes"
+src = "gosvc:routes.go::fetchUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "kotlin-ctor-property-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/OrderController.kt::OrderController.order"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/UsersClient.kt::UsersClient.getUser"
+
+[[edge]]
+case = "java-new"
+kind = "instantiates"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.getUser"
+dst = "spring-svc:src/main/java/com/acme/users/User.java::User"

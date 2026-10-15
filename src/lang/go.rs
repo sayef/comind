@@ -2,15 +2,84 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, text, LangSpec, RawContract, Target};
+use crate::facts::{Args, Import, ImportItem, RefKind, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct Go;
 
+/// Router registration methods across net/http, gin, echo and chi.
+const ROUTE_METHODS: &[&str] = &[
+    "HandleFunc",
+    "Handle",
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "Get",
+    "Post",
+    "Put",
+    "Patch",
+    "Delete",
+];
+
 impl LangSpec for Go {
     fn receiver(&self) -> &'static str {
         "self"
+    }
+
+    fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let f = node.child_by_field_name("function")?;
+        let p = path(f, src)?;
+        let (method, receiver) = p.split_last()?;
+        let list = node.child_by_field_name("arguments")?;
+        let args = args(list, src);
+        if receiver == ["http"] {
+            return Some(RawContract::Op {
+                receiver: receiver.to_vec(),
+                method: method.clone(),
+                args,
+            });
+        }
+        if !ROUTE_METHODS.contains(&method.as_str()) || args.positional.len() < 2 {
+            return None;
+        }
+        let Some(ValueExpr::Lit(pattern)) = args.positional.first().cloned().flatten() else {
+            return None;
+        };
+        let (verb, route) = match pattern.split_once(' ') {
+            Some((v, r)) if v.chars().all(|c| c.is_ascii_uppercase()) => (v.to_string(), r),
+            _ if method.starts_with("Handle") => ("ANY".to_string(), pattern.as_str()),
+            _ => (method.to_uppercase(), pattern.as_str()),
+        };
+        if !route.starts_with('/') {
+            return None;
+        }
+        let handler = named_children(list)
+            .last()
+            .filter(|h| h.kind() != "func_literal")
+            .and_then(|h| path(*h, src))
+            .unwrap_or_default();
+        Some(RawContract::Handle {
+            method: verb,
+            path: ValueExpr::Lit(route.to_string()),
+            handler,
+        })
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if !matches!(node.kind(), "const_spec" | "var_spec") {
+            return None;
+        }
+        let name = field_text(node, "name", src)?.to_string();
+        let v = named_children(node.child_by_field_name("value")?)
+            .into_iter()
+            .next()?;
+        Some((name, value(v, src)?))
     }
 
     fn def(&self, node: Node, src: &[u8], _in_class: bool) -> Option<(SymbolKind, String)> {
@@ -247,6 +316,58 @@ fn value_type(v: Node, src: &[u8]) -> Option<TypeSource> {
         }),
         _ => None,
     }
+}
+
+fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
+    match node.kind() {
+        "interpreted_string_literal" | "raw_string_literal" => Some(ValueExpr::Lit(
+            text(node, src)
+                .trim_matches(|c| c == '"' || c == '`')
+                .to_string(),
+        )),
+        "identifier" | "selector_expression" => path(node, src).map(ValueExpr::Name),
+        "binary_expression" if field_text(node, "operator", src) == Some("+") => {
+            Some(ValueExpr::Join {
+                sep: String::new(),
+                parts: [
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ]
+                .into_iter()
+                .map(|n| {
+                    n.and_then(|n| value(n, src))
+                        .unwrap_or(ValueExpr::Name(Vec::new()))
+                })
+                .collect(),
+            })
+        }
+        "call_expression" => {
+            let func = path(node.child_by_field_name("function")?, src)?;
+            let a = args(node.child_by_field_name("arguments")?, src);
+            Some(ValueExpr::Call {
+                func,
+                args: a
+                    .positional
+                    .into_iter()
+                    .map(|v| v.unwrap_or(ValueExpr::Name(Vec::new())))
+                    .collect(),
+                kwargs: Vec::new(),
+            })
+        }
+        "parenthesized_expression" => value(*named_children(node).first()?, src),
+        _ => None,
+    }
+}
+
+fn args(list: Node, src: &[u8]) -> Args {
+    let mut out = Args::default();
+    for a in named_children(list) {
+        if a.kind() == "comment" {
+            continue;
+        }
+        out.positional.push(value(a, src));
+    }
+    out
 }
 
 fn path(node: Node, src: &[u8]) -> Option<Vec<String>> {

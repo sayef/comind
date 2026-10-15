@@ -6,6 +6,7 @@ pub mod java;
 pub mod kotlin;
 pub mod python;
 pub mod rust;
+pub mod spring;
 pub mod typescript;
 
 use tree_sitter::Node;
@@ -28,6 +29,12 @@ pub enum RawContract {
         receiver: Vec<String>,
         method: String,
         path: ValueExpr,
+        client: bool,
+    },
+    Handle {
+        method: String,
+        path: ValueExpr,
+        handler: Vec<String>,
     },
     Construct {
         target: Target,

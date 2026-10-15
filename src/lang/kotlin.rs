@@ -2,8 +2,8 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, spring, text, LangSpec, RawContract, Target};
+use crate::facts::{Import, ImportItem, RefKind, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct Kotlin;
@@ -11,6 +11,39 @@ pub struct Kotlin;
 impl LangSpec for Kotlin {
     fn receiver(&self) -> &'static str {
         "this"
+    }
+
+    fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        if let Some(r) = spring::route(node, src) {
+            return Some(r);
+        }
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let kids = named_children(node);
+        let callee = kids
+            .first()
+            .filter(|k| k.kind() == "navigation_expression")?;
+        let mut receiver = path(*callee, src)?;
+        let method = receiver.pop()?;
+        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {
+            return None;
+        }
+        let list = kids.iter().find(|k| k.kind() == "value_arguments")?;
+        Some(RawContract::Op {
+            receiver,
+            method,
+            args: spring::args(*list, src),
+        })
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if node.kind() != "property_declaration" {
+            return None;
+        }
+        let name = property_name(node, src)?;
+        let init = named_children(node).into_iter().last()?;
+        Some((name, spring::value(init, src)?))
     }
 
     fn package(&self, root: Node, src: &[u8]) -> Option<String> {

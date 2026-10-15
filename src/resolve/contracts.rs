@@ -69,9 +69,12 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                     receiver,
                     method,
                     path,
+                    client,
                     ..
                 } => {
-                    let Some(p) = cx.value(path, &f.file_id, 0) else {
+                    // Read the path where the handler lives (a class for Spring, else the file).
+                    let at = cx.b.parent.get(handler).unwrap_or(&f.file_id);
+                    let Some(p) = cx.value(path, at, 0) else {
                         continue;
                     };
                     // File-routed handlers (Next.js) carry their full path and no router.
@@ -86,9 +89,30 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                         }
                         format!("{}{p}", cx.prefix(&router, 0))
                     };
+                    let kind = if *client {
+                        EdgeKind::Consumes
+                    } else {
+                        EdgeKind::Serves
+                    };
+                    emit(handler, format!("http:{method} {}", http_path(&full)), kind);
+                }
+                ContractFact::Handle {
+                    from,
+                    method,
+                    path,
+                    handler,
+                    ..
+                } => {
+                    let Some(p) = cx.value(path, from, 0) else {
+                        continue;
+                    };
+                    let src = match cx.b.resolve_path(handler, from, f, 0) {
+                        Some(Value::Sym(id)) if !handler.is_empty() => id,
+                        _ => from.clone(),
+                    };
                     emit(
-                        handler,
-                        format!("http:{method} {}", http_path(&full)),
+                        &src,
+                        format!("http:{method} {}", http_path(&p)),
                         EdgeKind::Serves,
                     );
                 }
@@ -456,6 +480,40 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             return;
         }
+        if matches!(f.language, Language::Java | Language::Kotlin) {
+            if let Some((_, verb)) = crate::lang::spring::REST_TEMPLATE
+                .iter()
+                .find(|(m, _)| *m == method)
+            {
+                // `exchange(url, HttpMethod.GET, …)` names its verb.
+                let verb = match (verb.is_empty(), args.positional.get(1)) {
+                    (false, _) => Some(verb.to_string()),
+                    (true, Some(Some(ValueExpr::Name(p)))) => p.last().cloned(),
+                    _ => None,
+                };
+                let url = args.positional.first().and_then(Option::as_ref);
+                if let (Some(verb), Some(url)) = (verb, url.and_then(|u| self.value(u, from, 0))) {
+                    emit(
+                        from,
+                        format!("http:{} {}", verb.to_uppercase(), http_path(&url)),
+                        EdgeKind::Consumes,
+                    );
+                }
+                return;
+            }
+        }
+        if f.language == Language::Go {
+            if let Some((verb, url)) = go_request(receiver, method, args) {
+                if let Some(url) = self.value(url, from, 0) {
+                    emit(
+                        from,
+                        format!("http:{verb} {}", http_path(&url)),
+                        EdgeKind::Consumes,
+                    );
+                }
+                return;
+            }
+        }
         let direct_http = self.direct_http(receiver, from, f);
         let client = if direct_http {
             Some(Client::Http)
@@ -646,6 +704,9 @@ impl<'b, 'a> Cx<'b, 'a> {
                 let last = func.last()?.as_str();
                 if PASS_THROUGH.contains(&last) {
                     self.value(args.first()?, scope, depth + 1)
+                } else if *func == ["fmt", "Sprintf"] || *func == ["String", "format"] {
+                    let fmt = self.value(args.first()?, scope, depth + 1)?;
+                    Some(printf_placeholders(&fmt))
                 } else {
                     None
                 }
@@ -775,6 +836,57 @@ impl<'b, 'a> Cx<'b, 'a> {
 }
 
 /// Join path parts with single slashes, keeping a leading slash.
+/// `http.Get(url)`, `http.Post(url, …)`, `http.NewRequest("GET", url, …)` and
+/// `http.NewRequestWithContext(ctx, "GET", url, …)`: the verb and the URL argument.
+fn go_request<'a>(
+    receiver: &[String],
+    method: &str,
+    args: &'a Args,
+) -> Option<(String, &'a ValueExpr)> {
+    if receiver != ["http"] {
+        return None;
+    }
+    let at = |i: usize| args.positional.get(i).and_then(Option::as_ref);
+    let lit = |i: usize| match at(i) {
+        Some(ValueExpr::Lit(v)) => Some(v.to_uppercase()),
+        Some(ValueExpr::Name(p)) => p
+            .last()
+            .and_then(|m| m.strip_prefix("Method").map(str::to_uppercase)),
+        _ => None,
+    };
+    match method {
+        "Get" | "Head" => Some((method.to_uppercase(), at(0)?)),
+        "Post" | "PostForm" => Some(("POST".into(), at(0)?)),
+        "NewRequest" => Some((lit(0)?, at(1)?)),
+        "NewRequestWithContext" => Some((lit(1)?, at(2)?)),
+        _ => None,
+    }
+}
+
+/// `%s`, `%d`, `%v`, … become `{}` placeholders.
+fn printf_placeholders(fmt: &str) -> String {
+    let mut out = String::new();
+    let mut it = fmt.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match it.peek() {
+            Some('%') => {
+                it.next();
+                out.push('%');
+            }
+            Some(_) => {
+                while it.next().is_some_and(|c| !c.is_ascii_alphabetic()) {}
+                out.push_str("{}");
+            }
+            None => out.push('%'),
+        }
+    }
+    out
+}
+
 fn join_path(parts: &[String]) -> String {
     let mut out = String::new();
     for (i, p) in parts.iter().enumerate() {
@@ -811,7 +923,7 @@ pub fn http_path(url: &str) -> String {
         .split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
-            if s.starts_with('{') && s.ends_with('}') {
+            if (s.starts_with('{') && s.ends_with('}')) || s.starts_with(':') {
                 "{}".to_string()
             } else {
                 s.to_string()
@@ -940,6 +1052,18 @@ fn contract_symbol(key: &str) -> Symbol {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn framework_path_params_and_printf() {
+        assert_eq!(http_path("/api/things/:id"), "/api/things/{}");
+        assert_eq!(http_path("/api/x/{id:[0-9]+}"), "/api/x/{}");
+        assert_eq!(printf_placeholders("%s/api/users/%d"), "{}/api/users/{}");
+        assert_eq!(printf_placeholders("100%% %5.2f"), "100% {}");
+        assert_eq!(
+            http_path(&printf_placeholders("%s/api/users/%s")),
+            "/api/users/{}"
+        );
+    }
 
     #[test]
     fn http_paths_normalize() {

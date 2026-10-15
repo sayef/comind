@@ -2,8 +2,8 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, spring, text, LangSpec, RawContract, Target};
+use crate::facts::{Import, ImportItem, RefKind, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct Java;
@@ -37,6 +37,41 @@ impl LangSpec for Java {
 
     fn variable(&self, _node: Node, _src: &[u8]) -> Option<String> {
         None
+    }
+
+    fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        if let Some(r) = spring::route(node, src) {
+            return Some(r);
+        }
+        if node.kind() != "method_invocation" {
+            return None;
+        }
+        let method = field_text(node, "name", src)?;
+        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {
+            return None;
+        }
+        Some(RawContract::Op {
+            receiver: node
+                .child_by_field_name("object")
+                .and_then(|o| path(o, src))
+                .unwrap_or_default(),
+            method: method.to_string(),
+            args: spring::args(node.child_by_field_name("arguments")?, src),
+        })
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if !matches!(
+            node.kind(),
+            "field_declaration" | "local_variable_declaration" | "constant_declaration"
+        ) {
+            return None;
+        }
+        let d = node.child_by_field_name("declarator")?;
+        Some((
+            field_text(d, "name", src)?.to_string(),
+            spring::value(d.child_by_field_name("value")?, src)?,
+        ))
     }
 
     fn import(&self, node: Node, src: &[u8]) -> Option<Vec<Import>> {

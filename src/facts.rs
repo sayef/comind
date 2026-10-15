@@ -95,6 +95,18 @@ pub enum ContractFact {
         method: String,
         path: ValueExpr,
         line: u32,
+        /// A declarative client method (Feign) consumes the route instead of serving it.
+        #[serde(default)]
+        client: bool,
+    },
+    /// `mux.HandleFunc("GET /x", h)` / `app.get("/x", h)` in `from`; `handler` names the
+    /// function when it is a reference rather than an inline closure.
+    Handle {
+        from: String,
+        method: String,
+        path: ValueExpr,
+        handler: Vec<String>,
+        line: u32,
     },
     /// `target = Ctor(args)` where the constructor may be a router, app or client.
     Construct {
