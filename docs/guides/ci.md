@@ -1,4 +1,4 @@
-# Comind CI — building the shared org index
+# CI and merge requests
 
 **Model.** One central pipeline checks out the team's repos, runs
 `comind link … --embed [--enrich]`, and writes a new **atomically-versioned** LanceDB dataset.
@@ -12,7 +12,7 @@ approach; the GitLab example below uses S3. Both are equivalent.
 
 ## GitHub Actions (shipped)
 
-[`.github/workflows/comind-index.yml`](../.github/workflows/comind-index.yml) builds the index on a
+[`.github/workflows/comind-index.yml`](https://github.com/sayef/comind/blob/main/.github/workflows/comind-index.yml) builds the index on a
 schedule (and on demand). To enable it:
 
 - **Variable** `COMIND_INDEX_ENABLED = true` — lets the schedule run.

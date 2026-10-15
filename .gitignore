@@ -48,3 +48,6 @@ __pycache__/
 
 # generated brand PNGs (recreate: python3 scripts/render_pngs.py)
 assets/png/
+
+# Docs site build output
+/site

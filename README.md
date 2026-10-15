@@ -10,9 +10,18 @@
 <p align="center"><b>Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.</b></p>
 
 <p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://comind.pages.dev/">Docs</a> ·
+  <a href="https://comind.pages.dev/reference/mcp/">MCP tools</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/sayef/comind/actions/workflows/ci.yml"><img src="https://github.com/sayef/comind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A34A" alt="MIT license"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94%2B-16A34A" alt="Rust 1.94+"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94.1%2B-16A34A" alt="Rust 1.94.1+"></a>
   <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comind"><img src="https://img.shields.io/crates/v/comind.svg" alt="crates.io"></a> -->
 </p>
 
@@ -109,7 +118,7 @@ Add to your MCP client (e.g. Claude Code):
 - **Before a change:** `ripple` (blast radius, across repos and service contracts), `context_pack` (minimal read-set + known constraints), `preflight` (constraints, dead ends, contracts, missing companions for a planned edit), `contracts` (HTTP routes, queues, buckets, tables and who uses them), `guide` (measured conventions and recipes).
 - **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
 
-Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, the distiller, signing and privacy are described in the **[team guide](docs/GUIDE.md)**.
+Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, the distiller, signing and privacy are described in the **[docs](https://comind.pages.dev/)** ([guides](docs/guides/)).
 
 ## Commands
 
@@ -129,7 +138,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind contracts [--type http\|sqs\|sns\|s3\|table] [--dangling]` | Service contracts with providers and consumers (FastAPI, Next.js, Express, Spring MVC, Feign, RestTemplate, WebClient, Go net/http/gin/echo/chi, axum, actix, reqwest, httpx/requests/fetch/axios, boto3, SQL; Terraform queues/topics/buckets and subscriptions) |
 | `comind packages [--skew]` | Internal packages: publisher, consumers, version skew |
 | `comind conventions [--repo <name>]` | Measured conventions, org baseline, recipes from history |
-| `comind preflight [repo] [--base <rev>] [--strict]` | Before committing or in MR CI: constraints, dead ends, failing checks, contracts, blast radius, missing companions ([MR job](docs/CI.md#merge-request-preflight)) |
+| `comind preflight [repo] [--base <rev>] [--strict]` | Before committing or in MR CI: constraints, dead ends, failing checks, contracts, blast radius, missing companions ([MR job](docs/guides/ci.md#merge-request-preflight)) |
 | `comind remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
 | `comind why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
@@ -208,7 +217,7 @@ src/main.rs    the comind binary (CLI)
 ## CI
 
 [`.github/workflows/comind-index.yml`](.github/workflows/comind-index.yml) (and
-[`docs/CI.md`](docs/CI.md), with a GitLab variant) builds the shared index on a schedule: it clones
+[`docs/guides/ci.md`](docs/guides/ci.md), with a GitLab variant) builds the shared index on a schedule: it clones
 the listed repos and runs `comind link … [--enrich] [--incremental]`, publishing the result
 as a downloadable artifact (or to S3). Lance's version manifest is the atomic "latest" pointer every
 consumer reads.

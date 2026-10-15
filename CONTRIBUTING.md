@@ -36,7 +36,7 @@ Tests that need a bucket or an LLM key are opt-in; everything else runs offline.
 - Determinism holds: the same repositories give the same graph, ids and ordering.
 - Changes to stored formats (Lance tables, ledger records, facts) keep reading what older versions wrote
   (`#[serde(default)]` on new fields).
-- Commands, MCP tools and configuration keys are reflected in the README, [docs](docs/GUIDE.md) and the
+- Commands, MCP tools and configuration keys are reflected in the README, [docs](https://comind.pages.dev/) and the
   [changelog](CHANGELOG.md) (under `## [Unreleased]`).
 
 ## Project layout
