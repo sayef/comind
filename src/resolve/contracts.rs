@@ -371,12 +371,14 @@ fn aws_spec(svc: &str, method: &str) -> Option<(&'static [&'static str], usize, 
 
 /// The AWS service a call targets, from boto3's distinctive keyword names, when the client
 /// itself was built somewhere we cannot see (`client = await self._sqs()`).
-fn infer_aws(method: &str, args: &Args) -> Option<&'static str> {
-    let has = |k: &str| args.keywords.iter().any(|(n, _)| n == k);
+fn infer_aws(method: &str, has: impl Fn(&str) -> bool) -> Option<&'static str> {
     ["sqs", "sns", "s3"]
         .into_iter()
         .find(|svc| aws_spec(svc, method).is_some_and(|(kws, _, _, _)| kws.iter().any(|k| has(k))))
 }
+
+/// Attribute names that denote the resource itself (`topic.arn`, `queue.url`).
+const RESOURCE_ATTRS: &[&str] = &["arn", "url", "name", "id"];
 
 impl<'b, 'a> Cx<'b, 'a> {
     fn new(b: &'b Binder<'a>, facts: &'a [FileFacts]) -> Self {
@@ -856,7 +858,7 @@ impl<'b, 'a> Cx<'b, 'a> {
                 }
             }
             None => {
-                if let Some(svc) = infer_aws(method, args) {
+                if let Some(svc) = infer_aws(method, |k| self.kwarg(args, k, from).is_some()) {
                     if let Some((key, kind)) = self.aws(svc, method, args, from) {
                         emit(from, key, kind);
                     }
@@ -913,14 +915,19 @@ impl<'b, 'a> Cx<'b, 'a> {
     /// of the enclosing callable instead, resolved later at its call sites.
     fn aws(&self, svc: &str, method: &str, args: &Args, from: &str) -> Option<(String, EdgeKind)> {
         let (kws, pos, scheme, kind) = aws_spec(svc, method)?;
-        let expr = kws
+        let (expr, at) = kws
             .iter()
-            .find_map(|k| args.keywords.iter().find(|(n, _)| n == k).map(|(_, v)| v))
-            .or_else(|| args.positional.get(pos).and_then(Option::as_ref))?;
-        if let Some(v) = self.value(expr, from, 0) {
+            .find_map(|k| self.kwarg(args, k, from))
+            .or_else(|| {
+                args.positional
+                    .get(pos)
+                    .and_then(Option::as_ref)
+                    .map(|e| (e.clone(), from.to_string()))
+            })?;
+        if let Some(v) = self.value(&expr, &at, 0) {
             return Some((scheme_key(scheme, &v), kind));
         }
-        if let Some((func, param, index, field)) = self.param_origin(expr, from, 0) {
+        if let Some((func, param, index, field)) = self.param_origin(&expr, &at, 0) {
             self.summarise(
                 func,
                 Summary {
@@ -933,6 +940,29 @@ impl<'b, 'a> Cx<'b, 'a> {
             );
         }
         None
+    }
+
+    /// A keyword argument, also when passed inside `**params` (`params = dict(TopicArn=…)`);
+    /// returns the expression and the scope to read it in.
+    fn kwarg(&self, args: &Args, key: &str, from: &str) -> Option<(ValueExpr, String)> {
+        if let Some((_, v)) = args.keywords.iter().find(|(n, _)| n == key) {
+            return Some((v.clone(), from.to_string()));
+        }
+        args.keywords
+            .iter()
+            .filter(|(n, _)| n == "**")
+            .find_map(|(_, v)| {
+                let (expr, at) = match v {
+                    ValueExpr::Name(p) => self.locate(p, from, 0)?,
+                    other => (other.clone(), from.to_string()),
+                };
+                let found = match &expr {
+                    ValueExpr::Call { kwargs, .. } => kwargs.iter().find(|(k, _)| k == key),
+                    ValueExpr::Record(pairs) => pairs.iter().find(|(k, _)| k == key),
+                    _ => None,
+                };
+                found.map(|(_, v)| (v.clone(), at))
+            })
     }
 
     fn summarise(&self, func: String, s: Summary) -> bool {
@@ -960,10 +990,20 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
         }
         let (head, rest) = path.split_first()?;
-        self.b.scope_chain(from).into_iter().find_map(|s| {
+        let direct = self.b.scope_chain(from).into_iter().find_map(|s| {
             let i = positional(self.params.get(s.as_str())?, head)?;
             Some((s, head.clone(), i, rest.to_vec()))
-        })
+        });
+        if direct.is_some() || depth > 6 {
+            return direct;
+        }
+        // A local assigned from a parameter (`arn = topic.arn`): follow it.
+        let ValueExpr::Name(inner) = self.values.get(&(from, head.as_str())).copied()? else {
+            return None;
+        };
+        let mut next = inner.clone();
+        next.extend(rest.iter().cloned());
+        self.param_origin(&ValueExpr::Name(next), from, depth + 1)
     }
 
     fn attr_origin(&self, class: &str, attr: &str, depth: u32) -> Option<Origin> {
@@ -1120,7 +1160,13 @@ impl<'b, 'a> Cx<'b, 'a> {
             ),
             ValueExpr::Name(path) => match self.locate(path, scope, depth + 1) {
                 Some((expr, at)) => self.value(&expr, &at, depth + 1),
-                None => self.config_value(path, scope),
+                None => self.config_value(path, scope).or_else(|| {
+                    // `topic.arn`, `queue.url`: the resource the object names.
+                    let (last, rest) = path.split_last()?;
+                    (!rest.is_empty() && RESOURCE_ATTRS.contains(&last.as_str()))
+                        .then(|| self.value(&ValueExpr::Name(rest.to_vec()), scope, depth + 1))
+                        .flatten()
+                }),
             },
             ValueExpr::Join { sep, parts } => {
                 let vals: Vec<String> = parts

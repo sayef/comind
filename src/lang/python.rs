@@ -428,7 +428,13 @@ fn args(list: Node, src: &[u8]) -> Args {
                     out.keywords.push((k.to_string(), v));
                 }
             }
-            "list_splat" | "dictionary_splat" | "comment" => {}
+            // `**params`: kept so keyword lookups can see into the dict it names.
+            "dictionary_splat" => {
+                if let Some(v) = named_children(a).first().and_then(|v| value_expr(*v, src)) {
+                    out.keywords.push(("**".into(), v));
+                }
+            }
+            "list_splat" | "comment" => {}
             _ => {
                 if a.kind() == "call" {
                     if let Some(p) = a.child_by_field_name("function").and_then(|f| path(f, src)) {
@@ -447,6 +453,7 @@ fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
     match node.kind() {
         // `a if cond else b`: the value when the condition holds.
         "conditional_expression" => value_expr(*named_children(node).first()?, src),
+        "await" => value_expr(*named_children(node).first()?, src),
         "string" => {
             let mut parts = Vec::new();
             for c in named_children(node) {
@@ -497,6 +504,26 @@ fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
         // os.getenv("X", …) / os.environ.get("X", …); other calls kept for known callees.
         "call" => {
             let f = path(node.child_by_field_name("function")?, src)?.join(".");
+            // `getattr(obj, "x")`, also through `asyncio.to_thread(getattr, obj, "x")`.
+            let list = named_children(node.child_by_field_name("arguments")?);
+            let attr = match (f.as_str(), list.as_slice()) {
+                ("getattr", [obj, name, ..]) => Some((*obj, *name)),
+                (t, [g, obj, name, ..])
+                    if t.ends_with("to_thread") && text(*g, src) == "getattr" =>
+                {
+                    Some((*obj, *name))
+                }
+                _ => None,
+            };
+            if let Some((obj, name)) = attr {
+                let (Some(mut p), Some(ValueExpr::Lit(n))) =
+                    (path(obj, src), value_expr(name, src))
+                else {
+                    return None;
+                };
+                p.push(n);
+                return Some(ValueExpr::Name(p));
+            }
             if !matches!(
                 f.as_str(),
                 "os.getenv" | "getenv" | "os.environ.get" | "environ.get"

@@ -994,3 +994,22 @@ case = "infra-terraform"
 kind = "subscribes"
 src = "contract:sqs:user-jobs"
 dst = "contract:sns:user-events"
+
+# ---- Indirect SNS publish: getattr via to_thread, **params, constructor attr, YAML config ----
+[[edge]]
+case = "contract-aws-indirect"
+kind = "publishes"
+src = "service-a:service_a/completion.py::build"
+dst = "contract:sns:acme-{}-completion-events.fifo"
+
+[[edge]]
+case = "same-file-call"
+kind = "calls"
+src = "service-a:service_a/completion.py::CompletionPublisher.__call__"
+dst = "service-a:service_a/completion.py::publish_to_topic"
+
+[[edge]]
+case = "same-file-instantiate"
+kind = "instantiates"
+src = "service-a:service_a/completion.py::build"
+dst = "service-a:service_a/completion.py::CompletionPublisher"

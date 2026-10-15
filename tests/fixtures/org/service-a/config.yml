@@ -1,3 +1,5 @@
 aws:
   uploads_bucket: user-uploads
   region: ${AWS_REGION}
+completion:
+  sns_topic: acme-dev-completion-events.fifo
