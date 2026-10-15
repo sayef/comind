@@ -32,6 +32,7 @@ pub enum RawContract {
         client: bool,
     },
     Handle {
+        receiver: Vec<String>,
         method: String,
         path: ValueExpr,
         handler: Vec<String>,

@@ -495,11 +495,13 @@ fn contract(raw: RawContract, node: Node, scope: &Scope, ctx: &Ctx, out: &mut Pa
             client,
         },
         RawContract::Handle {
+            receiver,
             method,
             path,
             handler,
         } => ContractFact::Handle {
             from: scope.callable.render(),
+            receiver,
             method,
             path,
             handler,

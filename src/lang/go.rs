@@ -30,6 +30,26 @@ impl LangSpec for Go {
     }
 
     fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        // `api := r.Group("/api")` (gin, echo): a route group with a prefix.
+        if node.kind() == "short_var_declaration" {
+            let left = named_children(node.child_by_field_name("left")?);
+            let right = named_children(node.child_by_field_name("right")?);
+            let ([name], [call]) = (left.as_slice(), right.as_slice()) else {
+                return None;
+            };
+            if name.kind() != "identifier" || call.kind() != "call_expression" {
+                return None;
+            }
+            let ctor = path(call.child_by_field_name("function")?, src)?;
+            if ctor.last().map(String::as_str) != Some("Group") {
+                return None;
+            }
+            return Some(RawContract::Construct {
+                target: Target::Var(text(*name, src).to_string()),
+                ctor,
+                args: args(call.child_by_field_name("arguments")?, src),
+            });
+        }
         if node.kind() != "call_expression" {
             return None;
         }
@@ -65,6 +85,7 @@ impl LangSpec for Go {
             .and_then(|h| path(*h, src))
             .unwrap_or_default();
         Some(RawContract::Handle {
+            receiver: receiver.to_vec(),
             method: verb,
             path: ValueExpr::Lit(route.to_string()),
             handler,

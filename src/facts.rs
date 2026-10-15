@@ -103,6 +103,9 @@ pub enum ContractFact {
     /// function when it is a reference rather than an inline closure.
     Handle {
         from: String,
+        /// The router or route group the handler is registered on.
+        #[serde(default)]
+        receiver: Vec<String>,
         method: String,
         path: ValueExpr,
         handler: Vec<String>,

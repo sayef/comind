@@ -41,6 +41,7 @@ impl LangSpec for Rust {
                             return out
                                 .into_iter()
                                 .map(|(verb, handler)| RawContract::Handle {
+                                    receiver: Vec::new(),
                                     method: verb.to_uppercase(),
                                     path: ValueExpr::Lit(path.clone()),
                                     handler,

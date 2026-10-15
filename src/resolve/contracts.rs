@@ -103,6 +103,7 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                 }
                 ContractFact::Handle {
                     from,
+                    receiver,
                     method,
                     path,
                     handler,
@@ -111,6 +112,7 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                     let Some(p) = cx.value(path, from, 0) else {
                         continue;
                     };
+                    let p = format!("{}{p}", cx.group_prefix(from, receiver, 0));
                     let src = match cx.b.resolve_path(handler, from, f, 0) {
                         Some(Value::Sym(id)) if !handler.is_empty() => id,
                         _ => from.clone(),
@@ -193,6 +195,8 @@ struct Cx<'b, 'a> {
     mounts: HashMap<String, (String, String)>,
     /// Classes/interfaces whose methods (transitively) perform HTTP, plus their supertypes.
     http_types: std::collections::HashSet<String>,
+    /// Go route groups: (scope, variable) → (parent receiver, prefix).
+    groups: HashMap<(String, String), (Vec<String>, String)>,
 }
 
 impl<'b, 'a> Cx<'b, 'a> {
@@ -204,6 +208,7 @@ impl<'b, 'a> Cx<'b, 'a> {
             routers: HashMap::new(),
             mounts: HashMap::new(),
             http_types: std::collections::HashSet::new(),
+            groups: HashMap::new(),
         };
         for f in facts {
             for v in &f.values {
@@ -222,6 +227,18 @@ impl<'b, 'a> Cx<'b, 'a> {
                 else {
                     continue;
                 };
+                if f.language == Language::Go && ctor.last().is_some_and(|c| c == "Group") {
+                    let prefix = args
+                        .positional
+                        .first()
+                        .and_then(Option::as_ref)
+                        .and_then(|v| cx.value(v, scope, 0))
+                        .unwrap_or_default();
+                    let parent = ctor[..ctor.len() - 1].to_vec();
+                    cx.groups
+                        .insert((scope.clone(), target.clone()), (parent, prefix));
+                    continue;
+                }
                 let Some(ext) = cx.external(ctor, scope, f) else {
                     continue;
                 };
@@ -342,6 +359,19 @@ impl<'b, 'a> Cx<'b, 'a> {
             && self
                 .external(receiver, from, f)
                 .is_some_and(|m| HTTP_MODULES.contains(&m.as_str()))
+    }
+
+    /// Prefix of a Go route group variable, following nested groups.
+    fn group_prefix(&self, scope: &str, receiver: &[String], depth: u32) -> String {
+        let [name] = receiver else {
+            return String::new();
+        };
+        match self.groups.get(&(scope.to_string(), name.clone())) {
+            Some((parent, p)) if depth < 8 => {
+                format!("{}{p}", self.group_prefix(scope, parent, depth + 1))
+            }
+            _ => String::new(),
+        }
     }
 
     /// Full mount prefix of a router: parents' include prefixes, then its own prefix.

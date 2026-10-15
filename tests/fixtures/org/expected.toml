@@ -844,3 +844,28 @@ case = "contract-express-route"
 kind = "serves"
 src = "web-app:src/server.ts"
 dst = "contract:http:POST /api/v2/jobs"
+
+# ---- Go route groups (gin/echo) ----
+[[edge]]
+case = "contract-go-group"
+kind = "serves"
+src = "gosvc:routes.go::listOrders"
+dst = "contract:http:GET /api/v1/orders"
+
+[[edge]]
+case = "contract-go-group"
+kind = "serves"
+src = "gosvc:routes.go::showOrder"
+dst = "contract:http:GET /api/v1/orders/{}"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::ginRoutes"
+dst = "gosvc:routes.go::engine.GET"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::ginRoutes"
+dst = "gosvc:routes.go::engine.Group"

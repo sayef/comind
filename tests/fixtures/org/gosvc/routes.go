@@ -14,3 +14,17 @@ func routes() *http.ServeMux {
 func fetchUser(id string) (*http.Response, error) {
 	return http.Get("http://users/api/accounts/" + id)
 }
+
+type engine struct{}
+
+func (e *engine) Group(prefix string) *engine            { return e }
+func (e *engine) GET(path string, h func(c *engine))     {}
+func listOrders(c *engine)                               {}
+func showOrder(c *engine)                                {}
+
+func ginRoutes(r *engine) {
+	api := r.Group("/api")
+	v1 := api.Group("/v1")
+	v1.GET("/orders", listOrders)
+	v1.GET("/orders/:id", showOrder)
+}
