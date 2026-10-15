@@ -158,7 +158,8 @@ async function loadOverview() {
     </div>
     <h2>Org map</h2>
     <canvas id="org"></canvas>
-    <div class="legend">Arrows point from dependent to dependency · solid: code (imports, calls, inheritance) · dashed: service contracts (HTTP, queues, tables) · label = edge count</div>
+    <div class="legend">Click a repo to see what a change there can affect · arrows point from dependent to dependency · solid: code (imports, calls, inheritance) · dashed: service contracts (HTTP, queues, tables) · label = edge count</div>
+    <div id="orglens"></div>
     <h2>Ledger</h2><p>${led}</p>
     <h2>Repos</h2>
     <table><tr><th>Repo</th><th>Symbols</th></tr>
@@ -168,7 +169,30 @@ async function loadOverview() {
       ${o.skew.map(s => `<tr><td>${esc(s.package)}</td><td>${esc(s.publisher)} @ ${esc(s.published)}</td><td>${esc(s.consumer)}</td><td class="mono">${esc(s.locked)}</td></tr>`).join("")}</table>`
       : '<p class="muted">No internal dependency pins a version other than its publisher.</p>'}`;
   const org = await api("/api/orgmap");
-  drawGraph($("#org"), org, {spread: 200, curve: 22, onPick: null});
+  let selected = null;
+  const pick = id => {
+    selected = selected === id ? null : id;
+    if (selected) history.replaceState(null, "", "#lens=" + encodeURIComponent(selected));
+    const hit = selected ? dependents(org, selected) : null;
+    map.lens(selected, hit && new Set(hit.keys()));
+    $("#orglens").innerHTML = !selected ? "" : hit.size
+      ? `<p><b>${esc(selected)}</b>: a change can reach ${[...hit].map(([r, d]) => `<span class="chip">${esc(r)} · ${d} hop${d > 1 ? "s" : ""}</span>`).join(" ")}</p>`
+      : `<p><b>${esc(selected)}</b>: no other indexed repo depends on it.</p>`;
+  };
+  const map = drawGraph($("#org"), org, {spread: 200, curve: 22, onPick: pick});
+  if (location.hash.startsWith("#lens=")) pick(decodeURIComponent(location.hash.slice(6)));
+}
+
+// Repos that depend on `repo`, directly or transitively (code or contracts), with hop count.
+function dependents(g, repo) {
+  const seen = new Map(), queue = [[repo, 0]];
+  while (queue.length) {
+    const [r, d] = queue.shift();
+    for (const e of g.edges) if (e.dst === r && e.src !== repo && !seen.has(e.src)) {
+      seen.set(e.src, d + 1); queue.push([e.src, d + 1]);
+    }
+  }
+  return seen;
 }
 
 async function loadContracts() {
@@ -295,7 +319,8 @@ function drawGraph(cv, g, opt = {}) {
   });
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
   const edges = g.edges.map(e => ({...e, a: byId[e.src], b: byId[e.dst]})).filter(e => e.a && e.b);
-  let drag = null, ticks = 0;
+  let drag = null, ticks = 0, lensOn = null, lensSet = null;
+  const lit = id => !lensOn || id === lensOn || lensSet.has(id);
   function step() {
     for (const a of nodes) for (const b of nodes) {
       if (a === b) continue;
@@ -325,6 +350,7 @@ function drawGraph(cv, g, opt = {}) {
       const bend = e.kind === "contract" ? curve * 2.2 : curve;
       const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2, len = Math.max(1, Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y));
       const cx = mx - (e.b.y - e.a.y) / len * bend, cy = my + (e.b.x - e.a.x) / len * bend;
+      ctx.globalAlpha = lit(e.a.id) && lit(e.b.id) ? 1 : 0.12;
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.quadraticCurveTo(cx, cy, e.b.x, e.b.y); ctx.stroke();
       ctx.setLineDash([]); ctx.lineWidth = 1;
       const ang = Math.atan2(e.b.y - cy, e.b.x - cx), tx = e.b.x - Math.cos(ang) * 10, ty = e.b.y - Math.sin(ang) * 10;
@@ -332,17 +358,21 @@ function drawGraph(cv, g, opt = {}) {
       ctx.lineTo(tx - Math.cos(ang - .4) * 8, ty - Math.sin(ang - .4) * 8);
       ctx.lineTo(tx - Math.cos(ang + .4) * 8, ty - Math.sin(ang + .4) * 8); ctx.fill();
       if (e.weight) halo(String(e.weight), (e.a.x + 2 * cx + e.b.x) / 4, (e.a.y + 2 * cy + e.b.y) / 4, "center", muted);
+      ctx.globalAlpha = 1;
     }
     ctx.font = "12px system-ui, sans-serif"; ctx.textBaseline = "middle";
     for (const n of nodes) {
-      const r = n.focus ? 9 : 6;
+      ctx.globalAlpha = lit(n.id) ? 1 : 0.2;
+      const r = n.focus || n.id === lensOn ? 9 : 6;
       ctx.fillStyle = n.repo === "_contracts" ? "#b7791f" : `hsl(${hue(n.repo)} 55% 52%)`;
       ctx.beginPath();
       if (n.repo === "_contracts") ctx.rect(n.x - r, n.y - r, r * 2, r * 2); else ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fill();
       if (n.focus) { ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
       const label = n.name.length > 34 ? n.name.slice(0, 33) + "…" : n.name, left = n.x > W - 200;
-      halo(label, left ? n.x - r - 4 : n.x + r + 4, n.y, left ? "right" : "left", n.focus ? ink : muted);
+      if (lensOn && lensSet.has(n.id)) { ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1; }
+      halo(label, left ? n.x - r - 4 : n.x + r + 4, n.y, left ? "right" : "left", n.focus || n.id === lensOn ? ink : muted);
+      ctx.globalAlpha = 1;
     }
   }
   function loop() { if (ticks++ < 260 || drag) step(); draw(); if (ticks < 260 || drag) requestAnimationFrame(loop); }
@@ -353,6 +383,7 @@ function drawGraph(cv, g, opt = {}) {
   cv.onpointermove = ev => { if (!drag) return; const [x, y] = at(ev); drag.x = x; drag.y = y; moved = true; };
   cv.onpointerup = () => { const n = drag; drag = null; ticks = 200; if (n && !moved && !n.focus && onPick) onPick(n.id); else requestAnimationFrame(loop); };
   loop();
+  return { lens(sel, set) { lensOn = sel; lensSet = set || new Set(); draw(); } };
 }
 
 async function loadConventions() {

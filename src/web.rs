@@ -140,9 +140,23 @@ async fn orgmap(State(s): State<Shared>) -> Json<Value> {
             }
         }
     }
+    let real = |n: &&Node| n.repo != crate::resolve::CONTRACTS;
+    // A queue subscribed to a topic is a contract consuming a contract: its own consumers are
+    // the topic's consumers too.
+    let by_id: std::collections::HashMap<&str, &crate::graph::ContractView> = d
+        .contracts
+        .iter()
+        .map(|c| (c.contract.id.as_str(), c))
+        .collect();
     for c in &d.contracts {
-        for u in &c.consumers {
-            for p in c.providers.iter().filter(|p| p.repo != u.repo) {
+        let mut consumers: Vec<&Node> = c.consumers.iter().filter(real).collect();
+        for via in c.consumers.iter().filter(|n| !real(n)) {
+            if let Some(q) = by_id.get(via.id.as_str()) {
+                consumers.extend(q.consumers.iter().filter(real));
+            }
+        }
+        for u in consumers {
+            for p in c.providers.iter().filter(real).filter(|p| p.repo != u.repo) {
                 *links
                     .entry((u.repo.clone(), p.repo.clone(), "contract"))
                     .or_default() += 1;
