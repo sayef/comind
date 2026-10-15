@@ -258,7 +258,7 @@ struct Scope {
 
 fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
     // Before defs: annotated definitions (Spring) declare contracts in their enclosing scope.
-    if let Some(raw) = ctx.spec.contract(node, ctx.source) {
+    for raw in ctx.spec.contracts(node, ctx.source) {
         contract(raw, node, scope, ctx, out);
     }
     if let Some((kind, name)) = ctx.spec.def(node, ctx.source, scope.in_class) {

@@ -2,8 +2,8 @@
 
 use tree_sitter::Node;
 
-use super::{field_text, line, named_children, text, LangSpec, Target};
-use crate::facts::{Import, ImportItem, RefKind, TypeSource};
+use super::{field_text, line, named_children, text, LangSpec, RawContract, Target};
+use crate::facts::{Args, Import, ImportItem, RefKind, TemplatePart, TypeSource, ValueExpr};
 use crate::model::SymbolKind;
 
 pub struct Rust;
@@ -13,9 +13,74 @@ const WRAPPERS: &[&str] = &[
     "Box", "Arc", "Rc", "Option", "Result", "RefCell", "Mutex", "RwLock", "Cow",
 ];
 
+const VERBS: &[&str] = &["get", "post", "put", "patch", "delete", "head"];
+
 impl LangSpec for Rust {
     fn receiver(&self) -> &'static str {
         "self"
+    }
+
+    fn contracts(&self, node: Node, src: &[u8]) -> Vec<RawContract> {
+        match node.kind() {
+            // actix / rocket: `#[get("/x")] async fn h()`.
+            "function_item" => attribute_route(node, src).into_iter().collect(),
+            "call_expression" => {
+                let Some(f) = node.child_by_field_name("function") else {
+                    return Vec::new();
+                };
+                let Some(list) = node.child_by_field_name("arguments") else {
+                    return Vec::new();
+                };
+                let args = named_children(list);
+                // axum: `.route("/x", get(h).post(h2))`.
+                if f.kind() == "field_expression" && field_text(f, "field", src) == Some("route") {
+                    if let [p, chain] = args.as_slice() {
+                        if let Some(ValueExpr::Lit(path)) = value(*p, src) {
+                            let mut out = Vec::new();
+                            method_router(*chain, src, &mut out);
+                            return out
+                                .into_iter()
+                                .map(|(verb, handler)| RawContract::Handle {
+                                    method: verb.to_uppercase(),
+                                    path: ValueExpr::Lit(path.clone()),
+                                    handler,
+                                })
+                                .collect();
+                        }
+                    }
+                    return Vec::new();
+                }
+                // reqwest: `client.get(url)`, `reqwest::get(url)`.
+                let Some(mut p) = path(f, src) else {
+                    return Vec::new();
+                };
+                let Some(method) = p.pop() else {
+                    return Vec::new();
+                };
+                if !VERBS.contains(&method.as_str()) || args.is_empty() {
+                    return Vec::new();
+                }
+                vec![RawContract::Op {
+                    receiver: p,
+                    method,
+                    args: Args {
+                        positional: args.iter().map(|n| value(*n, src)).collect(),
+                        ..Default::default()
+                    },
+                }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn value(&self, node: Node, src: &[u8]) -> Option<(String, ValueExpr)> {
+        if !matches!(node.kind(), "const_item" | "static_item") {
+            return None;
+        }
+        Some((
+            field_text(node, "name", src)?.to_string(),
+            value(node.child_by_field_name("value")?, src)?,
+        ))
     }
 
     fn def(&self, node: Node, src: &[u8], _in_class: bool) -> Option<(SymbolKind, String)> {
@@ -264,6 +329,121 @@ fn segments(node: Node, src: &[u8]) -> Option<Vec<String>> {
 }
 
 /// Expression path; a leading module `self::` becomes `<self>` (vs. the `self` receiver).
+fn attribute_route(func: Node, src: &[u8]) -> Option<RawContract> {
+    let mut prev = func.prev_named_sibling();
+    while let Some(a) = prev.filter(|p| matches!(p.kind(), "attribute_item" | "line_comment")) {
+        prev = a.prev_named_sibling();
+        let Some(attr) = named_children(a)
+            .into_iter()
+            .find(|c| c.kind() == "attribute")
+        else {
+            continue;
+        };
+        let kids = named_children(attr);
+        let verb = kids.first().and_then(|n| path(*n, src))?.pop()?;
+        if !VERBS.contains(&verb.as_str()) {
+            continue;
+        }
+        let lit = kids
+            .iter()
+            .find(|k| k.kind() == "token_tree")
+            .and_then(|t| {
+                named_children(*t)
+                    .into_iter()
+                    .find(|c| c.kind() == "string_literal")
+            })
+            .and_then(|s| value(s, src))?;
+        return Some(RawContract::Route {
+            handler: field_text(func, "name", src)?.to_string(),
+            receiver: Vec::new(),
+            method: verb.to_uppercase(),
+            path: lit,
+            client: false,
+        });
+    }
+    None
+}
+
+/// `get(h).post(h2)` → [(get, h), (post, h2)].
+fn method_router(node: Node, src: &[u8], out: &mut Vec<(String, Vec<String>)>) {
+    if node.kind() != "call_expression" {
+        return;
+    }
+    let (Some(f), Some(list)) = (
+        node.child_by_field_name("function"),
+        node.child_by_field_name("arguments"),
+    ) else {
+        return;
+    };
+    let (verb, inner) = match f.kind() {
+        "field_expression" => (
+            field_text(f, "field", src).unwrap_or_default().to_string(),
+            f.child_by_field_name("value"),
+        ),
+        _ => (
+            path(f, src).and_then(|mut p| p.pop()).unwrap_or_default(),
+            None,
+        ),
+    };
+    if let Some(i) = inner {
+        method_router(i, src, out);
+    }
+    if VERBS.contains(&verb.as_str()) {
+        let handler = named_children(list)
+            .first()
+            .filter(|h| h.kind() != "closure_expression")
+            .and_then(|h| path(*h, src))
+            .unwrap_or_default();
+        out.push((verb, handler));
+    }
+}
+
+/// Literals, names, and `format!` templates with inline or positional arguments.
+fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
+    match node.kind() {
+        "string_literal" | "raw_string_literal" => Some(ValueExpr::Lit(
+            named_children(node)
+                .iter()
+                .filter(|c| c.kind() == "string_content")
+                .map(|c| text(*c, src))
+                .collect(),
+        )),
+        "identifier" | "scoped_identifier" => path(node, src).map(ValueExpr::Name),
+        "reference_expression" => value(node.child_by_field_name("value")?, src),
+        "macro_invocation" if field_text(node, "macro", src) == Some("format") => {
+            let tt = named_children(node)
+                .into_iter()
+                .find(|c| c.kind() == "token_tree")?;
+            let kids = named_children(tt);
+            let fmt = value(*kids.first().filter(|k| k.kind() == "string_literal")?, src)?;
+            let ValueExpr::Lit(fmt) = fmt else {
+                return None;
+            };
+            let mut positional = kids[1..]
+                .iter()
+                .filter(|k| k.kind() == "identifier")
+                .map(|k| text(*k, src).to_string());
+            let mut parts = Vec::new();
+            let mut rest = fmt.as_str();
+            while let Some(open) = rest.find('{') {
+                parts.push(TemplatePart::Lit(rest[..open].to_string()));
+                let close = rest[open..].find('}').map_or(rest.len(), |c| open + c);
+                let name = rest[open + 1..close].split(':').next().unwrap_or("");
+                let expr = if name.is_empty() {
+                    positional.next().map(|n| vec![n])
+                } else {
+                    Some(vec![name.to_string()])
+                };
+                parts.push(TemplatePart::Expr(expr));
+                rest = rest.get(close + 1..).unwrap_or("");
+            }
+            parts.push(TemplatePart::Lit(rest.to_string()));
+            Some(ValueExpr::Template(parts))
+        }
+        _ => None,
+    }
+}
+
 fn path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     match node.kind() {
         "identifier" | "self" | "crate" | "super" => Some(vec![text(node, src).to_string()]),

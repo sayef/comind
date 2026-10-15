@@ -514,6 +514,23 @@ impl<'b, 'a> Cx<'b, 'a> {
                 return;
             }
         }
+        if f.language == Language::Rust && HTTP_VERBS.contains(&method) {
+            // Only URL-shaped arguments: `map.get(key)` is not a request.
+            if let Some(url) = args
+                .positional
+                .first()
+                .and_then(Option::as_ref)
+                .and_then(|u| self.value(u, from, 0))
+                .filter(|u| u.starts_with("http") || u.starts_with('/'))
+            {
+                emit(
+                    from,
+                    format!("http:{} {}", method.to_uppercase(), http_path(&url)),
+                    EdgeKind::Consumes,
+                );
+            }
+            return;
+        }
         let direct_http = self.direct_http(receiver, from, f);
         let client = if direct_http {
             Some(Client::Http)

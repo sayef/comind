@@ -126,7 +126,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind flow <focus> [--index-dir <dir>]` | Pre-generated flow walkthrough + live call trace |
 | `comind changed <repo> [--since <sha>]` | Files changed since a commit (git diff) |
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
-| `comind contracts [--type http\|sqs\|sns\|s3\|table] [--dangling]` | Service contracts with providers and consumers (FastAPI, Next.js, Spring MVC, Feign, RestTemplate, Go net/http/gin/echo/chi, httpx/requests/fetch/axios, boto3, SQL) |
+| `comind contracts [--type http\|sqs\|sns\|s3\|table] [--dangling]` | Service contracts with providers and consumers (FastAPI, Next.js, Spring MVC, Feign, RestTemplate, Go net/http/gin/echo/chi, axum, actix, reqwest, httpx/requests/fetch/axios, boto3, SQL) |
 | `comind packages [--skew]` | Internal packages: publisher, consumers, version skew |
 | `comind conventions [--repo <name>]` | Measured conventions, org baseline, recipes from history |
 | `comind preflight [repo] [--base <rev>] [--strict]` | Before committing or in MR CI: constraints, dead ends, failing checks, contracts, blast radius, missing companions ([MR job](docs/CI.md#merge-request-preflight)) |

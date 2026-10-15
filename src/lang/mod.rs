@@ -66,6 +66,11 @@ pub trait LangSpec: Sync {
         None
     }
 
+    /// Every contract at this node (a router line can register several verbs).
+    fn contracts(&self, node: Node, src: &[u8]) -> Vec<RawContract> {
+        self.contract(node, src).into_iter().collect()
+    }
+
     /// `name = <statically known value>` at module or class level.
     fn value(&self, _node: Node, _src: &[u8]) -> Option<(String, ValueExpr)> {
         None

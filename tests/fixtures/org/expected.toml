@@ -806,3 +806,28 @@ case = "java-new"
 kind = "instantiates"
 src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.getUser"
 dst = "spring-svc:src/main/java/com/acme/users/User.java::User"
+
+# ---- Rust: axum method routers, actix attribute routes, reqwest ----
+[[edge]]
+case = "contract-axum-route"
+kind = "serves"
+src = "rs-api:src/main.rs::list_items"
+dst = "contract:http:GET /api/items"
+
+[[edge]]
+case = "contract-axum-route"
+kind = "serves"
+src = "rs-api:src/main.rs::create_item"
+dst = "contract:http:POST /api/items"
+
+[[edge]]
+case = "contract-actix-route"
+kind = "serves"
+src = "rs-api:src/main.rs::report"
+dst = "contract:http:GET /api/reports/{}"
+
+[[edge]]
+case = "contract-reqwest-client"
+kind = "consumes"
+src = "rs-api:src/main.rs::account"
+dst = "contract:http:GET /api/accounts/{}"
