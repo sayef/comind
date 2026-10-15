@@ -106,3 +106,6 @@ contracts, ledger review and timeline, explorer with a dependency graph per symb
 - **Erasure**: `comind erase <id> | --actor me --yes` deletes records for good, including old
   snapshot versions.
 - **Secrets**: records that look like they contain a secret are refused; LLM input is redacted.
+- **Poisoning**: records not written by a person are refused when they read like instructions to
+  an agent or carry a shell or script payload; a record planted straight into the store with such
+  content (or a secret) is treated as T0 and never injected.
