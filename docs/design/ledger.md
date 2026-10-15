@@ -259,7 +259,9 @@ One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 > Implemented in `src/distill.rs` (`comind distill git`). **Decision 2026-10-15: comind never reads
 > agent session transcripts**; the transcript inputs, `.git/comind/transcripts/` and the turn-end /
 > compact hook below are not built. The distiller works from commit messages (and later MR threads).
-> Ops are limited to `new`; proposals land in the shared inbox at T1 (author `distilled`).
+> Ops: `new` and `supersede`; proposals land in the shared inbox at T1 (author `distilled`). A
+> supersede or retract by a non-human author only retires machine records; a human-backed record
+> is marked challenged and waits for a person.
 
 Runs on turn-end/compaction, MR merge, or on demand. Provider-agnostic via Rig; works with local
 models through any OpenAI-compatible endpoint.

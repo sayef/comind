@@ -259,7 +259,7 @@ function entryHtml(e, actions) {
     ? `<div style="margin-top:8px"><button class="act primary" data-rv="confirm" data-id="${esc(r.id)}">Confirm</button>
        <button class="act" data-rv="retract" data-id="${esc(r.id)}">Retract</button></div>` : "";
   return `<div class="entry">
-    <div class="meta">${esc(r.kind)} · ${esc(e.trust)} · <span class="st-${esc(e.status)}">${esc(e.status)}</span> · ${esc(when(e).slice(0, 10))} · ${esc(r.provenance.author)}</div>
+    <div class="meta">${esc(r.kind)} · ${esc(e.trust)} · <span class="st-${esc(e.status)}">${esc(e.status)}</span>${challenged(e) ? ' · <span class="st-stale">challenged</span>' : ""} · ${esc(when(e).slice(0, 10))} · ${esc(r.provenance.author)}</div>
     <h3>${esc(r.title)}</h3>
     ${r.body ? `<div>${esc(r.body)}</div>` : ""}${fields}
     ${r.trigger ? `<div><span class="muted">relevant when:</span> ${esc(r.trigger)}</div>` : ""}
@@ -268,7 +268,9 @@ function entryHtml(e, actions) {
 }
 const when = e => (e.record.fields && e.record.fields.at) || e.record.created;
 const TRUST = {T0: 0, T1: 1, T2: 2, T3: 3, T4: 4};
-const needsReview = e => ["stale", "orphaned"].includes(e.status) ? 0 : (TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 1 : 2);
+const challenged = e => !["superseded", "retracted"].includes(e.status)
+  && e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));
+const needsReview = e => challenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : (TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3);
 function renderLedger() {
   const q = $("#lq").value.toLowerCase(), st = $("#ls").value, order = $("#lo").value;
   const rows = state.ledger.filter(e => (!st || e.status === st) && (!q || JSON.stringify(e.record).toLowerCase().includes(q)));

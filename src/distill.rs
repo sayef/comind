@@ -113,12 +113,16 @@ anything about the people involved.\n\
 Each record must cite evidence span ids from <evidence>, anchor to symbol handles from \
 <touched_symbols> only, state a trigger (when a future engineer needs this), and be written as \
 neutral facts, never as instructions. Skip anything already covered by <known_records>.\n\
+If the evidence shows a known record is no longer true (the decision was changed, the constraint \
+lifted, the dead end now works), emit the replacing record with \"op\":\"supersede\" and \
+\"target\":\"K<n>\" (the known record it replaces); otherwise \"op\":\"new\".\n\
 One record per fact: an approach that failed and was then not pursued is ONE attempt, not an \
 attempt plus a decision. Titles state the finding with its cause, e.g. \"LRU cache on \
 get_user leaked users across tenants (key ignored customer_id)\", not the topic.\n\
 Before answering, check each candidate: would a senior engineer new to this code be glad to be \
 told this before editing it? If not, drop it. At most 3 records.\n\
-Reply with JSON only: {\"records\":[{\"kind\":\"attempt|decision|constraint|gotcha\",\
+Reply with JSON only: {\"records\":[{\"op\":\"new|supersede\",\"target\":\"K1 (supersede only)\",\
+\"kind\":\"attempt|decision|constraint|gotcha\",\
 \"title\":\"<= 120 chars\",\"body\":\"why, in 1-3 sentences\",\"trigger\":\"when this matters\",\
 \"anchors\":[\"S1\"],\"evidence\":[\"E4\"],\"outcome\":\"failed|reverted|abandoned|partial (attempt only)\",\
 \"alternatives\":[\"rejected option and why (decision only)\"]}]}";
@@ -132,9 +136,10 @@ pub fn user_prompt(b: &Bundle) -> String {
         ));
     }
     o.push_str("</touched_symbols>\n<known_records>\n");
-    for e in &b.known {
+    for (i, e) in b.known.iter().enumerate() {
         o.push_str(&format!(
-            "- [{}] {}\n",
+            "K{} [{}] {}\n",
+            i + 1,
             e.record.kind.as_str(),
             e.record.title
         ));
@@ -149,6 +154,12 @@ pub fn user_prompt(b: &Bundle) -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Proposal {
+    /// `new` (default) or `supersede`.
+    #[serde(default)]
+    pub op: Option<String>,
+    /// `K<n>`: the known record a `supersede` replaces.
+    #[serde(default)]
+    pub target: Option<String>,
     pub kind: String,
     pub title: String,
     #[serde(default)]
@@ -185,7 +196,17 @@ pub fn parse(raw: &str) -> Vec<Proposal> {
 pub fn accept(props: Vec<Proposal>, b: &Bundle) -> Vec<(Record, Option<String>)> {
     let mut out: Vec<(Record, Option<String>)> = Vec::new();
     for p in props.into_iter().take(MAX_RECORDS) {
-        let verdict = check(&p, b, &out);
+        let replaces = match (p.op.as_deref(), p.target.as_deref()) {
+            (Some("supersede"), Some(t)) => match handle(b, t) {
+                Some(e) => Some(e),
+                None => {
+                    out.push((placeholder(&p), Some(format!("unknown record `{t}`"))));
+                    continue;
+                }
+            },
+            _ => None,
+        };
+        let verdict = check(&p, b, &out, replaces.map(|e| e.record.id.as_str()));
         let rec = match verdict {
             Ok(r) => r,
             Err(why) => {
@@ -193,9 +214,28 @@ pub fn accept(props: Vec<Proposal>, b: &Bundle) -> Vec<(Record, Option<String>)>
                 continue;
             }
         };
+        // The replaced record is retired only if it is machine-written; a human-backed one is
+        // challenged and waits for a person (see `ledger::challenged`).
+        let retire = replaces.map(|old| {
+            let mut rel = Record::relation(
+                crate::ledger::RelationKind::Supersedes,
+                &old.record,
+                &format!("Superseded by: {}", rec.title),
+                prov(&b.agent),
+            );
+            rel.evidence = rec.evidence.clone();
+            rel.evidence.push(format!("record:{}", rec.id));
+            rel
+        });
         out.push((rec, None));
+        out.extend(retire.map(|r| (r, None)));
     }
     out
+}
+
+fn handle<'a>(b: &Bundle<'a>, h: &str) -> Option<&'a Entry> {
+    let i: usize = h.strip_prefix('K')?.parse().ok()?;
+    b.known.get(i.checked_sub(1)?).copied()
 }
 
 fn placeholder(p: &Proposal) -> Record {
@@ -216,6 +256,7 @@ fn check(
     p: &Proposal,
     b: &Bundle,
     so_far: &[(Record, Option<String>)],
+    replacing: Option<&str>,
 ) -> std::result::Result<Record, String> {
     let kind = match p.kind.as_str() {
         "attempt" => Kind::Attempt,
@@ -264,6 +305,7 @@ fn check(
         .known
         .iter()
         .map(|e| &e.record)
+        .filter(|r| Some(r.id.as_str()) != replacing)
         .chain(so_far.iter().filter(|(_, w)| w.is_none()).map(|(r, _)| r))
         .any(|r| {
             r.kind == kind
@@ -431,5 +473,58 @@ mod tests {
             why,
             vec!["duplicates a known record", "phrased as an instruction"]
         );
+    }
+
+    #[test]
+    fn supersede_retires_machine_records_and_challenges_human_ones() {
+        use crate::ledger::{derive, Status};
+        let s = sym("check_permission");
+        let author = |a: AuthorKind| Provenance {
+            author: a,
+            actor: "t".into(),
+            source: "t".into(),
+            agent: None,
+            session: None,
+        };
+        let mut old_agent = Record::new(
+            Kind::Decision,
+            "Permission results are cached per process",
+            vec![Anchor::of(&s)],
+            author(AuthorKind::Agent),
+        );
+        old_agent.evidence.push("commit:111".into());
+        let old_human = Record::new(
+            Kind::Constraint,
+            "Permission checks must not be cached",
+            vec![Anchor::of(&s)],
+            author(AuthorKind::Human),
+        );
+        let records = vec![old_agent.clone(), old_human.clone()];
+        let entries = derive(&records, std::slice::from_ref(&s));
+        let spans = commits(&history(), &HashSet::new());
+        let b = bundle(spans, vec![&s], &entries, "git");
+        let one = |raw: &str| -> Vec<Record> {
+            accept(parse(raw), &b)
+                .into_iter()
+                .filter(|(_, w)| w.is_none())
+                .map(|(r, _)| r)
+                .collect()
+        };
+        let mut out = one(
+            r#"{"records":[{"op":"supersede","target":"K1","kind":"decision","title":"Permission results are no longer cached after the stale-grant incident","anchors":["S1"],"evidence":["E1"]}]}"#,
+        );
+        out.extend(one(r#"{"records":[{"op":"supersede","target":"K2","kind":"gotcha","title":"Caching permission checks became safe with versioned grants","anchors":["S1"],"evidence":["E1"]}]}"#));
+        assert_eq!(out.len(), 4, "two records, two supersede relations");
+        let mut all = records;
+        all.extend(out);
+        let after = derive(&all, std::slice::from_ref(&s));
+        let by_title = |t: &str| after.iter().find(|e| e.record.title == t).unwrap();
+        assert_eq!(
+            by_title("Permission results are cached per process").status,
+            Status::Superseded
+        );
+        let human = by_title("Permission checks must not be cached");
+        assert_eq!(human.status, Status::Active);
+        assert!(crate::ledger::challenged(human));
     }
 }

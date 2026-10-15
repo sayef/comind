@@ -60,6 +60,11 @@ comind review <id> confirm                  # or: retract --reason "…", supers
 comind ui --web                             # the same, with a timeline, in the browser
 ```
 
+Only a person can retire a human-backed record (written or confirmed by a person). When an agent
+or the distiller retracts or supersedes one (for example a later MR shows a decision changed), the
+record stays active, is marked **challenged**, and goes to the top of the inbox. Machine-written
+records can be superseded by machines.
+
 Ten minutes a week of review is what keeps the ledger worth reading. Agent session transcripts
 are never read.
 
