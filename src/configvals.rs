@@ -25,7 +25,10 @@ pub fn is_config(rel: &str) -> bool {
             "node_modules" | ".github" | "tests" | "test" | "fixtures" | ".venv" | "target"
         )
     });
-    stem_ok && (file.ends_with(".yml") || file.ends_with(".yaml")) && !in_skipped
+    stem_ok
+        && p.matches('/').count() < 6
+        && (file.ends_with(".yml") || file.ends_with(".yaml"))
+        && !in_skipped
 }
 
 /// Facts for every config file in a repo.

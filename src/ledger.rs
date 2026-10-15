@@ -395,19 +395,31 @@ impl Ledger {
     /// `apply`, otherwise only listed.
     pub async fn erase(&self, pick: impl Fn(&Record) -> bool, apply: bool) -> Result<Vec<Record>> {
         let all = self.keyed().await?;
-        let ids: std::collections::HashSet<&str> = all
+        let mut ids: std::collections::HashSet<&str> = all
             .iter()
             .filter(|(_, r)| pick(r))
             .map(|(_, r)| r.id.as_str())
             .collect();
-        let doomed: Vec<&(ObjPath, Record)> = all
-            .iter()
-            .filter(|(_, r)| {
-                ids.contains(r.id.as_str())
-                    || r.relation
+        // Relations about erased records go too, and relations about those, to a fixpoint.
+        loop {
+            let more: Vec<&str> = all
+                .iter()
+                .filter(|(_, r)| !ids.contains(r.id.as_str()))
+                .filter(|(_, r)| {
+                    r.relation
                         .as_ref()
                         .is_some_and(|x| ids.contains(x.target.as_str()))
-            })
+                })
+                .map(|(_, r)| r.id.as_str())
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            ids.extend(more);
+        }
+        let doomed: Vec<&(ObjPath, Record)> = all
+            .iter()
+            .filter(|(_, r)| ids.contains(r.id.as_str()))
             .collect();
         if apply {
             for (key, r) in &doomed {
@@ -1123,8 +1135,9 @@ mod tests {
         let mut theirs = prov(AuthorKind::Human);
         theirs.actor = "actor-other".into();
         let other = Record::new(Kind::Gotcha, "other", vec![Anchor::of(&s)], theirs.clone());
-        let confirm = Record::relation(RelationKind::Confirms, &mine, "", theirs);
-        for r in [&mine, &other, &confirm] {
+        let confirm = Record::relation(RelationKind::Confirms, &mine, "", theirs.clone());
+        let undo = Record::relation(RelationKind::Retracts, &confirm, "", theirs);
+        for r in [&mine, &other, &confirm, &undo] {
             ledger.put(r).await.unwrap();
         }
         ledger.compact().await.unwrap();
@@ -1132,8 +1145,8 @@ mod tests {
             .erase(|r| r.provenance.actor == "actor-test", false)
             .await
             .unwrap();
-        assert_eq!(dry.len(), 2);
-        assert_eq!(ledger.all().await.unwrap().len(), 3);
+        assert_eq!(dry.len(), 3, "relation chains go with the record");
+        assert_eq!(ledger.all().await.unwrap().len(), 4);
         ledger
             .erase(|r| r.provenance.actor == "actor-test", true)
             .await

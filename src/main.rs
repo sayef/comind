@@ -1316,6 +1316,21 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
         comind::ui::err("name record ids or --actor (`me` for your own records)");
         return ExitCode::FAILURE;
     }
+    if let Some(short) = ids.iter().find(|i| i.len() < 8) {
+        comind::ui::err(&format!("id prefix `{short}` is too short (8+ characters)"));
+        return ExitCode::FAILURE;
+    }
+    let cfg = comind::config::Config::load();
+    let all = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    for i in ids {
+        let n = all.iter().filter(|r| r.id.starts_with(i.as_str())).count();
+        if n != 1 {
+            comind::ui::err(&format!(
+                "id prefix `{i}` matches {n} records; give a longer one"
+            ));
+            return ExitCode::FAILURE;
+        }
+    }
     let actor = actor.map(|a| {
         if a == "me" {
             comind::ledger::actor()
@@ -1327,7 +1342,6 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
         ids.iter().any(|i| r.id.starts_with(i.as_str()))
             || actor.as_deref() == Some(r.provenance.actor.as_str())
     };
-    let cfg = comind::config::Config::load();
     match comind::ledger::erase_blocking(&cfg.index_dir(from), pick, yes) {
         Ok(gone) => {
             for r in &gone {

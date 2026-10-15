@@ -234,6 +234,16 @@ struct Summary {
 /// A parameter origin: callable, parameter name, position, attribute path.
 type Origin = (String, String, usize, Vec<String>);
 
+/// A parameter's position, or `usize::MAX` when it is keyword-only (after a `*` marker).
+fn positional(names: &[String], p: &str) -> Option<usize> {
+    let i = names.iter().position(|n| n == p)?;
+    Some(if names[..i].iter().any(|n| n == "*") {
+        usize::MAX
+    } else {
+        i
+    })
+}
+
 fn scheme_key(s: Scheme, v: &str) -> String {
     match s {
         Scheme::Sqs => format!("sqs:{}", queue_name(v)),
@@ -336,6 +346,9 @@ impl<'b, 'a> Cx<'b, 'a> {
                         .and_then(|v| cx.value(v, scope, 0))
                         .unwrap_or_default();
                     let parent = ctor[..ctor.len() - 1].to_vec();
+                    if parent == [target.clone()] {
+                        continue;
+                    }
                     cx.groups
                         .insert((scope.clone(), target.clone()), (parent, prefix));
                     continue;
@@ -384,8 +397,8 @@ impl<'b, 'a> Cx<'b, 'a> {
                         args.get("prefix", usize::MAX)
                             .and_then(|v| cx.value(v, from, 0)),
                     ),
-                    "use" if args.positional.len() == 2 => (
-                        args.positional.get(1),
+                    "use" if args.positional.len() >= 2 => (
+                        args.positional.last(),
                         args.positional
                             .first()
                             .and_then(Option::as_ref)
@@ -846,11 +859,7 @@ impl<'b, 'a> Cx<'b, 'a> {
         }
         let (head, rest) = path.split_first()?;
         self.b.scope_chain(from).into_iter().find_map(|s| {
-            let i = self
-                .params
-                .get(s.as_str())?
-                .iter()
-                .position(|n| n == head)?;
+            let i = positional(self.params.get(s.as_str())?, head)?;
             Some((s, head.clone(), i, rest.to_vec()))
         })
     }
@@ -862,11 +871,7 @@ impl<'b, 'a> Cx<'b, 'a> {
         if let Some(ValueExpr::Name(v)) = self.values.get(&(class, attr)).copied() {
             if let Some((q, rest)) = v.split_first() {
                 let init = self.init_of(class, 0)?;
-                let i = self
-                    .params
-                    .get(init.as_str())?
-                    .iter()
-                    .position(|n| n == q)?;
+                let i = positional(self.params.get(init.as_str())?, q)?;
                 return Some((init, q.clone(), i, rest.to_vec()));
             }
         }
@@ -1227,25 +1232,23 @@ fn go_request<'a>(
 fn test_path(path: &str) -> bool {
     let p = path.to_ascii_lowercase();
     let (dirs, file) = p.rsplit_once('/').unwrap_or(("", &p));
+    let orig = path.rsplit('/').next().unwrap_or(path);
     dirs.split('/')
         .any(|d| matches!(d, "tests" | "test" | "__tests__" | "e2e" | "testing"))
         || file.starts_with("test_")
         || file == "conftest.py"
         || [
-            "_test.py",
-            "_test.go",
-            ".test.ts",
-            ".test.tsx",
-            ".test.js",
-            ".spec.ts",
-            ".spec.tsx",
-            ".spec.js",
-            "test.java",
-            "test.kt",
-            "tests.rs",
+            "_test.py", "_test.go", "_test.rs", ".test.ts", ".test.tsx", ".test.js", ".spec.ts",
+            ".spec.tsx", ".spec.js",
         ]
         .iter()
         .any(|s| file.ends_with(s))
+        // JVM convention: `UserTest.java`, `UserTests.kt` (not `Latest.java`).
+        || ["Test.java", "Tests.java", "Test.kt", "Tests.kt"].iter().any(|s| {
+            orig.strip_suffix(s)
+                .and_then(|stem| stem.chars().last())
+                .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
 }
 
 /// `%s`, `%d`, `%v`, … become `{}` placeholders.
@@ -1439,6 +1442,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keyword_only_params_have_no_position() {
+        let names: Vec<String> = ["a", "*", "b"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(positional(&names, "a"), Some(0));
+        assert_eq!(positional(&names, "b"), Some(usize::MAX));
+    }
+
+    #[test]
     fn test_paths() {
         assert!(test_path("app/tests/e2e/test_x.py"));
         assert!(test_path("src/test/java/com/acme/UserTest.java"));
@@ -1446,6 +1456,9 @@ mod tests {
         assert!(test_path("pkg/handler_test.go"));
         assert!(!test_path("app/latest_version.py"));
         assert!(!test_path("src/contest/routes.py"));
+        assert!(!test_path("src/main/java/com/acme/Latest.java"));
+        assert!(!test_path("src/contests.rs"));
+        assert!(test_path("src/main/kotlin/UserServiceTest.kt"));
     }
 
     #[test]

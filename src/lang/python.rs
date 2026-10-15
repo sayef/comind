@@ -162,6 +162,8 @@ impl LangSpec for Python {
             .into_iter()
             .filter_map(|p| match p.kind() {
                 "identifier" => Some(text(p, src).to_string()),
+                // Everything after `*args` or a bare `*` is keyword-only.
+                "list_splat_pattern" | "keyword_separator" => Some("*".to_string()),
                 "typed_parameter" | "default_parameter" | "typed_default_parameter" => p
                     .child_by_field_name("name")
                     .or_else(|| {

@@ -4,6 +4,12 @@ import "net/http"
 
 func getItem(w http.ResponseWriter, r *http.Request) {}
 
+func metrics(w http.ResponseWriter, r *http.Request) {}
+
+func defaultMux() {
+	http.HandleFunc("/metrics", metrics)
+}
+
 func routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/items/{id}", getItem)

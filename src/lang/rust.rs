@@ -420,10 +420,10 @@ fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
             let ValueExpr::Lit(fmt) = fmt else {
                 return None;
             };
+            // One slot per argument, so a non-identifier keeps its position.
             let mut positional = kids[1..]
                 .iter()
-                .filter(|k| k.kind() == "identifier")
-                .map(|k| text(*k, src).to_string());
+                .map(|k| (k.kind() == "identifier").then(|| text(*k, src).to_string()));
             let mut parts = Vec::new();
             let mut rest = fmt.as_str();
             while let Some(open) = rest.find('{') {
@@ -431,7 +431,7 @@ fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
                 let close = rest[open..].find('}').map_or(rest.len(), |c| open + c);
                 let name = rest[open + 1..close].split(':').next().unwrap_or("");
                 let expr = if name.is_empty() {
-                    positional.next().map(|n| vec![n])
+                    positional.next().flatten().map(|n| vec![n])
                 } else {
                     Some(vec![name.to_string()])
                 };

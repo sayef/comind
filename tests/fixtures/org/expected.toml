@@ -962,3 +962,9 @@ case = "same-repo-import"
 kind = "imports"
 src = "service-a:service_a/uploads.py"
 dst = "service-a:service_a/cfg.py::config"
+
+[[edge]]
+case = "contract-go-default-mux"
+kind = "serves"
+src = "gosvc:routes.go::metrics"
+dst = "contract:http:ANY /metrics"

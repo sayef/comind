@@ -58,7 +58,7 @@ impl LangSpec for Go {
         let (method, receiver) = p.split_last()?;
         let list = node.child_by_field_name("arguments")?;
         let args = args(list, src);
-        if receiver == ["http"] {
+        if receiver == ["http"] && !method.starts_with("Handle") {
             return Some(RawContract::Op {
                 receiver: receiver.to_vec(),
                 method: method.clone(),

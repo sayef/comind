@@ -192,7 +192,7 @@ impl Rule {
             }
         }
         out.sort_by(|a, b| (&a.repo, &a.path, a.line).cmp(&(&b.repo, &b.path, b.line)));
-        out.dedup_by(|a, b| a.what == b.what && a.path == b.path);
+        out.dedup_by(|a, b| a.repo == b.repo && a.path == b.path && a.what == b.what);
         out
     }
 }

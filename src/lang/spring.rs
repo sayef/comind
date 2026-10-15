@@ -46,7 +46,8 @@ pub(crate) fn route(def: Node, src: &[u8]) -> Option<RawContract> {
                 .and_then(|v| match v {
                     ValueExpr::Name(p) => p.last().cloned(),
                     _ => None,
-                })?;
+                })
+                .unwrap_or_else(|| "ANY".into());
             return Some((verb, mapping_path(a, src)));
         }
         None
