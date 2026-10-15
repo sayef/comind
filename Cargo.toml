@@ -33,7 +33,7 @@ indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
 console = "0.16" # styled status lines + TTY detection
 comfy-table = "7" # unicode result tables
 anyhow = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net"] }
 futures = "0.3"
 rayon = "1"
 ignore = "=0.4.23"
@@ -63,6 +63,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 crossterm = "0.29"
 globset = "0.4"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 
 [profile.release]
 lto = "thin"

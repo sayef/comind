@@ -39,3 +39,4 @@ pub mod mcp;
 
 pub mod tui;
 pub mod ui;
+pub mod web;

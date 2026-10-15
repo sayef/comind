@@ -258,10 +258,15 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Terminal UI: overview, contracts, ledger, explorer and conventions
+    /// Terminal UI (or `--web`: local web UI) for overview, contracts, ledger, explorer and conventions
     Ui {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
+        /// Serve the web UI on 127.0.0.1 instead of the terminal UI
+        #[arg(long)]
+        web: bool,
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
     },
     /// Before committing: recorded constraints/dead ends, contracts, blast radius and missing
     /// companions for your uncommitted changes
@@ -557,7 +562,11 @@ fn main() -> ExitCode {
             strict,
             index_dir,
         } => cmd_preflight(&repo, &base, strict, index_dir.as_deref()),
-        Cmd::Ui { index_dir } => cmd_ui(index_dir.as_deref()),
+        Cmd::Ui {
+            index_dir,
+            web,
+            port,
+        } => cmd_ui(index_dir.as_deref(), web.then_some(port)),
         Cmd::Erase {
             ids,
             actor,
@@ -1339,7 +1348,7 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
     }
 }
 
-fn cmd_ui(from: Option<&str>) -> ExitCode {
+fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
     let cfg = comind::config::Config::load();
     let dir = cfg.graph_dir(from);
     let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
@@ -1355,10 +1364,11 @@ fn cmd_ui(from: Option<&str>) -> ExitCode {
     };
     conventions.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
     let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let entries = comind::ledger::derive(&records, &symbols);
-    let deps = comind::manifests::internal(
-        &comind::index::read_packages_blocking(&dir).unwrap_or_default(),
-    );
+    let mut entries = comind::ledger::derive(&records, &symbols);
+    let packages = comind::index::read_packages_blocking(&dir).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+    comind::checks::promote(&mut entries, &findings);
+    let deps = comind::manifests::internal(&packages);
     let graph = comind::graph::CodeGraph::build(&symbols, &edges);
     let data = comind::tui::Data {
         contracts: graph.contracts(None, false),
@@ -1370,7 +1380,11 @@ fn cmd_ui(from: Option<&str>) -> ExitCode {
         deps,
         root: Some(cfg.index_dir(from)),
     };
-    match comind::tui::App::new(data).run() {
+    let run = match web {
+        Some(port) => comind::web::serve(data, port),
+        None => comind::tui::App::new(data).run(),
+    };
+    match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             comind::ui::err(&format!("{e:#}"));

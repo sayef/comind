@@ -138,7 +138,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
-| `comind ui [--index-dir <dir>]` | Terminal UI: overview, contracts, ledger, explorer, conventions |
+| `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI, or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for the full flags of any subcommand.
@@ -191,6 +191,8 @@ src/scip.rs    SCIP ingestion (existing index.scip or installed indexers)
 src/eval.rs    graph-quality eval on a gold fixture (`comind eval graph`)
 src/conventions.rs measured coding conventions + org baseline; src/recipes.rs change recipes from history
 src/ledger.rs  reasoning ledger: decisions, failed attempts, constraints anchored to symbols (`why`, `remember`)
+src/checks.rs  compiled constraint checks evaluated on the graph and manifests (`ledger --check`, preflight)
+src/web.rs     local web UI (`comind ui --web`)
 src/git.rs     git change detection (incremental)
 src/index.rs   versioned LanceDB store: symbols, edges, search, enrichment, flows, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack

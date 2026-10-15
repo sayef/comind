@@ -43,7 +43,7 @@ pub const PROVIDES: &[EdgeKind] = &[
 ];
 
 /// A node as returned to callers — flat, printable, agent-friendly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Node {
     pub id: String,
     pub name: String,
@@ -55,7 +55,7 @@ pub struct Node {
 }
 
 /// A node plus how far it sits from the focus (BFS depth) and via which relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Hop {
     pub node: Node,
     pub depth: usize,
@@ -63,7 +63,7 @@ pub struct Hop {
 }
 
 /// The 360° view of one symbol.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Zoom {
     pub focus: Option<Node>,
     pub container: Option<Node>,
@@ -79,7 +79,7 @@ pub struct Zoom {
 }
 
 /// A symbol's role in a contract (`serves http:GET /x`) and the participants on the other side.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ContractRole {
     pub role: EdgeKind,
     pub contract: Node,
@@ -87,7 +87,7 @@ pub struct ContractRole {
 }
 
 /// A contract with everyone on each side.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ContractView {
     pub contract: Node,
     pub providers: Vec<Node>,
