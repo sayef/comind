@@ -259,6 +259,9 @@ enum Cmd {
         /// Compare the working tree against this revision
         #[arg(long, default_value = "HEAD")]
         base: String,
+        /// Exit non-zero when a `must` constraint check fails in a changed file (CI)
+        #[arg(long)]
+        strict: bool,
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
@@ -538,8 +541,9 @@ fn main() -> ExitCode {
         Cmd::Preflight {
             repo,
             base,
+            strict,
             index_dir,
-        } => cmd_preflight(&repo, &base, index_dir.as_deref()),
+        } => cmd_preflight(&repo, &base, strict, index_dir.as_deref()),
         Cmd::Ui { index_dir } => cmd_ui(index_dir.as_deref()),
 
         Cmd::Eval {
@@ -1317,7 +1321,7 @@ fn cmd_ui(from: Option<&str>) -> ExitCode {
     }
 }
 
-fn cmd_preflight(repo: &str, base: &str, from: Option<&str>) -> ExitCode {
+fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
     let root = Path::new(repo);
     let name = std::fs::canonicalize(root)
         .ok()
@@ -1360,7 +1364,21 @@ fn cmd_preflight(repo: &str, base: &str, from: Option<&str>) -> ExitCode {
         "{}",
         comind::preflight::report(&g, &symbols, &edges, &entries, &recipes, &findings, &changes)
     );
-    ExitCode::SUCCESS
+    let changed: Vec<String> = changes
+        .iter()
+        .map(|c| format!("{}/{}", c.repo, c.path))
+        .collect();
+    let blocking = findings.iter().any(|f| {
+        f.severity == "must"
+            && f.violations
+                .iter()
+                .any(|v| changed.contains(&format!("{}/{}", v.repo, v.path)))
+    });
+    if strict && blocking {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {

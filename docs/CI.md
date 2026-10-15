@@ -111,3 +111,28 @@ endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 `repo_meta` table) against HEAD and reparses only changed files — useful for keeping a per-repo
 dataset fresh cheaply. Today the central `link` re-parses sources; org-level re-merge from per-repo
 datasets is a future optimization.
+
+## Merge-request preflight
+
+Run `preflight` in each member repo's MR pipeline against the shared index and post the report as
+an MR note. It lists recorded constraints and dead ends on the touched code, contracts other
+services consume, blast radius, missing co-changes and failing constraint checks. `--strict` fails
+the job when a `must` constraint check is violated in a changed file. Checks run on the shared
+index, so they see the default branch plus the MR's changed paths, not edges new in the MR.
+
+```yaml
+comind-preflight:
+  stage: test
+  rules: [{ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' }]
+  script:
+    - comind preflight . --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --index-dir "$COMIND_INDEX" --strict > preflight.md || STATUS=$?
+    - |
+      jq -Rs '{body: .}' preflight.md | curl -sf -X POST \
+        -H "PRIVATE-TOKEN: $COMIND_NOTE_TOKEN" -H "Content-Type: application/json" \
+        --data @- "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    - exit ${STATUS:-0}
+```
+
+The scheduled index job should also run `comind ledger --compact --index-dir "$COMIND_INDEX"`
+and, optionally, `comind ledger --check` to fail on org-wide violations.
+
