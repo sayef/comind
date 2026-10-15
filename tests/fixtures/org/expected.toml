@@ -831,3 +831,16 @@ case = "contract-reqwest-client"
 kind = "consumes"
 src = "rs-api:src/main.rs::account"
 dst = "contract:http:GET /api/accounts/{}"
+
+# ---- Express: Router()/express() instances, use() mounts, handler references ----
+[[edge]]
+case = "contract-express-route"
+kind = "serves"
+src = "web-app:src/server.ts::listJobs"
+dst = "contract:http:GET /api/v2/jobs"
+
+[[edge]]
+case = "contract-express-route"
+kind = "serves"
+src = "web-app:src/server.ts"
+dst = "contract:http:POST /api/v2/jobs"

@@ -58,6 +58,20 @@ impl LangSpec for TypeScript {
     }
 
     fn contract(&self, node: Node, src: &[u8]) -> Option<RawContract> {
+        // `const app = express()` / `const api = Router()`: maybe a router, decided at link time.
+        if node.kind() == "variable_declarator" {
+            let name = node
+                .child_by_field_name("name")
+                .filter(|n| n.kind() == "identifier")?;
+            let call = node
+                .child_by_field_name("value")
+                .filter(|v| v.kind() == "call_expression")?;
+            return Some(RawContract::Construct {
+                target: Target::Var(text(name, src).to_string()),
+                ctor: path(call.child_by_field_name("function")?, src)?,
+                args: args(call.child_by_field_name("arguments")?, src),
+            });
+        }
         if node.kind() != "call_expression" {
             return None;
         }
@@ -329,7 +343,7 @@ fn type_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
 
 /// Calls that may be HTTP operations; receivers decide at resolve time.
 const HTTP_OPS: &[&str] = &[
-    "fetch", "get", "post", "put", "patch", "delete", "head", "options", "request",
+    "fetch", "get", "post", "put", "patch", "delete", "head", "options", "request", "use",
 ];
 
 fn args(list: Node, src: &[u8]) -> Args {

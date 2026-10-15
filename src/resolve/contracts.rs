@@ -21,7 +21,12 @@ const HTTP_CLIENTS: &[&str] = &[
     "aiohttp.ClientSession",
 ];
 const HTTP_MODULES: &[&str] = &["httpx", "requests", "axios", "ky", "got"];
-const ROUTERS: &[&str] = &["fastapi.APIRouter", "fastapi.FastAPI"];
+const ROUTERS: &[&str] = &[
+    "fastapi.APIRouter",
+    "fastapi.FastAPI",
+    "express",
+    "express.Router",
+];
 const DB_READS: &[&str] = &["get", "query", "select", "scalars"];
 const DB_WRITES: &[&str] = &["add", "merge", "delete", "insert", "update"];
 /// Calls whose value is their first argument's (`Path("/x")`, `str(x)`).
@@ -254,20 +259,30 @@ impl<'b, 'a> Cx<'b, 'a> {
                 else {
                     continue;
                 };
-                if method != "include_router" {
-                    continue;
-                }
+                // FastAPI `include_router(r, prefix=…)`, Express `use("/prefix", r)`.
+                let (router, prefix) = match method.as_str() {
+                    "include_router" => (
+                        args.positional.first(),
+                        args.get("prefix", usize::MAX)
+                            .and_then(|v| cx.value(v, from, 0)),
+                    ),
+                    "use" if args.positional.len() == 2 => (
+                        args.positional.get(1),
+                        args.positional
+                            .first()
+                            .and_then(Option::as_ref)
+                            .and_then(|v| cx.value(v, from, 0)),
+                    ),
+                    _ => continue,
+                };
                 let parent = cx.var_of(receiver, from, f);
-                let router = match args.positional.first() {
+                let router = match router {
                     Some(Some(ValueExpr::Name(p))) => cx.var_of(p, from, f),
                     _ => None,
                 };
                 if let (Some(parent), Some(router)) = (parent, router) {
-                    let prefix = args
-                        .get("prefix", usize::MAX)
-                        .and_then(|v| cx.value(v, from, 0))
-                        .unwrap_or_default();
-                    cx.mounts.insert(router, (parent, prefix));
+                    cx.mounts
+                        .insert(router, (parent, prefix.unwrap_or_default()));
                 }
             }
         }
@@ -459,6 +474,39 @@ impl<'b, 'a> Cx<'b, 'a> {
             }
             if DB_WRITES.contains(&method) {
                 emit(from, format!("table:{table}"), EdgeKind::Writes);
+                return;
+            }
+        }
+        // Express: `router.get("/x", …, handler)` on an `express()` / `Router()` instance.
+        if HTTP_VERBS.contains(&method)
+            && matches!(f.language, Language::TypeScript | Language::JavaScript)
+            && args.positional.len() >= 2
+        {
+            if let Some(router) = self
+                .var_of(receiver, from, f)
+                .filter(|r| self.routers.contains_key(r))
+            {
+                let path = args.positional.first().and_then(Option::as_ref);
+                if let Some(p) = path.and_then(|p| self.value(p, from, 0)) {
+                    let handler = match args.positional.last() {
+                        Some(Some(ValueExpr::Name(h))) => {
+                            match self.b.resolve_path(h, from, f, 0) {
+                                Some(Value::Sym(id)) => id,
+                                _ => from.to_string(),
+                            }
+                        }
+                        _ => from.to_string(),
+                    };
+                    emit(
+                        &handler,
+                        format!(
+                            "http:{} {}",
+                            method.to_uppercase(),
+                            http_path(&format!("{}{p}", self.prefix(&router, 0)))
+                        ),
+                        EdgeKind::Serves,
+                    );
+                }
                 return;
             }
         }
