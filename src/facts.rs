@@ -34,6 +34,15 @@ pub struct FileFacts {
     pub calls: Vec<CallFact>,
 }
 
+/// A queue (`sqs`), topic (`sns`) or bucket (`s3`) named in IaC; `logical` names are the
+/// short name a module expands (`inference-tasks`), not the full resource name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfraRef {
+    pub scheme: String,
+    pub name: String,
+    pub logical: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParamFact {
     pub func: String,
@@ -145,6 +154,13 @@ pub enum ContractFact {
         method: String,
         args: Args,
         line: u32,
+    },
+    /// Infrastructure as code declares (or subscribes) a queue, topic or bucket.
+    Infra {
+        declares: InfraRef,
+        /// The topic this queue is subscribed to.
+        #[serde(default)]
+        subscribes: Option<InfraRef>,
     },
     /// `__tablename__ = "x"` on a model class.
     Table { class: String, name: String },

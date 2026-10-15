@@ -134,16 +134,105 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
                     args,
                     ..
                 } => cx.op(f, from, receiver, method, args, &mut emit),
-                ContractFact::Construct { .. } => {}
+                ContractFact::Construct { .. } | ContractFact::Infra { .. } => {}
             }
         }
     }
     cx.propagate(facts, &mut emit);
+    link_infra(b, facts, &mut out);
     suffix_match(&mut out);
     let mut seen = std::collections::HashSet::new();
     out.edges
         .retain(|(a, b, k)| seen.insert((a.clone(), b.clone(), k.as_str())));
     out
+}
+
+/// IaC declarations and topic→queue subscriptions. A module's logical name (`inference-tasks`)
+/// joins the one contract of that kind the same repo's code uses whose name ends with it.
+fn link_infra(b: &Binder, facts: &[FileFacts], out: &mut Linked) {
+    let repo_of = |id: &str| b.file_facts_of(id).map(|f| f.repo.clone());
+    let mut used: Vec<(String, String)> = Vec::new(); // (repo, contract name)
+    let names: HashMap<String, String> = out
+        .symbols
+        .iter()
+        .map(|s| (s.id.render(), s.name.clone()))
+        .collect();
+    for (src, dst, _) in &out.edges {
+        if let (Some(r), Some(n)) = (repo_of(src), names.get(dst)) {
+            used.push((r, n.clone()));
+        }
+    }
+    // Full (non-logical) IaC names are candidates too: another repo may name this one's topic.
+    for f in facts {
+        for c in &f.contracts {
+            if let ContractFact::Infra {
+                declares,
+                subscribes,
+            } = c
+            {
+                for r in std::iter::once(declares)
+                    .chain(subscribes)
+                    .filter(|r| !r.logical)
+                {
+                    used.push((String::new(), format!("{}:{}", r.scheme, untier(&r.name))));
+                }
+            }
+        }
+    }
+    let key = |r: &crate::facts::InfraRef, repo: &str| -> String {
+        let full = format!("{}:{}", r.scheme, untier(&r.name));
+        if !r.logical {
+            return full;
+        }
+        let want = name_tokens(&untier(&r.name));
+        let own = name_tokens(repo);
+        let contains = |have: &[String], part: &[String]| {
+            !part.is_empty() && have.windows(part.len()).any(|w| w == part)
+        };
+        let mut hits: Vec<&String> = used
+            .iter()
+            .filter(|(_, n)| n.starts_with(&format!("{}:", r.scheme)))
+            .filter(|(rr, n)| {
+                let have = name_tokens(&n[r.scheme.len() + 1..]);
+                let ends = have.len() >= want.len() && have[have.len() - want.len()..] == want[..];
+                // Used by this repo's code, or a full name that carries this repo's name.
+                ends && (rr == repo || contains(&have, &own))
+            })
+            .map(|(_, n)| n)
+            .collect();
+        hits.sort();
+        hits.dedup();
+        match hits.as_slice() {
+            [one] => one.to_string(),
+            _ => full,
+        }
+    };
+    let add = |src: String, k: String, kind: EdgeKind, out: &mut Linked| {
+        let e = (src, contract_id(&k).render(), kind);
+        if !out.edges.contains(&e) {
+            out.edges.push(e);
+        }
+        if !out.symbols.iter().any(|s| s.name == k) {
+            out.symbols.push(contract_symbol(&k));
+        }
+    };
+    for f in facts {
+        for c in &f.contracts {
+            let ContractFact::Infra {
+                declares,
+                subscribes,
+            } = c
+            else {
+                continue;
+            };
+            let q = key(declares, &f.repo);
+            add(f.file_id.clone(), q.clone(), EdgeKind::Defines, out);
+            if let Some(t) = subscribes {
+                let t = key(t, &f.repo);
+                add(contract_id(&q).render(), t, EdgeKind::Subscribes, out);
+            }
+        }
+    }
 }
 
 /// A client sees paths below its configured base URL (often `/api/v1`), so a consumer-only
@@ -246,9 +335,9 @@ fn positional(names: &[String], p: &str) -> Option<usize> {
 
 fn scheme_key(s: Scheme, v: &str) -> String {
     match s {
-        Scheme::Sqs => format!("sqs:{}", queue_name(v)),
-        Scheme::Sns => format!("sns:{}", arn_name(v)),
-        Scheme::S3 => format!("s3:{}", bucket(v)),
+        Scheme::Sqs => format!("sqs:{}", untier(&queue_name(v))),
+        Scheme::Sns => format!("sns:{}", untier(&arn_name(v))),
+        Scheme::S3 => format!("s3:{}", untier(&bucket(v))),
     }
 }
 
@@ -1340,6 +1429,63 @@ pub fn http_path(url: &str) -> String {
     format!("/{}", segs.join("/"))
 }
 
+/// Deployment tiers are not part of a resource's identity: `acme-dev-jobs` and
+/// `acme-${var.tier}-jobs` are the same queue, `acme-{}-jobs`.
+pub fn untier(name: &str) -> String {
+    const TIERS: &[&str] = &[
+        "dev",
+        "develop",
+        "development",
+        "stage",
+        "staging",
+        "stg",
+        "prod",
+        "production",
+        "prd",
+        "uat",
+        "preprod",
+        "sandbox",
+    ];
+    let mut out = String::new();
+    let mut word = String::new();
+    let flush = |w: &mut String, out: &mut String| {
+        if TIERS.contains(&w.to_ascii_lowercase().as_str()) {
+            out.push_str("{}");
+        } else {
+            out.push_str(w);
+        }
+        w.clear();
+    };
+    for c in name.chars() {
+        if matches!(c, '-' | '_' | '.' | '/') {
+            flush(&mut word, &mut out);
+            out.push(c);
+        } else {
+            word.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
+/// Tokens of a resource name, without trailing kind words (`-queue`, `-sns-topic.fifo`).
+fn name_tokens(name: &str) -> Vec<String> {
+    let mut t: Vec<String> = name
+        .split(['-', '_', '.', ':', '/'])
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    while t.last().is_some_and(|w| {
+        matches!(
+            w.as_str(),
+            "queue" | "topic" | "sns" | "sqs" | "fifo" | "bucket"
+        )
+    }) {
+        t.pop();
+    }
+    t
+}
+
 fn queue_name(url: &str) -> String {
     if url.starts_with("{env:") {
         return url.to_string();
@@ -1459,6 +1605,26 @@ mod tests {
         let names: Vec<String> = ["a", "*", "b"].iter().map(|s| s.to_string()).collect();
         assert_eq!(positional(&names, "a"), Some(0));
         assert_eq!(positional(&names, "b"), Some(usize::MAX));
+    }
+
+    #[test]
+    fn tiers_are_not_identity() {
+        assert_eq!(
+            untier("skills-dev-api-tasks-queue"),
+            "skills-{}-api-tasks-queue"
+        );
+        assert_eq!(
+            untier("skills-{}-api-tasks-queue"),
+            "skills-{}-api-tasks-queue"
+        );
+        assert_eq!(untier("acme_prod.events.fifo"), "acme_{}.events.fifo");
+        assert_eq!(untier("developers-feed"), "developers-feed");
+        assert_eq!(
+            name_tokens("skills-{}-x-analysis-events-queue")
+                .last()
+                .map(String::as_str),
+            Some("events")
+        );
     }
 
     #[test]

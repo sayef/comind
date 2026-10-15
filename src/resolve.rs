@@ -182,7 +182,14 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
         .collect();
     let linked = contracts::link(&b, facts, &calls);
     for (src, dst, kind) in linked.edges {
-        let Some(s) = b.sym(&src) else {
+        // Sources are code symbols, or contracts themselves (a queue subscribed to a topic).
+        let Some(src_id) = b.sym(&src).map(|s| s.id.clone()).or_else(|| {
+            linked
+                .symbols
+                .iter()
+                .find(|c| c.id.render() == src)
+                .map(|c| c.id.clone())
+        }) else {
             continue;
         };
         let dst_id = linked
@@ -193,7 +200,7 @@ pub fn resolve(symbols: &[Symbol], edges: &[Edge], facts: &[FileFacts]) -> Resol
         if let Some(d) = dst_id {
             out.stats.contract_edges += 1;
             out.edges.push(Edge {
-                src: s.id.clone(),
+                src: src_id,
                 dst: d,
                 kind,
                 confidence: 0.9,

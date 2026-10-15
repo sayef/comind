@@ -98,6 +98,7 @@ src/
   conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
   recipes.rs  change recipes from commit history (what changes together when adding code).
   ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
+  infra.rs    Terraform: queues, topics, buckets and topic→queue subscriptions as contract facts.
   configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
   distill.rs  LLM distiller: transcript / commit evidence → validated ledger proposals (T1).
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.

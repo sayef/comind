@@ -2047,7 +2047,13 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
     let list = |ns: &[comind::graph::Node]| {
         let set: BTreeSet<String> = ns
             .iter()
-            .map(|n| format!("{}:{}", n.repo, n.name))
+            .map(|n| {
+                if n.repo == comind::resolve::CONTRACTS {
+                    n.name.clone()
+                } else {
+                    format!("{}:{}", n.repo, n.name)
+                }
+            })
             .collect();
         if set.is_empty() {
             "—".to_string()

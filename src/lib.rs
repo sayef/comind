@@ -27,6 +27,7 @@ pub mod scip;
 pub mod eval;
 
 pub mod index;
+pub mod infra;
 pub mod search;
 
 pub mod embed;

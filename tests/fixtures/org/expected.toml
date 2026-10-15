@@ -981,3 +981,16 @@ case = "contract-webclient"
 kind = "consumes"
 src = "spring-svc:src/main/java/com/acme/users/ItemsGateway.java::ItemsGateway.item"
 dst = "contract:http:GET /api/items/{}"
+
+# ---- Terraform: module-declared queue joined to the code's key, subscribed to a topic ----
+[[edge]]
+case = "infra-terraform"
+kind = "defines"
+src = "service-a:iac/main.tf"
+dst = "contract:sqs:user-jobs"
+
+[[edge]]
+case = "infra-terraform"
+kind = "subscribes"
+src = "contract:sqs:user-jobs"
+dst = "contract:sns:user-events"

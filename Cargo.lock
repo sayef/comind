@@ -1358,6 +1358,7 @@ dependencies = [
  "futures",
  "git2",
  "globset",
+ "hcl-rs",
  "ignore",
  "indicatif 0.18.6",
  "lance-index",
@@ -3177,6 +3178,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "hcl-edit"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88489f7cdf733b4c7798403f72d2c16fdc2b720e82c5151055f618a9b49afc1c"
+dependencies = [
+ "fnv",
+ "hcl-primitives",
+ "vecmap-rs",
+ "winnow",
+]
+
+[[package]]
+name = "hcl-primitives"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd662a8afeca01b5b5318f35baed70017b9f854bfa38bdcdadb87de946a49071"
+dependencies = [
+ "itoa",
+ "kstring",
+ "ryu",
+ "serde",
+ "unicode-ident",
+]
+
+[[package]]
+name = "hcl-rs"
+version = "0.18.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48af7144c49a8db969e8a9d00cd470e1a446a3a73f6fa5eafc1eeb3d44d61ff4"
+dependencies = [
+ "hcl-edit",
+ "hcl-primitives",
+ "indexmap 2.14.0",
+ "itoa",
+ "serde",
+ "vecmap-rs",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3865,6 +3905,16 @@ dependencies = [
  "hashbrown 0.16.1",
  "portable-atomic",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "kstring"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a09b82a7f771ed02dc0dd9b27130a0fa5499fa15ed3027116c1e5e4e591bd9e"
+dependencies = [
+ "serde",
+ "static_assertions",
 ]
 
 [[package]]
@@ -8319,6 +8369,15 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vecmap-rs"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58c1dc449b873236909c7f325adf395071c209047737d831183e95c692413adf"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "version_check"

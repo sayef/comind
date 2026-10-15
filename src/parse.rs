@@ -110,6 +110,10 @@ pub fn parse_repo(root: &Path, repo_name: &str) -> Result<ParseOutput> {
         .collect();
     let mut out = parse_files(root, repo_name, &files);
     out.facts.extend(crate::configvals::scan(root, repo_name));
+    for (s, f) in crate::infra::scan(root, repo_name) {
+        out.symbols.push(s);
+        out.facts.push(f);
+    }
     Ok(out)
 }
 
@@ -141,6 +145,17 @@ pub fn parse_files(root: &Path, repo_name: &str, rel_paths: &[String]) -> ParseO
             .filter(|r| crate::configvals::is_config(r) && detect(&root.join(r)).is_none())
             .filter_map(|r| crate::configvals::file(root, repo_name, r)),
     );
+    let tf: Vec<String> = rel_paths
+        .iter()
+        .filter(|r| crate::infra::is_tf(r) && root.join(r).is_file())
+        .cloned()
+        .collect();
+    if !tf.is_empty() {
+        for (s, f) in crate::infra::files(root, repo_name, &tf) {
+            out.symbols.push(s);
+            out.facts.push(f);
+        }
+    }
     out
 }
 
