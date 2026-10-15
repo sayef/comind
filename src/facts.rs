@@ -26,6 +26,26 @@ pub struct FileFacts {
     /// Statically known values of module- and class-level names (for contract keys).
     #[serde(default)]
     pub values: Vec<ValueFact>,
+    /// Parameter names of callables, in order (receiver excluded), for param-flow summaries.
+    #[serde(default)]
+    pub params: Vec<ParamFact>,
+    /// Calls with statically readable arguments, for param-flow summaries.
+    #[serde(default)]
+    pub calls: Vec<CallFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParamFact {
+    pub func: String,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallFact {
+    pub from: String,
+    pub callee: Vec<String>,
+    pub args: Args,
+    pub line: u32,
 }
 
 /// A value an expression evaluates to, as far as static analysis can tell.

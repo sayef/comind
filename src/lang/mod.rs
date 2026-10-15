@@ -72,6 +72,16 @@ pub trait LangSpec: Sync {
         self.contract(node, src).into_iter().collect()
     }
 
+    /// Parameter names of a callable in order, receiver excluded.
+    fn param_names(&self, _def: Node, _src: &[u8]) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// A call with at least one statically readable argument: callee path and arguments.
+    fn call(&self, _node: Node, _src: &[u8]) -> Option<(Vec<String>, Args)> {
+        None
+    }
+
     /// `name = <statically known value>` at module or class level.
     fn value(&self, _node: Node, _src: &[u8]) -> Option<(String, ValueExpr)> {
         None

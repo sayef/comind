@@ -869,3 +869,77 @@ case = "go-method-call"
 kind = "calls"
 src = "gosvc:routes.go::ginRoutes"
 dst = "gosvc:routes.go::engine.Group"
+
+# ---- AWS through wrappers: param-flow summaries (direct params and constructor attributes) ----
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::FairQueue.send"
+dst = "pkg-common:src/acme/common/queues.py::Queue._sqs"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::Queue.send"
+dst = "pkg-common:src/acme/common/queues.py::Queue._sqs"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::publish"
+dst = "pkg-common:src/acme/common/queues.py::make_client"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue.send"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "service-a:service_a/notify.py::notify"
+dst = "pkg-common:src/acme/common/queues.py::publish"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "imports"
+src = "service-a:service_a/notify.py"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "imports"
+src = "service-a:service_a/notify.py"
+dst = "pkg-common:src/acme/common/queues.py::publish"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "inherits"
+src = "pkg-common:src/acme/common/queues.py::FairQueue"
+dst = "pkg-common:src/acme/common/queues.py::Queue"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "instantiates"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "contract:sqs:user-jobs"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/notify.py::notify"
+dst = "contract:sns:user-events"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "contract:sqs:users-queue"
+

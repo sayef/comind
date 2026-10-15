@@ -154,6 +154,40 @@ impl LangSpec for Python {
         type_path(def.child_by_field_name("return_type")?, src)
     }
 
+    fn param_names(&self, def: Node, src: &[u8]) -> Vec<String> {
+        let Some(ps) = def.child_by_field_name("parameters") else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = named_children(ps)
+            .into_iter()
+            .filter_map(|p| match p.kind() {
+                "identifier" => Some(text(p, src).to_string()),
+                "typed_parameter" | "default_parameter" | "typed_default_parameter" => p
+                    .child_by_field_name("name")
+                    .or_else(|| {
+                        named_children(p)
+                            .into_iter()
+                            .find(|c| c.kind() == "identifier")
+                    })
+                    .map(|n| text(n, src).to_string()),
+                _ => None,
+            })
+            .collect();
+        if names.first().is_some_and(|n| n == "self" || n == "cls") {
+            names.remove(0);
+        }
+        names
+    }
+
+    fn call(&self, node: Node, src: &[u8]) -> Option<(Vec<String>, Args)> {
+        if node.kind() != "call" {
+            return None;
+        }
+        let callee = path(node.child_by_field_name("function")?, src)?;
+        let a = args(node.child_by_field_name("arguments")?, src);
+        (a.positional.iter().any(Option::is_some) || !a.keywords.is_empty()).then_some((callee, a))
+    }
+
     fn params(&self, def: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
         let Some(ps) = def.child_by_field_name("parameters") else {
             return Vec::new();
@@ -409,6 +443,8 @@ fn args(list: Node, src: &[u8]) -> Args {
 /// What an expression evaluates to statically: literal, template, env var, or a name.
 fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
     match node.kind() {
+        // `a if cond else b`: the value when the condition holds.
+        "conditional_expression" => value_expr(*named_children(node).first()?, src),
         "string" => {
             let mut parts = Vec::new();
             for c in named_children(node) {

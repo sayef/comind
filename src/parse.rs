@@ -198,6 +198,8 @@ fn parse_file_with(
             types: Vec::new(),
             scip: None,
             contracts: Vec::new(),
+            params: Vec::new(),
+            calls: Vec::new(),
             values: Vec::new(),
         }],
     };
@@ -289,6 +291,15 @@ fn walk(node: Node, scope: &Scope, ctx: &Ctx, out: &mut ParseOutput) {
             kind,
             from: from.render(),
             path,
+            line: lang::line(node),
+        });
+    }
+
+    if let Some((callee, args)) = ctx.spec.call(node, ctx.source) {
+        facts(out).calls.push(crate::facts::CallFact {
+            from: scope.callable.render(),
+            callee,
+            args,
             line: lang::line(node),
         });
     }
@@ -393,6 +404,13 @@ fn define(
         });
     }
     if callable {
+        let names = ctx.spec.param_names(node, ctx.source);
+        if !names.is_empty() {
+            facts(out).params.push(crate::facts::ParamFact {
+                func: rendered.clone(),
+                names,
+            });
+        }
         if let Some(ty) = ctx.spec.returns(node, ctx.source) {
             facts(out).types.push(TypeHint {
                 scope: rendered.clone(),

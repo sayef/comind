@@ -56,6 +56,10 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
         edges: Vec::new(),
     };
     let mut emit = |src: &str, key: String, kind: EdgeKind| {
+        // Contracts describe production topology; tests calling routes or fake buckets are noise.
+        if b.file_facts_of(src).is_some_and(|f| test_path(&f.path)) {
+            return;
+        }
         out.edges
             .push((src.to_string(), contract_id(&key).render(), kind));
         if !out.symbols.iter().any(|s: &Symbol| s.name == key) {
@@ -134,7 +138,11 @@ pub(super) fn link(b: &Binder, facts: &[FileFacts], calls: &[(String, String)]) 
             }
         }
     }
+    cx.propagate(facts, &mut emit);
     suffix_match(&mut out);
+    let mut seen = std::collections::HashSet::new();
+    out.edges
+        .retain(|(a, b, k)| seen.insert((a.clone(), b.clone(), k.as_str())));
     out
 }
 
@@ -197,6 +205,76 @@ struct Cx<'b, 'a> {
     http_types: std::collections::HashSet<String>,
     /// Go route groups: (scope, variable) → (parent receiver, prefix).
     groups: HashMap<(String, String), (Vec<String>, String)>,
+    /// Callable id → parameter names (receiver excluded).
+    params: HashMap<&'a str, &'a [String]>,
+    /// Callable id → what it does with its parameters (`send_message(QueueUrl=<param>)`).
+    summaries: std::cell::RefCell<HashMap<String, Vec<Summary>>>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Scheme {
+    Sqs,
+    Sns,
+    S3,
+}
+
+/// A callable passes its parameter `param` (position `index`) to a contract operation.
+#[derive(Clone, PartialEq)]
+struct Summary {
+    param: String,
+    index: usize,
+    /// Attribute path read off the parameter (`config.queue` → `["queue"]`).
+    field: Vec<String>,
+    scheme: Scheme,
+    kind: EdgeKind,
+}
+
+/// A parameter origin: callable, parameter name, position, attribute path.
+type Origin = (String, String, usize, Vec<String>);
+
+fn scheme_key(s: Scheme, v: &str) -> String {
+    match s {
+        Scheme::Sqs => format!("sqs:{}", queue_name(v)),
+        Scheme::Sns => format!("sns:{}", arn_name(v)),
+        Scheme::S3 => format!("s3:{}", bucket(v)),
+    }
+}
+
+/// boto3 operations: the argument naming the resource (keyword, position) and the edge.
+fn aws_spec(svc: &str, method: &str) -> Option<(&'static [&'static str], usize, Scheme, EdgeKind)> {
+    const ANY: usize = usize::MAX;
+    Some(match (svc, method) {
+        ("sqs", "send_message" | "send_message_batch") => {
+            (&["QueueUrl"], ANY, Scheme::Sqs, EdgeKind::Publishes)
+        }
+        ("sqs", "receive_message") => (&["QueueUrl"], ANY, Scheme::Sqs, EdgeKind::Subscribes),
+        ("sns", "publish" | "publish_batch") => (
+            &["TopicArn", "TargetArn"],
+            ANY,
+            Scheme::Sns,
+            EdgeKind::Publishes,
+        ),
+        ("s3", "put_object" | "delete_object" | "copy_object") => {
+            (&["Bucket"], ANY, Scheme::S3, EdgeKind::Writes)
+        }
+        ("s3", "upload_file" | "upload_fileobj") => (&["Bucket"], 1, Scheme::S3, EdgeKind::Writes),
+        ("s3", "get_object" | "head_object" | "list_objects_v2") => {
+            (&["Bucket"], ANY, Scheme::S3, EdgeKind::Reads)
+        }
+        ("s3", "download_file" | "download_fileobj") => {
+            (&["Bucket"], 0, Scheme::S3, EdgeKind::Reads)
+        }
+        _ => return None,
+    })
+}
+
+/// The AWS service a call targets, from boto3's distinctive keyword names, when the client
+/// itself was built somewhere we cannot see (`client = await self._sqs()`).
+fn infer_aws(method: &str, args: &Args) -> Option<&'static str> {
+    let has = |k: &str| args.keywords.iter().any(|(n, _)| n == k);
+    ["sqs", "sns", "s3"]
+        .into_iter()
+        .find(|svc| aws_spec(svc, method).is_some_and(|(kws, _, _, _)| kws.iter().any(|k| has(k))))
 }
 
 impl<'b, 'a> Cx<'b, 'a> {
@@ -209,7 +287,14 @@ impl<'b, 'a> Cx<'b, 'a> {
             mounts: HashMap::new(),
             http_types: std::collections::HashSet::new(),
             groups: HashMap::new(),
+            params: HashMap::new(),
+            summaries: Default::default(),
         };
+        for f in facts {
+            for p in &f.params {
+                cx.params.insert(p.func.as_str(), p.names.as_slice());
+            }
+        }
         for f in facts {
             for v in &f.values {
                 cx.values
@@ -639,6 +724,13 @@ impl<'b, 'a> Cx<'b, 'a> {
                     emit(from, key, kind);
                 }
             }
+            None => {
+                if let Some(svc) = infer_aws(method, args) {
+                    if let Some((key, kind)) = self.aws(svc, method, args, from) {
+                        emit(from, key, kind);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -686,37 +778,163 @@ impl<'b, 'a> Cx<'b, 'a> {
             .is_some_and(|bs| bs.iter().any(|b| self.owns_http(b, depth + 1)))
     }
 
+    /// The contract an AWS call names; a resource passed in as a parameter becomes a summary
+    /// of the enclosing callable instead, resolved later at its call sites.
     fn aws(&self, svc: &str, method: &str, args: &Args, from: &str) -> Option<(String, EdgeKind)> {
-        let v = |kw: &str, pos: usize| args.get(kw, pos).and_then(|x| self.value(x, from, 0));
-        Some(match (svc, method) {
-            ("sqs", "send_message" | "send_message_batch") => (
-                format!("sqs:{}", queue_name(&v("QueueUrl", usize::MAX)?)),
-                EdgeKind::Publishes,
-            ),
-            ("sqs", "receive_message") => (
-                format!("sqs:{}", queue_name(&v("QueueUrl", usize::MAX)?)),
-                EdgeKind::Subscribes,
-            ),
-            ("sns", "publish" | "publish_batch") => {
-                let arn = v("TopicArn", usize::MAX).or_else(|| v("TargetArn", usize::MAX))?;
-                (format!("sns:{}", arn_name(&arn)), EdgeKind::Publishes)
+        let (kws, pos, scheme, kind) = aws_spec(svc, method)?;
+        let expr = kws
+            .iter()
+            .find_map(|k| args.keywords.iter().find(|(n, _)| n == k).map(|(_, v)| v))
+            .or_else(|| args.positional.get(pos).and_then(Option::as_ref))?;
+        if let Some(v) = self.value(expr, from, 0) {
+            return Some((scheme_key(scheme, &v), kind));
+        }
+        if let Some((func, param, index, field)) = self.param_origin(expr, from, 0) {
+            self.summarise(
+                func,
+                Summary {
+                    param,
+                    index,
+                    field,
+                    scheme,
+                    kind,
+                },
+            );
+        }
+        None
+    }
+
+    fn summarise(&self, func: String, s: Summary) -> bool {
+        let mut all = self.summaries.borrow_mut();
+        let list = all.entry(func).or_default();
+        if list.contains(&s) {
+            return false;
+        }
+        list.push(s);
+        true
+    }
+
+    /// The callable parameter an expression stands for: a parameter (or an attribute of one) of
+    /// an enclosing callable, or `self.attr` assigned from a constructor parameter.
+    fn param_origin(&self, expr: &ValueExpr, from: &str, depth: u32) -> Option<Origin> {
+        let ValueExpr::Name(path) = expr else {
+            return None;
+        };
+        if let [recv, attr, rest @ ..] = path.as_slice() {
+            if recv == "self" || recv == "this" {
+                let class = self.b.enclosing_class(from)?;
+                let (f, p, i, mut field) = self.attr_origin(&class, attr, depth)?;
+                field.extend(rest.iter().cloned());
+                return Some((f, p, i, field));
             }
-            ("s3", "put_object" | "delete_object" | "copy_object") => (
-                format!("s3:{}", bucket(&v("Bucket", usize::MAX)?)),
-                EdgeKind::Writes,
-            ),
-            ("s3", "upload_file" | "upload_fileobj") => {
-                (format!("s3:{}", bucket(&v("Bucket", 1)?)), EdgeKind::Writes)
-            }
-            ("s3", "get_object" | "head_object" | "list_objects_v2") => (
-                format!("s3:{}", bucket(&v("Bucket", usize::MAX)?)),
-                EdgeKind::Reads,
-            ),
-            ("s3", "download_file" | "download_fileobj") => {
-                (format!("s3:{}", bucket(&v("Bucket", 0)?)), EdgeKind::Reads)
-            }
-            _ => return None,
+        }
+        let (head, rest) = path.split_first()?;
+        self.b.scope_chain(from).into_iter().find_map(|s| {
+            let i = self
+                .params
+                .get(s.as_str())?
+                .iter()
+                .position(|n| n == head)?;
+            Some((s, head.clone(), i, rest.to_vec()))
         })
+    }
+
+    fn attr_origin(&self, class: &str, attr: &str, depth: u32) -> Option<Origin> {
+        if depth > 6 {
+            return None;
+        }
+        if let Some(ValueExpr::Name(v)) = self.values.get(&(class, attr)).copied() {
+            if let Some((q, rest)) = v.split_first() {
+                let init = self.init_of(class, 0)?;
+                let i = self
+                    .params
+                    .get(init.as_str())?
+                    .iter()
+                    .position(|n| n == q)?;
+                return Some((init, q.clone(), i, rest.to_vec()));
+            }
+        }
+        let bases = self
+            .b
+            .bases
+            .borrow()
+            .get(class)
+            .cloned()
+            .unwrap_or_default();
+        bases
+            .iter()
+            .find_map(|b| self.attr_origin(b, attr, depth + 1))
+    }
+
+    /// The constructor of a class (`__init__`), inherited if the class declares none.
+    fn init_of(&self, class: &str, depth: u32) -> Option<String> {
+        let own = format!("{}/__init__().", class.strip_suffix('#')?);
+        if self.params.contains_key(own.as_str()) {
+            return Some(own);
+        }
+        if depth > 6 {
+            return None;
+        }
+        let bases = self
+            .b
+            .bases
+            .borrow()
+            .get(class)
+            .cloned()
+            .unwrap_or_default();
+        bases.iter().find_map(|b| self.init_of(b, depth + 1))
+    }
+
+    /// Resolve summaries at call sites: a call passing a known value emits the contract from the
+    /// caller; one passing its own parameter summarises the caller in turn (bounded rounds).
+    fn propagate(&self, facts: &[FileFacts], emit: &mut impl FnMut(&str, String, EdgeKind)) {
+        for _ in 0..4 {
+            let known = self.summaries.borrow().clone();
+            if known.is_empty() {
+                return;
+            }
+            let mut grew = false;
+            for f in facts {
+                for c in &f.calls {
+                    let target = match self.b.resolve_path(&c.callee, &c.from, f, 0) {
+                        Some(Value::Sym(id)) if self.b.is_type(&id) => self.init_of(&id, 0),
+                        Some(Value::Sym(id)) => Some(id),
+                        _ => None,
+                    };
+                    let Some(sums) = target.and_then(|t| known.get(&t)) else {
+                        continue;
+                    };
+                    for s in sums {
+                        let Some(arg) = c.args.get(&s.param, s.index) else {
+                            continue;
+                        };
+                        let expr = match (arg, s.field.is_empty()) {
+                            (_, true) => arg.clone(),
+                            (ValueExpr::Name(p), false) => {
+                                ValueExpr::Name(p.iter().chain(&s.field).cloned().collect())
+                            }
+                            _ => continue,
+                        };
+                        if let Some(v) = self.value(&expr, &c.from, 0) {
+                            emit(&c.from, scheme_key(s.scheme, &v), s.kind.clone());
+                        } else if let Some((func, param, index, field)) =
+                            self.param_origin(&expr, &c.from, 0)
+                        {
+                            let next = Summary {
+                                param,
+                                index,
+                                field,
+                                ..s.clone()
+                            };
+                            grew |= self.summarise(func, next);
+                        }
+                    }
+                }
+            }
+            if !grew {
+                return;
+            }
+        }
     }
 
     /// The table name of a pypika `Table("name", schema=…)` an expression evaluates to.
@@ -958,6 +1176,30 @@ fn go_request<'a>(
     }
 }
 
+fn test_path(path: &str) -> bool {
+    let p = path.to_ascii_lowercase();
+    let (dirs, file) = p.rsplit_once('/').unwrap_or(("", &p));
+    dirs.split('/')
+        .any(|d| matches!(d, "tests" | "test" | "__tests__" | "e2e" | "testing"))
+        || file.starts_with("test_")
+        || file == "conftest.py"
+        || [
+            "_test.py",
+            "_test.go",
+            ".test.ts",
+            ".test.tsx",
+            ".test.js",
+            ".spec.ts",
+            ".spec.tsx",
+            ".spec.js",
+            "test.java",
+            "test.kt",
+            "tests.rs",
+        ]
+        .iter()
+        .any(|s| file.ends_with(s))
+}
+
 /// `%s`, `%d`, `%v`, … become `{}` placeholders.
 fn printf_placeholders(fmt: &str) -> String {
     let mut out = String::new();
@@ -1147,6 +1389,16 @@ fn contract_symbol(key: &str) -> Symbol {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_paths() {
+        assert!(test_path("app/tests/e2e/test_x.py"));
+        assert!(test_path("src/test/java/com/acme/UserTest.java"));
+        assert!(test_path("web/src/api.spec.ts"));
+        assert!(test_path("pkg/handler_test.go"));
+        assert!(!test_path("app/latest_version.py"));
+        assert!(!test_path("src/contest/routes.py"));
+    }
 
     #[test]
     fn framework_path_params_and_printf() {
