@@ -455,6 +455,10 @@ Later: the same views as MCP Apps inside agent clients.
 - **GDPR**: pseudonymous actor ids; no PII in record bodies (lint); configurable retention.
   Erasure is a real delete, unlike git history: remove the inbox object, `delete` the Lance rows,
   then clean up old Lance versions (deleted rows survive in prior versions until cleanup).
+  Implemented as `comind erase <id…> | --actor <id|me> [--yes]`: deletes the inbox objects and
+  relations about them, compacts, rewrites the snapshot and prunes all old versions, and leaves
+  id-only tombstones (`_ledger/erased/<id>`) so `harvest` does not re-create harvested records.
+  Run it while no other compaction is in progress (pruning skips the in-flight safety window).
   **Confirm the retention/erasure design with legal@cobrainer.com before release** (this plan is
   not legal advice).
 - **Works Council / EU AI Act**: the ledger describes code, not people. No per-person counts,

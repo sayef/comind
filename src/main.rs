@@ -245,6 +245,19 @@ enum Cmd {
         #[arg(long)]
         compact: bool,
     },
+    /// Erase ledger records (and relations about them) by id or by author; dry run without --yes
+    Erase {
+        /// Record ids or id prefixes
+        ids: Vec<String>,
+        /// Every record by this pseudonymous actor (`me` for yours)
+        #[arg(long)]
+        actor: Option<String>,
+        /// Delete for real
+        #[arg(long)]
+        yes: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
     /// Terminal UI: overview, contracts, ledger, explorer and conventions
     Ui {
         #[arg(long = "index-dir")]
@@ -545,6 +558,12 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_preflight(&repo, &base, strict, index_dir.as_deref()),
         Cmd::Ui { index_dir } => cmd_ui(index_dir.as_deref()),
+        Cmd::Erase {
+            ids,
+            actor,
+            yes,
+            index_dir,
+        } => cmd_erase(&ids, actor.as_deref(), yes, index_dir.as_deref()),
 
         Cmd::Eval {
             what:
@@ -1281,6 +1300,45 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
     ExitCode::SUCCESS
 }
 
+fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>) -> ExitCode {
+    if ids.is_empty() && actor.is_none() {
+        comind::ui::err("name record ids or --actor (`me` for your own records)");
+        return ExitCode::FAILURE;
+    }
+    let actor = actor.map(|a| {
+        if a == "me" {
+            comind::ledger::actor()
+        } else {
+            a.to_string()
+        }
+    });
+    let pick = |r: &comind::ledger::Record| {
+        ids.iter().any(|i| r.id.starts_with(i.as_str()))
+            || actor.as_deref() == Some(r.provenance.actor.as_str())
+    };
+    let cfg = comind::config::Config::load();
+    match comind::ledger::erase_blocking(&cfg.index_dir(from), pick, yes) {
+        Ok(gone) => {
+            for r in &gone {
+                println!("- {} `{}` ({})", r.kind.as_str(), r.title, r.id);
+            }
+            if yes {
+                comind::ui::ok(&format!("erased {} record(s)", gone.len()));
+            } else {
+                comind::ui::ok(&format!(
+                    "{} record(s) would be erased; re-run with --yes",
+                    gone.len()
+                ));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn cmd_ui(from: Option<&str>) -> ExitCode {
     let cfg = comind::config::Config::load();
     let dir = cfg.graph_dir(from);
@@ -1391,11 +1449,12 @@ fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
         }
     };
     let root = cfg.index_dir(from);
-    let existing: HashSet<String> = comind::ledger::all_blocking(&root)
+    let mut existing: HashSet<String> = comind::ledger::all_blocking(&root)
         .unwrap_or_default()
         .into_iter()
         .map(|r| r.id)
         .collect();
+    existing.extend(comind::ledger::erased_blocking(&root).unwrap_or_default());
     let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
     for path in repos {
         let name = repo_name(path);

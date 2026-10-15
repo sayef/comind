@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use futures::TryStreamExt;
 use object_store::path::Path as ObjPath;
-use object_store::{ObjectStore, PutMode, PutOptions, PutPayload};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Fingerprint, Symbol, SymbolKind};
@@ -357,9 +357,9 @@ impl Ledger {
         Ok(out)
     }
 
-    /// Every record: the snapshot plus inbox objects not yet compacted. The inbox listing is
-    /// authoritative, so an erased object disappears even before the next compaction.
-    pub async fn all(&self) -> Result<Vec<Record>> {
+    /// Every record with its inbox key: the snapshot plus objects not yet compacted. The inbox
+    /// listing is authoritative, so an erased object disappears before the next compaction.
+    async fn keyed(&self) -> Result<Vec<(ObjPath, Record)>> {
         let keys = self.keys().await?;
         let snap = self.snapshot().await.unwrap_or_default();
         let mut out = Vec::with_capacity(keys.len());
@@ -369,12 +369,74 @@ impl Ledger {
                 None => self.fetch(&key).await?,
             };
             match serde_json::from_str::<Record>(&json) {
-                Ok(r) => out.push(r),
+                Ok(r) => out.push((key, r)),
                 Err(e) => eprintln!("comind: skipping unreadable ledger record {key}: {e}"),
             }
         }
-        out.sort_by(|a, b| a.id.cmp(&b.id));
+        out.sort_by(|a, b| a.1.id.cmp(&b.1.id));
         Ok(out)
+    }
+
+    /// Ids of erased records.
+    pub async fn erased(&self) -> Result<std::collections::HashSet<String>> {
+        let dir = self.root.clone().join("erased");
+        let metas: Vec<_> = self.store.list(Some(&dir)).try_collect().await?;
+        Ok(metas
+            .into_iter()
+            .filter_map(|m| m.location.filename().map(str::to_string))
+            .collect())
+    }
+
+    pub async fn all(&self) -> Result<Vec<Record>> {
+        Ok(self.keyed().await?.into_iter().map(|(_, r)| r).collect())
+    }
+
+    /// Records matching `pick`, plus relations about them; deleted (and compacted away) when
+    /// `apply`, otherwise only listed.
+    pub async fn erase(&self, pick: impl Fn(&Record) -> bool, apply: bool) -> Result<Vec<Record>> {
+        let all = self.keyed().await?;
+        let ids: std::collections::HashSet<&str> = all
+            .iter()
+            .filter(|(_, r)| pick(r))
+            .map(|(_, r)| r.id.as_str())
+            .collect();
+        let doomed: Vec<&(ObjPath, Record)> = all
+            .iter()
+            .filter(|(_, r)| {
+                ids.contains(r.id.as_str())
+                    || r.relation
+                        .as_ref()
+                        .is_some_and(|x| ids.contains(x.target.as_str()))
+            })
+            .collect();
+        if apply {
+            for (key, r) in &doomed {
+                // An id-only tombstone keeps harvest from re-creating the record.
+                let stone = self.root.clone().join("erased").join(r.id.as_str());
+                self.store.put(&stone, PutPayload::new()).await?;
+                self.store.delete(key).await?;
+            }
+            self.compact().await?;
+            self.purge_history().await?;
+        }
+        Ok(doomed.into_iter().map(|(_, r)| r.clone()).collect())
+    }
+
+    /// Rewrite the snapshot and drop its old versions, so erased rows leave no copies behind.
+    async fn purge_history(&self) -> Result<()> {
+        use lancedb::table::OptimizeAction;
+        let db = lancedb::connect(&self.tables).execute().await?;
+        let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
+            return Ok(());
+        };
+        tbl.optimize(OptimizeAction::All).await?;
+        tbl.optimize(OptimizeAction::Prune {
+            older_than: chrono::Duration::try_seconds(0),
+            delete_unverified: Some(true),
+            error_if_tagged_old_versions: Some(false),
+        })
+        .await?;
+        Ok(())
     }
 
     /// Fold new inbox objects into the snapshot and drop rows whose object was erased.
@@ -561,6 +623,20 @@ pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
 pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {
     let ledger = Ledger::open(index_root)?;
     runtime()?.block_on(ledger.compact())
+}
+
+pub fn erased_blocking(index_root: &str) -> Result<std::collections::HashSet<String>> {
+    let ledger = Ledger::open(index_root)?;
+    runtime()?.block_on(ledger.erased())
+}
+
+pub fn erase_blocking(
+    index_root: &str,
+    pick: impl Fn(&Record) -> bool,
+    apply: bool,
+) -> Result<Vec<Record>> {
+    let ledger = Ledger::open(index_root)?;
+    runtime()?.block_on(ledger.erase(pick, apply))
 }
 
 fn strings<'a>(
@@ -1030,6 +1106,56 @@ mod tests {
         assert_eq!(ids, vec![b.id.clone(), c.id.clone()]);
         assert_eq!(ledger.compact().await.unwrap(), (1, 1));
         assert_eq!(ledger.snapshot().await.unwrap().len(), 2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn erase_takes_relations_along() {
+        let dir = std::env::temp_dir().join(format!("comind-erase-{}", std::process::id()));
+        let ledger = Ledger::open(dir.to_str().unwrap()).unwrap();
+        let s = sym("f", 1, 1);
+        let mine = Record::new(
+            Kind::Gotcha,
+            "mine",
+            vec![Anchor::of(&s)],
+            prov(AuthorKind::Human),
+        );
+        let mut theirs = prov(AuthorKind::Human);
+        theirs.actor = "actor-other".into();
+        let other = Record::new(Kind::Gotcha, "other", vec![Anchor::of(&s)], theirs.clone());
+        let confirm = Record::relation(RelationKind::Confirms, &mine, "", theirs);
+        for r in [&mine, &other, &confirm] {
+            ledger.put(r).await.unwrap();
+        }
+        ledger.compact().await.unwrap();
+        let dry = ledger
+            .erase(|r| r.provenance.actor == "actor-test", false)
+            .await
+            .unwrap();
+        assert_eq!(dry.len(), 2);
+        assert_eq!(ledger.all().await.unwrap().len(), 3);
+        ledger
+            .erase(|r| r.provenance.actor == "actor-test", true)
+            .await
+            .unwrap();
+        let left: Vec<String> = ledger
+            .all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.title)
+            .collect();
+        assert_eq!(left, vec!["other".to_string()]);
+        let stones = ledger.erased().await.unwrap();
+        assert!(stones.contains(&mine.id) && stones.contains(&confirm.id));
+        assert_eq!(ledger.snapshot().await.unwrap().len(), 1);
+        let db = lancedb::connect(&ledger.tables).execute().await.unwrap();
+        let tbl = db.open_table(SNAPSHOT).execute().await.unwrap();
+        assert_eq!(
+            tbl.list_versions().await.unwrap().len(),
+            1,
+            "old versions pruned"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
