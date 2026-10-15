@@ -289,8 +289,8 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Propose ledger records from a session transcript or commit history (sends them to the
-    /// configured LLM; proposals land at T1 for human review)
+    /// Propose ledger records from commit history (sends commit messages to the configured LLM;
+    /// proposals land at T1 for human review). Agent sessions are never read.
     Distill {
         #[command(subcommand)]
         what: DistillWhat,
@@ -311,7 +311,7 @@ enum Cmd {
         /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
         /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
         agent: String,
-        /// Event: `session-start` | `pre-edit` | `session-end` (distils the transcript in the background)
+        /// Event: `session-start` | `pre-edit`
         event: String,
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
@@ -366,18 +366,6 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum DistillWhat {
-    /// A Claude Code session transcript (JSONL)
-    Transcript {
-        path: String,
-        /// The session's working directory (default: read from the transcript)
-        #[arg(long)]
-        cwd: Option<String>,
-        /// Print proposals without recording them
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long = "index-dir")]
-        index_dir: Option<String>,
-    },
     /// Commit messages of a repo (squash-merged MR descriptions, reverts with reasons)
     Git {
         repo: String,
@@ -594,15 +582,6 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
-        Cmd::Distill {
-            what:
-                DistillWhat::Transcript {
-                    path,
-                    cwd,
-                    dry_run,
-                    index_dir,
-                },
-        } => cmd_distill_transcript(&path, cwd.as_deref(), dry_run, index_dir.as_deref()),
         Cmd::Distill {
             what:
                 DistillWhat::Git {
@@ -1647,43 +1626,6 @@ fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: 
     ExitCode::SUCCESS
 }
 
-fn cmd_distill_transcript(
-    path: &str,
-    cwd: Option<&str>,
-    dry_run: bool,
-    from: Option<&str>,
-) -> ExitCode {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) => {
-            comind::ui::err(&format!("read {path}: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let cwd = cwd.map(str::to_string).or_else(|| {
-        text.lines()
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-            .find_map(|v| v.get("cwd").and_then(|c| c.as_str()).map(str::to_string))
-    });
-    let cfg = comind::config::Config::load();
-    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
-        comind::ui::err("no index; run `comind link` first");
-        return ExitCode::FAILURE;
-    };
-    let (spans, edited, session) = comind::distill::transcript(&text);
-    let repo = cwd.and_then(|c| repo_at(&symbols, Path::new(&c)));
-    let touched = comind::distill::touched(&symbols, repo.as_deref(), &edited);
-    if touched.is_empty() {
-        comind::ui::ok("the session edited no indexed code; nothing to distill");
-        return ExitCode::SUCCESS;
-    }
-    let root = cfg.index_dir(from);
-    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
-    let entries = comind::ledger::derive(&records, &symbols);
-    let b = comind::distill::bundle(spans, touched, &entries, "claude-code", session);
-    distill_and_record(std::slice::from_ref(&b), dry_run, &root)
-}
-
 fn cmd_distill_git(repo: &str, limit: usize, dry_run: bool, from: Option<&str>) -> ExitCode {
     let name = std::fs::canonicalize(repo)
         .ok()
@@ -1730,7 +1672,7 @@ fn cmd_distill_git(repo: &str, limit: usize, dry_run: bool, from: Option<&str>) 
                 .flat_map(|c| c.changed.iter().cloned())
                 .collect();
             let touched = comind::distill::touched(&symbols, Some(&name), &files);
-            comind::distill::bundle(chunk.to_vec(), touched, &entries, "git", None)
+            comind::distill::bundle(chunk.to_vec(), touched, &entries, "git")
         })
         .collect();
     comind::ui::note(&format!(
@@ -1751,25 +1693,6 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let v: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
-    if event == "session-end" {
-        // Distil in the background; the agent never waits on the LLM.
-        if let (Some(t), Ok(exe)) = (find_str(&v, "transcript_path"), std::env::current_exe()) {
-            let mut cmd = std::process::Command::new(exe);
-            cmd.args(["distill", "transcript", t]);
-            if let Some(c) = find_str(&v, "cwd") {
-                cmd.args(["--cwd", c]);
-            }
-            if let Some(d) = from {
-                cmd.args(["--index-dir", d]);
-            }
-            let _ = cmd
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
-        }
-        return ExitCode::SUCCESS;
-    }
     let cwd = v
         .get("cwd")
         .and_then(|c| c.as_str())
@@ -1898,12 +1821,6 @@ fn cmd_init_hooks(agent: &str) -> ExitCode {
             "PreToolUse": [{
                 "matcher": "Edit|MultiEdit|Write",
                 "hooks": [{"type": "command", "command": "comind hook claude pre-edit"}]
-            }],
-            "PreCompact": [{
-                "hooks": [{"type": "command", "command": "comind hook claude session-end"}]
-            }],
-            "SessionEnd": [{
-                "hooks": [{"type": "command", "command": "comind hook claude session-end"}]
             }]
         }
     });

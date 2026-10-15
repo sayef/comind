@@ -100,7 +100,7 @@ src/
   ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
   infra.rs    Terraform: queues, topics, buckets and topic→queue subscriptions as contract facts.
   configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
-  distill.rs  LLM distiller: transcript / commit evidence → validated ledger proposals (T1).
+  distill.rs  LLM distiller: commit-message evidence → validated ledger proposals (T1). Never reads agent sessions.
   signing.rs  optional SSH signatures on ledger records; verification against allowed_signers.
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
   preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
