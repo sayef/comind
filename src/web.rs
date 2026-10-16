@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -18,7 +18,9 @@ use crate::graph::{Node, Zoom};
 use crate::ledger::{AuthorKind, Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
-const PAGE: &str = include_str!("web/index.html");
+mod assets {
+    include!(concat!(env!("OUT_DIR"), "/ui_assets.rs"));
+}
 
 struct AppState {
     data: Data,
@@ -34,7 +36,6 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         entries: RwLock::new(entries),
     });
     let app = Router::new()
-        .route("/", get(page))
         .route("/api/overview", get(overview))
         .route("/api/orgmap", get(orgmap))
         .route("/api/versions", get(versions))
@@ -44,6 +45,7 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/find", get(find))
         .route("/api/node", get(node))
         .route("/api/review", post(review))
+        .fallback(get(asset))
         .layer(axum::middleware::from_fn(local_only))
         .with_state(state);
     let rt = tokio::runtime::Runtime::new()?;
@@ -79,11 +81,49 @@ async fn local_only(
     }
 }
 
-async fn page() -> impl IntoResponse {
+/// The embedded UI: a file by path, or `index.html` for client-side routes.
+async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let find = |p: &str| {
+        assets::ASSETS
+            .iter()
+            .find(|(n, _)| *n == p)
+            .map(|(_, b)| *b)
+    };
+    let (name, body) = match find(path) {
+        Some(b) if !path.is_empty() => (path, b),
+        _ if path.starts_with("api/") || path.starts_with("assets/") => {
+            return (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/plain")],
+                &b"not found"[..],
+            )
+                .into_response();
+        }
+        _ => ("index.html", find("index.html").unwrap_or_default()),
+    };
+    let mime = match name.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("json") => "application/json",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    };
+    // Bundled assets carry a content hash in their name; the page itself must stay fresh.
+    let cache = if name.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        Html(PAGE),
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, cache)],
+        body,
     )
+        .into_response()
 }
 
 async fn overview(State(s): State<Shared>) -> Json<Value> {

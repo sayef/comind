@@ -203,7 +203,7 @@ src/eval.rs    graph-quality eval on a gold fixture (`comind eval graph`)
 src/conventions.rs measured coding conventions + org baseline; src/recipes.rs change recipes from history
 src/ledger.rs  reasoning ledger: decisions, failed attempts, constraints anchored to symbols (`why`, `remember`)
 src/checks.rs  compiled constraint checks evaluated on the graph and manifests (`ledger --check`, preflight)
-src/web.rs     local web UI (`comind ui --web`)
+src/web.rs     local web UI (`comind ui --web`): JSON API + the embedded React app from ui/
 src/git.rs     git change detection (incremental)
 src/index.rs   versioned LanceDB store: symbols, edges, search, enrichment, flows, style guide
 src/graph.rs   in-memory petgraph: ripple / thread / zoom / context_pack

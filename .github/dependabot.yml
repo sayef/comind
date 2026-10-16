@@ -15,6 +15,14 @@ updates:
       - dependency-name: lance-index
       # Must match the version lancedb uses.
       - dependency-name: object_store
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      ui:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -12,7 +12,8 @@ homepage = "https://github.com/sayef/comind"
 documentation = "https://docs.rs/comind"
 keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
 categories = ["development-tools", "command-line-utilities"]
-exclude = [".github", ".pre-commit-config.yaml", "docs", "assets", "scripts", "tests/", "examples/"]
+# An allowlist, so the git-ignored `ui/dist` (built before publishing) ships in the crate.
+include = ["/src/**", "/build.rs", "/ui/dist/**", "/benches/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
 [lib]
