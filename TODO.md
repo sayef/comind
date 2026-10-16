@@ -12,8 +12,8 @@ Open items: things to try, measure or set up. Remove an item once it is done. Th
 
 ## Before the first release
 
-- Repository secrets: `CARGO_REGISTRY_TOKEN` (crates.io), `CLOUDFLARE_API_TOKEN` and
-  `CLOUDFLARE_ACCOUNT_ID` (docs site). Optional `RELEASE_PLZ_TOKEN` gives release PRs their own CI run.
+- First release only once the features are proven in the team pilot (secrets are in place; publishing is
+  a manual Release-plz run).
 - Review the open Dependabot pull requests (lancedb and lance-index stay pinned).
 - Check that CI passes once the repository is public, and that `install.sh` resolves the release assets.
 
