@@ -4,13 +4,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Patch and minor updates arrive together; each major version gets its own pull request.
     groups:
       rust:
         patterns: ["*"]
+        update-types: [minor, patch]
     ignore:
       # Pinned: 0.38–0.40 need the heavy `remote` feature to compile.
       - dependency-name: lancedb
       - dependency-name: lance-index
+      # Must match the version lancedb uses.
+      - dependency-name: object_store
   - package-ecosystem: github-actions
     directory: /
     schedule:
