@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -104,8 +105,8 @@ function Rule({ c, writable }: { c: Convention; writable: boolean }) {
       {c.exemplars.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {c.exemplars.slice(0, 3).map((x) => (
-            <Badge key={x} variant="outline" className="font-mono">
-              {x}
+            <Badge key={x} variant="outline" className="max-w-full font-mono" title={x}>
+              <span className="min-w-0 truncate">{x}</span>
             </Badge>
           ))}
         </div>
@@ -178,7 +179,9 @@ export function ConventionsPage() {
     const names = new Set([ORG, ...items.map((c) => c.repo), ...(overview.data?.repos.map((r) => r.repo) ?? [])]);
     return [...names].sort((a, b) => (a === ORG ? -1 : b === ORG ? 1 : a.localeCompare(b)));
   }, [items, overview.data]);
-  const [repo, setRepo] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const repo = params.get("repo");
+  const setRepo = (r: string) => setParams(r === ORG ? {} : { repo: r }, { replace: true });
   const [adding, setAdding] = useState(false);
   const current = repo ?? repos[0] ?? ORG;
   const rows = items.filter((c) => c.repo === current);
@@ -224,7 +227,7 @@ export function ConventionsPage() {
       {!all.isLoading && rows.length === 0 && <p className="text-sm text-muted-foreground">No conventions for {scopeName(current)} yet.</p>}
       <div className="grid items-start gap-4 lg:grid-cols-2">
         {byDim.map(([dim, list]) => (
-          <Card key={dim} className="p-4">
+          <Card key={dim} className="min-w-0 p-4">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{dim}</h2>
             <div className="mt-3 flex flex-col gap-4">
               {list.map((c) => (

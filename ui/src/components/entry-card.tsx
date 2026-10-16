@@ -116,7 +116,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
       )}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {r.anchors.map((a) => (
-          <span key={a.symbol} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={`${a.path}:${a.line}`}>
+          <span key={a.symbol} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={`${a.path}:${a.line}`}>
             {a.repo}:{a.name}
           </span>
         ))}
