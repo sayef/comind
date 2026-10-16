@@ -289,7 +289,6 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
     /// Check this machine's setup: index, ledger, hooks, keys, signing, SCIP indexers
     Doctor {
         #[arg(long = "index-dir")]
@@ -300,6 +299,7 @@ enum Cmd {
         #[command(subcommand)]
         what: CacheWhat,
     },
+    /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
     Hook {
         /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
         /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
@@ -1564,95 +1564,17 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
 fn cmd_doctor(from: Option<&str>) -> ExitCode {
     let cfg = comind::config::Config::load();
     let root = cfg.index_dir(from);
-    let set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
-    let mut problems = 0;
-    let mut check = |good: bool, ok: &str, bad: &str| {
-        if good {
-            comind::ui::ok(ok);
-        } else {
-            problems += 1;
-            comind::ui::warn(bad);
-        }
-    };
     comind::ui::header("comind doctor");
     comind::ui::field("index", &root);
-    match comind::index::graph_versions_blocking(&cfg.graph_dir(from)) {
-        Ok(v) if !v.is_empty() => {
-            let (_, _, at) = v.last().cloned().unwrap_or_default();
-            check(
-                true,
-                &format!(
-                    "index readable: {} version(s), latest {}",
-                    v.len(),
-                    at.get(..16).unwrap_or(&at)
-                ),
-                "",
-            );
+    let checks = comind::doctor::run(&cfg, &root);
+    for c in &checks {
+        if c.ok {
+            comind::ui::ok(&c.message);
+        } else {
+            comind::ui::warn(&c.message);
         }
-        _ => check(
-            false,
-            "",
-            "no index here yet: run `comind link <repos> --index-dir …`",
-        ),
     }
-    match comind::ledger::all_blocking(&root) {
-        Ok(r) => check(true, &format!("ledger readable: {} record(s)", r.len()), ""),
-        Err(e) => check(false, "", &format!("ledger not readable: {e:#}")),
-    }
-    if comind::cache::is_remote(&root) {
-        let fresh = comind::cache::dir(&root).is_some_and(|d| d.join("_graph").is_dir());
-        check(
-            fresh,
-            "local mirror present (hooks read it)",
-            "no local mirror yet: `comind cache refresh` (hooks create it on first use)",
-        );
-        check(
-            set("AWS_ACCESS_KEY_ID") || set("AWS_PROFILE") || set("AWS_WEB_IDENTITY_TOKEN_FILE"),
-            "AWS credentials in the environment",
-            "no AWS credentials in the environment (SSO: `aws sso login` + export)",
-        );
-    }
-    let settings = std::env::var_os("HOME")
-        .map(|h| Path::new(&h).join(".claude/settings.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_default();
-    let local = std::fs::read_to_string(".claude/settings.json").unwrap_or_default();
-    check(
-        settings.contains("comind hook") || local.contains("comind hook"),
-        "Claude Code hooks configured",
-        "Claude Code hooks not found: `comind init-hooks claude`",
-    );
-    check(
-        set("OPENAI_API_KEY") || cfg.llm_base_url().is_some(),
-        &format!("LLM configured (model {})", cfg.llm_model()),
-        "no LLM key: enrichment and flows are off (indexing works without)",
-    );
-    check(
-        comind::signing::signing_key().is_some(),
-        "ledger records are signed",
-        "records are unsigned (optional: `signing_key` or git SSH signing)",
-    );
-    check(
-        comind::signing::allowed_signers().is_some(),
-        "signatures are verified against allowed_signers",
-        "no allowed_signers: signatures are not checked (optional)",
-    );
-    let indexers: Vec<&str> = [
-        "scip-python",
-        "scip-typescript",
-        "scip-go",
-        "rust-analyzer",
-        "scip-java",
-    ]
-    .into_iter()
-    .filter(|b| comind::scip::which(b).is_some())
-    .collect();
-    check(
-        !indexers.is_empty(),
-        &format!("SCIP indexers on PATH: {}", indexers.join(", ")),
-        "no SCIP indexers on PATH (optional: compiler-grade edges)",
-    );
-    if problems == 0 {
+    if checks.iter().all(|c| c.ok) {
         comind::ui::ok("all good");
     }
     ExitCode::SUCCESS

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowUpRight, Layers, Network, Radar } from "lucide-react";
-import { useMemo } from "react";
+import { ArrowDownRight, ArrowUpRight, Check, ClipboardCopy, Layers, Network, Radar, Route } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { EntryCard } from "@/components/entry-card";
 import { GraphView } from "@/components/graph-view";
 import { RepoDot, SymbolLink } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
@@ -26,6 +27,26 @@ function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof La
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+/** Copies the context pack (what to read before changing this) as markdown for an agent. */
+function CopyContext({ focus }: { focus: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="mt-3"
+      title="What to read before changing this, plus what the team recorded, as markdown"
+      onClick={async () => {
+        await navigator.clipboard?.writeText(await api.context(focus));
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+      }}
+    >
+      {done ? <Check /> : <ClipboardCopy />} {done ? "Copied" : "Copy context for an agent"}
+    </Button>
   );
 }
 
@@ -65,6 +86,8 @@ export function ExplorerPage() {
             <Badge variant="outline">{f.kind}</Badge>
           </h1>
           {f.signature && <pre className="mt-2 max-w-3xl overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs">{f.signature}</pre>}
+          {detail.data.summary && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{detail.data.summary}</p>}
+          {f.repo !== "_contracts" && <CopyContext focus={f.id} />}
         </div>
         <Card className="flex items-center gap-4 px-4 py-3">
           <Radar className="size-5 text-warning" />
@@ -93,6 +116,22 @@ export function ExplorerPage() {
           />
         )}
       </Card>
+
+      {detail.data.flow && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2">
+              <Route className="size-4" /> How this flow works
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            <p className="leading-relaxed">{detail.data.flow.narration}</p>
+            {detail.data.flow.questions.length > 0 && (
+              <p className="text-xs text-muted-foreground">Answers: {detail.data.flow.questions.join(" · ")}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {zoom.contracts.length > 0 && (
         <Card>

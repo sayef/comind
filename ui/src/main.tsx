@@ -10,6 +10,8 @@ import { ConventionsPage } from "@/pages/conventions";
 import { ExplorerPage } from "@/pages/explorer";
 import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
+import { PackagesPage } from "@/pages/packages";
+import { SetupPage } from "@/pages/setup";
 import "./index.css";
 
 const queries = new QueryClient({ defaultOptions: { queries: { staleTime: 60_000, retry: 1 } } });
@@ -27,6 +29,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="ledger" element={<LedgerPage />} />
                 <Route path="explorer" element={<ExplorerPage />} />
                 <Route path="conventions" element={<ConventionsPage />} />
+                <Route path="packages" element={<PackagesPage />} />
+                <Route path="setup" element={<SetupPage />} />
                 <Route path="*" element={<OverviewPage />} />
               </Route>
             </Routes>

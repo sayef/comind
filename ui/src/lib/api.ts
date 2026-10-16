@@ -117,11 +117,46 @@ export interface NodeDetail {
   graph: { nodes: Node[]; edges: { src: string; dst: string; kind: string }[]; focus: string };
   ripple: { total: number; repos: Record<string, number> };
   ledger: Entry[];
+  summary: string | null;
+  flow: { narration: string; questions: string[] } | null;
+}
+
+export interface SearchHit {
+  id: string;
+  name: string;
+  kind: string;
+  repo: string;
+  location: string;
+  signature: string | null;
+  summary: string | null;
+  dependents: number;
+}
+
+export interface Package {
+  ecosystem: string;
+  name: string;
+  publisher: string;
+  published: string | null;
+  consumer: string;
+  requirement: string | null;
+  locked: string | null;
+  skewed: boolean;
+}
+
+export interface Setup {
+  index: string;
+  remote: boolean;
+  version: string;
+  checks: { ok: boolean; optional: boolean; message: string }[];
+  tools: { name: string; description: string }[];
 }
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path);
-  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  if (!r.ok) {
+    const body = await r.json().catch(() => null);
+    throw new Error(body?.error ?? `${path}: ${r.status}`);
+  }
   return r.json();
 }
 
@@ -143,6 +178,13 @@ export const api = {
     return out;
   },
   find: (q: string) => get<Node[]>(`/api/find?q=${encodeURIComponent(q)}`),
+  search: (q: string) => get<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
+  packages: () => get<Package[]>("/api/packages"),
+  setup: () => get<Setup>("/api/setup"),
+  context: async (focus: string) => {
+    const r = await fetch(`/api/context?focus=${encodeURIComponent(focus)}`);
+    return r.text();
+  },
   node: (focus: string) => get<NodeDetail>(`/api/node?focus=${encodeURIComponent(focus)}`),
   erase: async (id: string) => {
     const r = await fetch("/api/erase", {

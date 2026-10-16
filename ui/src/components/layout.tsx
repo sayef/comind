@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Ruler, Search, Sun } from "lucide-react";
+import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Plug, Ruler, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { CommandPalette } from "@/components/command-palette";
@@ -14,6 +14,8 @@ const NAV = [
   { to: "/contracts", label: "Contracts", icon: Network },
   { to: "/ledger", label: "Ledger", icon: BookMarked },
   { to: "/conventions", label: "Conventions", icon: Ruler },
+  { to: "/packages", label: "Packages", icon: Package },
+  { to: "/setup", label: "Connect", icon: Plug },
 ];
 
 export function Layout() {

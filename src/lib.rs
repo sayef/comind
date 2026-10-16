@@ -12,6 +12,7 @@ pub mod checks;
 pub mod config;
 pub mod configvals;
 pub mod conventions;
+pub mod doctor;
 
 pub mod facts;
 pub mod git;

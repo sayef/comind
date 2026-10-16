@@ -133,7 +133,9 @@ pub fn rank_candidates(
             let score = base * def_boost * exact_boost * penalty * graph_boost * query_boost;
             Some(SearchHit {
                 id: rid.clone(),
-                name: sym.name.clone(),
+                name: graph
+                    .lookup(&rid)
+                    .map_or_else(|| sym.name.clone(), |i| graph.node(i).name),
                 kind: format!("{:?}", sym.kind),
                 repo: sym.repo.0.clone(),
                 location: format!("{}:{}", sym.file_path, sym.range.start.line),

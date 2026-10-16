@@ -1,7 +1,7 @@
 //! Local web UI (`comind ui --web`): one embedded page over a small JSON API, bound to
 //! 127.0.0.1. Ledger reviews write to the index root like the terminal UI.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 
 use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
@@ -26,6 +26,65 @@ struct AppState {
     data: Data,
     entries: RwLock<Vec<Entry>>,
     manual: RwLock<Vec<crate::conventions::Manual>>,
+    /// Loaded on first use: LLM summaries and flows, and the search model.
+    extras: OnceCell<Extras>,
+    search: OnceCell<Option<Search>>,
+}
+
+#[derive(Default)]
+struct Extras {
+    enrichment: crate::search::Enrichment,
+    flows: HashMap<String, (String, Vec<String>)>,
+}
+
+struct Search {
+    embedder: crate::embed::Embedder,
+    by_id: HashMap<String, crate::model::Symbol>,
+}
+
+impl AppState {
+    async fn extras(&self) -> &Extras {
+        self.extras
+            .get_or_init(|| async {
+                let Some(uri) = graph_uri(self) else {
+                    return Extras::default();
+                };
+                let enrichment = crate::index::read_enrichment(&uri).await.ok().flatten();
+                let flows = crate::index::read_flows(&uri).await.ok().flatten();
+                Extras {
+                    enrichment: enrichment
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(id, s, q)| (id.render(), (s, q)))
+                        .collect(),
+                    flows: flows
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(id, n, q)| (id.render(), (n, q)))
+                        .collect(),
+                }
+            })
+            .await
+    }
+
+    async fn search(&self) -> Option<&Search> {
+        self.search
+            .get_or_init(|| async {
+                let embedder = tokio::task::spawn_blocking(crate::embed::Embedder::load_default)
+                    .await
+                    .ok()?
+                    .ok()?;
+                let by_id = self
+                    .data
+                    .symbols
+                    .iter()
+                    .map(|s| (s.id.render(), s.clone()))
+                    .collect();
+                Some(Search { embedder, by_id })
+            })
+            .await
+            .as_ref()
+    }
 }
 
 type Shared = Arc<AppState>;
@@ -37,6 +96,8 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         data,
         entries: RwLock::new(entries),
         manual: RwLock::new(manual),
+        extras: OnceCell::new(),
+        search: OnceCell::new(),
     });
     let app = Router::new()
         .route("/api/overview", get(overview))
@@ -47,6 +108,10 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/conventions", get(conventions).post(change_convention))
         .route("/api/find", get(find))
         .route("/api/node", get(node))
+        .route("/api/search", get(search))
+        .route("/api/context", get(context))
+        .route("/api/packages", get(packages))
+        .route("/api/setup", get(setup))
         .route("/api/review", post(review))
         .route("/api/erase", post(erase))
         .fallback(get(asset))
@@ -406,6 +471,13 @@ async fn node(State(s): State<Shared>, Query(q): Query<NodeQ>) -> impl IntoRespo
             ids.extend(scope);
         }
     }
+    let extras = s.extras().await;
+    let fid = z.focus.as_ref().map(|f| f.id.clone()).unwrap_or_default();
+    let summary = extras.enrichment.get(&fid).map(|(s, _)| s);
+    let flow = extras
+        .flows
+        .get(&fid)
+        .map(|(n, q)| json!({"narration": n, "questions": q}));
     let entries = s.entries.read().await;
     let about: Vec<&Entry> = crate::ledger::about(&entries, &ids);
     (
@@ -415,8 +487,147 @@ async fn node(State(s): State<Shared>, Query(q): Query<NodeQ>) -> impl IntoRespo
             "graph": neighbourhood(&z),
             "ripple": {"total": ripple.len(), "repos": repos},
             "ledger": about,
+            "summary": summary,
+            "flow": flow,
         })),
     )
+}
+
+#[derive(Deserialize)]
+struct SearchQ {
+    q: String,
+    repo: Option<String>,
+}
+
+/// Hybrid code search (BM25, vectors, centrality), as `comind search` and the MCP tool.
+async fn search(State(s): State<Shared>, Query(q): Query<SearchQ>) -> impl IntoResponse {
+    let run = async {
+        let uri = graph_uri(&s).context("no index root")?;
+        let engine = s
+            .search()
+            .await
+            .context("the embedding model could not be loaded")?;
+        let extras = s.extras().await;
+        let limit = if q.repo.is_some() { 60 } else { 20 };
+        let mut hits = crate::search::hybrid(
+            &uri,
+            &engine.by_id,
+            &s.data.graph,
+            &extras.enrichment,
+            &engine.embedder,
+            &q.q,
+            limit,
+        )
+        .await
+        .map_err(|e| match format!("{e:#}").contains("was not found") {
+            true => {
+                anyhow::anyhow!("this index has no search table: rebuild it without --no-embed")
+            }
+            false => e.context("hybrid search failed"),
+        })?;
+        if let Some(r) = &q.repo {
+            hits.retain(|h| &h.repo == r);
+            hits.truncate(20);
+        }
+        anyhow::Ok(
+            hits.into_iter()
+                .map(|h| {
+                    json!({"id": h.id, "name": h.name, "kind": h.kind, "repo": h.repo,
+                           "location": h.location, "signature": h.signature,
+                           "summary": h.summary, "dependents": h.deps})
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    match run.await {
+        Ok(v) => (StatusCode::OK, Json(json!(v))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("{e:#}")})),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct ContextQ {
+    focus: String,
+    budget: Option<usize>,
+}
+
+/// The context pack for a symbol as markdown, ready to paste into an agent.
+async fn context(State(s): State<Shared>, Query(q): Query<ContextQ>) -> impl IntoResponse {
+    let g = &s.data.graph;
+    let Some(idx) = g.lookup(&q.focus) else {
+        return (StatusCode::NOT_FOUND, "no such symbol".to_string());
+    };
+    let extras = s.extras().await;
+    let focus = g.node(idx);
+    let pack = g.context_pack(idx, q.budget.unwrap_or(1500));
+    let mut o = format!(
+        "## Context for changing `{}` ({} · {})\n\nRead these first:\n\n",
+        focus.name, focus.repo, focus.location
+    );
+    for (n, _) in pack.iter().filter(|(n, _)| n.id != focus.id) {
+        o.push_str(&format!("- `{}` ({} · {})", n.name, n.repo, n.location));
+        if let Some((sum, _)) = extras.enrichment.get(&n.id) {
+            o.push_str(&format!(": {sum}"));
+        }
+        o.push('\n');
+    }
+    let mut ids: Vec<String> = pack.iter().map(|(n, _)| n.id.clone()).collect();
+    ids.push(focus.id.clone());
+    let entries = s.entries.read().await;
+    let known: Vec<String> = crate::ledger::about(&entries, &ids)
+        .into_iter()
+        .filter(|e| e.trust >= crate::ledger::Trust::T2)
+        .filter(|e| !matches!(e.status, Status::Superseded | Status::Retracted))
+        .take(6)
+        .map(crate::ledger::line)
+        .collect();
+    if !known.is_empty() {
+        o.push_str("\nRecorded by the team:\n\n");
+        for k in known {
+            o.push_str(&format!("- {k}\n"));
+        }
+    }
+    (StatusCode::OK, o)
+}
+
+async fn packages(State(s): State<Shared>) -> Json<Value> {
+    Json(json!(s
+        .data
+        .deps
+        .iter()
+        .map(
+            |d| json!({"ecosystem": d.ecosystem, "name": d.name, "publisher": d.publisher,
+                        "published": d.published, "consumer": d.consumer,
+                        "requirement": d.requirement, "locked": d.locked, "skewed": d.skewed()})
+        )
+        .collect::<Vec<_>>()))
+}
+
+/// Setup status and how to connect agents: index location, checks, MCP tools.
+async fn setup(State(s): State<Shared>) -> Json<Value> {
+    let root = s.data.root.clone().unwrap_or_default();
+    let checks = {
+        let root = root.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::doctor::run(&crate::config::Config::load(), &root)
+        })
+        .await
+        .unwrap_or_default()
+    };
+    let tools: Vec<Value> = crate::mcp::tools()
+        .into_iter()
+        .map(|(name, description)| json!({"name": name, "description": description}))
+        .collect();
+    Json(json!({
+        "index": root,
+        "remote": crate::cache::is_remote(&root),
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": checks,
+        "tools": tools,
+    }))
 }
 
 /// Nodes and labelled edges around the focus, for the canvas graph.

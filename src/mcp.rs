@@ -530,7 +530,7 @@ trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthr
 `contracts` lists HTTP routes, queues, topics, buckets and tables with providers and consumers. `search` needs embeddings \
 (on by default unless the index was built with --no-embed); the graph tools always work.";
 
-#[tool_router]
+#[tool_router(vis = "pub(crate)")]
 impl ComindServer {
     #[tool(
         name = "search",
@@ -1457,4 +1457,18 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;
     Ok(())
+}
+
+/// The MCP tools this server offers: `(name, description)`.
+pub fn tools() -> Vec<(String, String)> {
+    ComindServer::tool_router()
+        .list_all()
+        .into_iter()
+        .map(|t| {
+            (
+                t.name.to_string(),
+                t.description.unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
 }

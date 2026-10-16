@@ -204,8 +204,8 @@ export function OverviewPage() {
               <CardTitle>Version skew</CardTitle>
               <CardDescription>Internal packages pinned to a different version than their publisher.</CardDescription>
             </div>
-            <Link to="/ledger" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              Ledger <ArrowUpRight className="size-3" />
+            <Link to="/packages" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              Packages <ArrowUpRight className="size-3" />
             </Link>
           </CardHeader>
           <CardContent>
