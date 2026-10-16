@@ -27,11 +27,13 @@ fn ripple_crosses_service_boundary_through_http_contract() {
     );
     assert!(
         hops.iter()
-            .any(|h| h.node.name == "fetch" && h.node.repo == "profile-svc"),
+            .any(|h| h.node.name == "SkillsClient.fetch" && h.node.repo == "profile-svc"),
         "{names:?}"
     );
     // A consumer's change doesn't break the provider.
-    let fetch = g.lookup("fetch").unwrap();
+    let fetch = g
+        .lookup("SkillsClient.fetch")
+        .expect("qualified names resolve");
     assert!(!g
         .ripple(fetch, 4)
         .iter()

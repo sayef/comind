@@ -183,7 +183,24 @@ impl CodeGraph {
         self.node_of(idx)
     }
 
+    /// A display node; methods are named `Class.method` so `__init__` and `get` read clearly.
     fn node_of(&self, idx: NodeIndex) -> Node {
+        let mut n = self.plain(idx);
+        if self.g[idx].sym.kind == crate::model::SymbolKind::Method {
+            if let Some(owner) = self
+                .g
+                .edges_directed(idx, Incoming)
+                .find(|e| *e.weight() == EdgeKind::Contains)
+                .map(|e| &self.g[e.source()].sym)
+                .filter(|o| o.kind != crate::model::SymbolKind::File)
+            {
+                n.name = format!("{}.{}", owner.name, n.name);
+            }
+        }
+        n
+    }
+
+    fn plain(&self, idx: NodeIndex) -> Node {
         let s = &self.g[idx].sym;
         Node {
             id: s.id.render(),
@@ -215,9 +232,20 @@ impl CodeGraph {
                 candidates = v.clone();
             }
         }
+        // `Class.method`, as nodes are displayed.
+        if let (true, Some((_, method))) = (candidates.is_empty(), focus.rsplit_once('.')) {
+            candidates = self
+                .by_name
+                .get(method)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|&i| self.node_of(i).name == focus)
+                .collect();
+        }
         candidates.sort_by_key(|&i| {
             let s = &self.g[i].sym;
-            let inexact = (s.name != focus) as usize;
+            let inexact = (s.name != focus && self.node_of(i).name != focus) as usize;
             let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
             let path = s.file_path.to_ascii_lowercase();
             let is_test = (path.contains("test") || path.contains("spec")) as usize;
@@ -349,29 +377,12 @@ impl CodeGraph {
         let (mut p, mut c) = (Vec::new(), Vec::new());
         for e in self.g.edges_directed(contract, Incoming) {
             if PROVIDES.contains(e.weight()) {
-                p.push(self.qualified(e.source()));
+                p.push(self.node_of(e.source()));
             } else if is_contract_role(e.weight()) {
-                c.push(self.qualified(e.source()));
+                c.push(self.node_of(e.source()));
             }
         }
         (p, c)
-    }
-
-    /// A node named `Class.method` when it is a method, so `__init__` and `get` read clearly.
-    fn qualified(&self, idx: NodeIndex) -> Node {
-        let mut n = self.node_of(idx);
-        if self.g[idx].sym.kind == crate::model::SymbolKind::Method {
-            if let Some(owner) = self
-                .g
-                .edges_directed(idx, Incoming)
-                .find(|e| *e.weight() == EdgeKind::Contains)
-                .map(|e| &self.g[e.source()].sym)
-                .filter(|o| o.kind != crate::model::SymbolKind::File)
-            {
-                n.name = format!("{}.{}", owner.name, n.name);
-            }
-        }
-        n
     }
 
     /// All contracts, optionally of one type (`http`, `sqs`, …) or only those missing a side.
