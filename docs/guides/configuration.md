@@ -20,6 +20,7 @@ guide       = true
 # cache_ttl_secs = 300                          # how often serve/ui check for a new index; hooks' mirror
 # signing_key = "~/.ssh/id_ed25519.pub"          # sign ledger records (default: git user.signingkey)
 # allowed_signers = "~/.config/git/allowed_signers"
+# aws_profile = "team-dev"                       # S3: AWS profile when AWS_PROFILE is unset
 # author_name = "Ada Lovelace"                  # name on ledger records (default: git user.name)
 # record_names = false                          # keep names off new records
 ```
@@ -27,5 +28,5 @@ guide       = true
 Environment: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`, `COMIND_LLM_BASE_URL`,
 `COMIND_FORMAT`, `COMIND_SIGNING_KEY`, `COMIND_ALLOWED_SIGNERS`, `COMIND_AUTHOR_NAME`, `COMIND_AGENT`.
 
-Secrets stay in the environment: `OPENAI_API_KEY` for the LLM, the standard AWS variables or an SSO profile
-for `s3://` indexes.
+Secrets stay out of the file: `OPENAI_API_KEY` for the LLM in the environment, and S3 access through the
+standard AWS chain ([S3 and compatible storage](storage.md)).

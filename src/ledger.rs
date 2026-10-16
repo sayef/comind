@@ -435,10 +435,7 @@ pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectSt
     let root = index_root.trim_end_matches('/');
     if let Some(rest) = root.strip_prefix("s3://") {
         let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
-        let store = object_store::aws::AmazonS3Builder::from_env()
-            .with_bucket_name(bucket)
-            .build()
-            .context("open S3 store")?;
+        let store = crate::s3::bucket(bucket)?;
         let path = ObjPath::from(format!("{prefix}/{sub}").trim_start_matches('/'));
         return Ok((Arc::new(store), path));
     }
@@ -518,7 +515,7 @@ impl Ledger {
     async fn snapshot(&self) -> Result<HashMap<String, String>> {
         use lancedb::query::ExecutableQuery;
         let mut out = HashMap::new();
-        let db = lancedb::connect(&self.tables).execute().await?;
+        let db = crate::s3::connect(&self.tables).execute().await?;
         let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
             return Ok(out);
         };
@@ -601,7 +598,7 @@ impl Ledger {
     /// Rewrite the snapshot and drop its old versions, so erased rows leave no copies behind.
     async fn purge_history(&self) -> Result<()> {
         use lancedb::table::OptimizeAction;
-        let db = lancedb::connect(&self.tables).execute().await?;
+        let db = crate::s3::connect(&self.tables).execute().await?;
         let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
             return Ok(());
         };
@@ -633,7 +630,7 @@ impl Ledger {
             .keys()
             .filter(|k| !listed.contains(k.as_str()))
             .collect();
-        let db = lancedb::connect(&self.tables).execute().await?;
+        let db = crate::s3::connect(&self.tables).execute().await?;
         if !new_keys.is_empty() {
             let schema = Arc::new(Schema::new(vec![
                 Field::new("key", DataType::Utf8, false),
@@ -1335,7 +1332,7 @@ mod tests {
             .collect();
         assert_eq!(left, vec!["other".to_string()]);
         assert_eq!(ledger.snapshot().await.unwrap().len(), 1);
-        let db = lancedb::connect(&ledger.tables).execute().await.unwrap();
+        let db = crate::s3::connect(&ledger.tables).execute().await.unwrap();
         let tbl = db.open_table(SNAPSHOT).execute().await.unwrap();
         assert_eq!(
             tbl.list_versions().await.unwrap().len(),

@@ -425,6 +425,12 @@ enum ConfigAction {
 }
 
 fn main() -> ExitCode {
+    // Before any thread starts: the configured AWS profile applies unless the shell picked one.
+    if let Some(p) = comind::config::Config::load().aws_profile {
+        if std::env::var_os("AWS_PROFILE").is_none() {
+            std::env::set_var("AWS_PROFILE", p);
+        }
+    }
     match Cli::parse().cmd {
         Cmd::Index {
             repo,

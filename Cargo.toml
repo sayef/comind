@@ -35,6 +35,11 @@ comfy-table = "7" # unicode result tables
 anyhow = "1"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net"] }
 futures = "0.3"
+# S3 access through the standard AWS chain (profiles, SSO, credential_process); lance uses it too.
+aws-config = "1"
+aws-credential-types = "1"
+async-trait = "0.1"
+toml_edit = "0.25"
 rayon = "1"
 ignore = "=0.4.23"
 petgraph = "0.8.3"

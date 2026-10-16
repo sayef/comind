@@ -58,12 +58,10 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
             "local mirror present (hooks read it)",
             "no local mirror yet: `comind cache refresh` (hooks create it on first use)",
         );
-        check(
-            set("AWS_ACCESS_KEY_ID") || set("AWS_PROFILE") || set("AWS_WEB_IDENTITY_TOKEN_FILE"),
-            false,
-            "AWS credentials in the environment",
-            "no AWS credentials in the environment (SSO: `aws sso login` + export)",
-        );
+        match crate::s3::check() {
+            Ok(m) => check(true, false, &m, ""),
+            Err(m) => check(false, false, "", &m),
+        }
     }
     let settings = std::env::var_os("HOME")
         .map(|h| Path::new(&h).join(".claude/settings.json"))

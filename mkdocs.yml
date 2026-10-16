@@ -90,6 +90,7 @@ nav:
   - Guides:
       - Using comind with agents: guides/agents.md
       - Team setup: guides/team-setup.md
+      - S3 and compatible storage: guides/storage.md
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md
       - Preflight and checks: guides/preflight.md
