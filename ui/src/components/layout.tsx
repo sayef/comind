@@ -79,20 +79,22 @@ export function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
-          <div className="flex items-center gap-2 md:hidden">
-            <img src="/logo.svg" alt="" className="size-6 dark:hidden" />
-            <img src="/logo-dark.svg" alt="" className="hidden size-6 dark:block" />
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:grid md:grid-cols-[1fr_minmax(0,32rem)_1fr] md:px-6">
+          <div className="flex shrink-0 items-center">
+            <span className="md:hidden">
+              <img src="/logo.svg" alt="" className="size-6 dark:hidden" />
+              <img src="/logo-dark.svg" alt="" className="hidden size-6 dark:block" />
+            </span>
           </div>
           <button
             onClick={() => setPalette(true)}
-            className="flex h-9 w-full min-w-0 max-w-md items-center gap-2 rounded-md border bg-card px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-muted"
+            className="flex h-9 w-full min-w-0 items-center gap-2 rounded-md border bg-card px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-muted"
           >
             <Search className="size-4 shrink-0" />
             <span className="flex-1 truncate text-left">Search symbols, files, contracts…</span>
             <kbd className="hidden rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
           </button>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex shrink-0 items-center justify-end gap-2">
             {overview.data && !overview.data.writable && <Badge variant="outline">read-only</Badge>}
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun /> : <Moon />}
