@@ -230,7 +230,7 @@ enum Cmd {
     /// Confirm, retract, supersede or dispute a ledger record
     Review {
         id: String,
-        /// confirm | retract | supersede | dispute
+        /// confirm | archive (no longer applies) | invalidate (was wrong) | supersede | dispute | retract
         action: String,
         #[arg(long, default_value = "")]
         reason: String,
@@ -1188,13 +1188,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 
 /// `comind config <path|init>` — show or scaffold the config file.
 fn human() -> comind::ledger::Provenance {
-    comind::ledger::Provenance {
-        author: comind::ledger::AuthorKind::Human,
-        actor: comind::ledger::actor(),
-        source: "cli".into(),
-        agent: None,
-        session: None,
-    }
+    comind::ledger::Provenance::human("cli")
 }
 
 #[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
@@ -1286,18 +1280,15 @@ fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
 }
 
 fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitCode {
-    let Some(kind) = comind::ledger::RelationKind::parse(action) else {
-        comind::ui::err("action must be confirm, retract, supersede or dispute");
-        return ExitCode::FAILURE;
-    };
     let root = comind::config::Config::load().index_dir(from);
     let records = comind::ledger::all_blocking(&root).unwrap_or_default();
     let Some(target) = records.iter().find(|r| r.id == id || r.id.starts_with(id)) else {
         comind::ui::err(&format!("no ledger record `{id}`"));
         return ExitCode::FAILURE;
     };
-    let rec = comind::ledger::Record::relation(kind, target, reason, human());
-    match comind::ledger::put_blocking(&root, &rec) {
+    let put = comind::ledger::Record::review(target, action, reason, human())
+        .and_then(|rec| comind::ledger::put_blocking(&root, &rec));
+    match put {
         Ok(()) => {
             comind::ui::ok(&format!("{action}: `{}`", target.title));
             ExitCode::SUCCESS

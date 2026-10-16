@@ -221,6 +221,7 @@ mod tests {
                 source: "t".into(),
                 agent: None,
                 session: None,
+                name: None,
             },
         );
         sign_with(&mut rec, &key).unwrap();

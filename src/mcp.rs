@@ -66,14 +66,12 @@ impl ComindServer {
             .to_string()
     }
 
-    fn agent() -> crate::ledger::Provenance {
-        crate::ledger::Provenance {
-            author: crate::ledger::AuthorKind::Agent,
-            actor: crate::ledger::actor(),
-            source: "mcp".into(),
-            agent: std::env::var("COMIND_AGENT").ok(),
-            session: None,
-        }
+    /// The calling agent: `COMIND_AGENT`, else the client name from the MCP handshake.
+    fn agent(peer: &rmcp::Peer<rmcp::RoleServer>) -> crate::ledger::Provenance {
+        let name = std::env::var("COMIND_AGENT")
+            .ok()
+            .or_else(|| Some(peer.peer_info()?.client_info.name.clone()));
+        crate::ledger::Provenance::agent("mcp", name)
     }
 
     /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
@@ -103,7 +101,11 @@ impl ComindServer {
             .collect()
     }
 
-    async fn write_record(&self, p: RememberParam) -> anyhow::Result<String> {
+    async fn write_record(
+        &self,
+        p: RememberParam,
+        by: crate::ledger::Provenance,
+    ) -> anyhow::Result<String> {
         let kind = crate::ledger::Kind::parse(&p.kind)
             .ok_or_else(|| anyhow::anyhow!("unknown kind `{}`", p.kind))?;
         let mut anchors = Vec::new();
@@ -119,7 +121,7 @@ impl ComindServer {
                 .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
             anchors.push(crate::ledger::Anchor::of(s));
         }
-        let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, Self::agent());
+        let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, by);
         rec.body = p.body.unwrap_or_default();
         rec.trigger = p.trigger;
         rec.evidence = p.evidence;
@@ -139,21 +141,19 @@ impl ComindServer {
         ))
     }
 
-    async fn write_review(&self, p: ReviewParam) -> anyhow::Result<String> {
-        let kind = crate::ledger::RelationKind::parse(&p.action)
-            .ok_or_else(|| anyhow::anyhow!("unknown action `{}`", p.action))?;
+    async fn write_review(
+        &self,
+        p: ReviewParam,
+        by: crate::ledger::Provenance,
+    ) -> anyhow::Result<String> {
         let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
         let records = ledger.all().await?;
         let target = records
             .iter()
             .find(|r| r.id == p.id || r.id.starts_with(&p.id))
             .ok_or_else(|| anyhow::anyhow!("no ledger record `{}`", p.id))?;
-        let rec = crate::ledger::Record::relation(
-            kind,
-            target,
-            p.reason.as_deref().unwrap_or_default(),
-            Self::agent(),
-        );
+        let reason = p.reason.as_deref().unwrap_or_default();
+        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?;
         ledger.put(&rec).await?;
         Ok(format!("{}: `{}`", p.action, target.title))
     }
@@ -405,7 +405,7 @@ struct PreflightParam {
 struct ReviewParam {
     /// Record id (or a unique prefix) from `why`.
     id: String,
-    /// `confirm` (verified against the code) | `retract` | `supersede` | `dispute`.
+    /// `confirm` | `archive` (no longer applies) | `invalidate` (was wrong) | `supersede` | `dispute`.
     action: String,
     #[serde(default)]
     reason: Option<String>,
@@ -828,8 +828,12 @@ impl ComindServer {
         name = "remember",
         description = "Record durable engineering knowledge about symbols for the team: a failed or reverted approach (`attempt`, evidence required), a choice between alternatives (`decision`), an invariant (`constraint`), a trap (`gotcha`), why code exists (`intent`) or an open `question`. Only record what a future engineer would be glad to know before editing — not summaries of what you did. Write neutral facts, never instructions."
     )]
-    async fn remember(&self, Parameters(p): Parameters<RememberParam>) -> CallToolResult {
-        let result = self.write_record(p).await;
+    async fn remember(
+        &self,
+        peer: rmcp::Peer<rmcp::RoleServer>,
+        Parameters(p): Parameters<RememberParam>,
+    ) -> CallToolResult {
+        let result = self.write_record(p, Self::agent(&peer)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -840,10 +844,14 @@ impl ComindServer {
 
     #[tool(
         name = "review",
-        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `retract` (no longer true), `supersede` (replaced by a newer record) or `dispute` (contradicted). Use when `why` shows a STALE record you have verified."
+        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `archive` (was true, no longer applies), `invalidate` (was wrong), `supersede` (replaced by a newer record) or `dispute` (contradicted). Give a reason. Retiring a record a person wrote or confirmed only flags it for a person to decide. Use when `why` shows a STALE record you have verified."
     )]
-    async fn review(&self, Parameters(p): Parameters<ReviewParam>) -> CallToolResult {
-        let result = self.write_review(p).await;
+    async fn review(
+        &self,
+        peer: rmcp::Peer<rmcp::RoleServer>,
+        Parameters(p): Parameters<ReviewParam>,
+    ) -> CallToolResult {
+        let result = self.write_review(p, Self::agent(&peer)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),

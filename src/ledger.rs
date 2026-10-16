@@ -111,6 +111,74 @@ pub struct Provenance {
     pub agent: Option<String>,
     #[serde(default)]
     pub session: Option<String>,
+    /// The person's name, or the person an agent works for; absent with `record_names = false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Provenance {
+    pub fn human(source: &str) -> Provenance {
+        Provenance {
+            author: AuthorKind::Human,
+            actor: actor(),
+            source: source.into(),
+            agent: None,
+            session: None,
+            name: author_name(),
+        }
+    }
+
+    pub fn agent(source: &str, agent: Option<String>) -> Provenance {
+        Provenance {
+            author: AuthorKind::Agent,
+            agent,
+            ..Provenance::human(source)
+        }
+    }
+
+    /// Who, for people to read: "Ada Lovelace", "claude-code for Ada Lovelace", "an agent".
+    pub fn who(&self) -> String {
+        match (self.author, self.name.as_deref(), self.agent.as_deref()) {
+            (AuthorKind::Agent, Some(n), Some(a)) => format!("{a} for {n}"),
+            (AuthorKind::Agent, Some(n), None) => format!("an agent for {n}"),
+            (AuthorKind::Agent, None, Some(a)) => a.to_string(),
+            (AuthorKind::Agent, None, None) => "an agent".into(),
+            (AuthorKind::Human, Some(n), _) => n.to_string(),
+            (AuthorKind::Human, None, _) => "a person".into(),
+            (AuthorKind::Harvested, ..) => "git history".into(),
+            (AuthorKind::Distilled, ..) => "the distiller".into(),
+        }
+    }
+}
+
+/// The name new records carry: `COMIND_AUTHOR_NAME`, config `author_name`, else git `user.name`.
+pub fn author_name() -> Option<String> {
+    let name = match std::env::var("COMIND_AUTHOR_NAME") {
+        Ok(n) => Some(n),
+        Err(_) => {
+            let cfg = crate::config::Config::load();
+            if cfg.record_names == Some(false) {
+                return None;
+            }
+            cfg.author_name.or_else(|| {
+                git2::Config::open_default()
+                    .ok()?
+                    .get_string("user.name")
+                    .ok()
+            })
+        }
+    };
+    name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+}
+
+/// A review action: `confirm`, `supersede`, `dispute`, `retract`, `archive` (no longer applies)
+/// or `invalidate` (was wrong).
+pub fn review_action(action: &str) -> Option<(RelationKind, Option<&'static str>)> {
+    match action {
+        "archive" => Some((RelationKind::Retracts, Some("outdated"))),
+        "invalidate" => Some((RelationKind::Retracts, Some("wrong"))),
+        other => RelationKind::parse(other).map(|k| (k, None)),
+    }
 }
 
 /// Where a record points: a symbol as it was when the record was written.
@@ -183,6 +251,24 @@ impl Record {
             created: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             signature: None,
         }
+    }
+
+    /// The relation record for a review `action` (see [`review_action`]) on `target`.
+    pub fn review(
+        target: &Record,
+        action: &str,
+        reason: &str,
+        provenance: Provenance,
+    ) -> Result<Record> {
+        let (kind, retire) = review_action(action).with_context(|| {
+            format!("unknown action `{action}`: confirm, archive, invalidate, supersede, dispute or retract")
+        })?;
+        let mut r = Record::relation(kind, target, reason, provenance);
+        if let Some(why) = retire {
+            r.fields
+                .insert("retire".into(), serde_json::Value::String(why.into()));
+        }
+        Ok(r)
     }
 
     /// A relation record (`confirm`, `retract`, …) about `target`.
@@ -666,6 +752,25 @@ pub struct Entry {
     pub related: Vec<(RelationKind, String)>,
     /// Signature check: verified, failed (record treated as T0), or unsigned/unchecked.
     pub verified: Option<bool>,
+    /// Who wrote it, for people to read.
+    pub by: String,
+    /// Reviews of this record, oldest first.
+    pub history: Vec<Event>,
+    /// Why it was retracted: `outdated` (archived) or `wrong` (invalidated).
+    pub retired: Option<String>,
+}
+
+/// One review of a record.
+#[derive(Debug, Clone, Serialize)]
+pub struct Event {
+    pub id: String,
+    /// `confirm`, `supersede`, `dispute`, `retract`, `archive` or `invalidate`.
+    pub action: String,
+    pub who: String,
+    pub at: String,
+    pub reason: String,
+    /// False when it could not take effect (a machine retiring a human-backed record).
+    pub counted: bool,
 }
 
 /// Derive status and trust for every non-relation record.
@@ -680,25 +785,28 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
                 .push(s);
         }
     }
-    let mut related: HashMap<&str, Vec<(RelationKind, String, AuthorKind)>> = HashMap::new();
+    let mut related: HashMap<&str, Vec<&Record>> = HashMap::new();
     // A relation whose signature fails counts for nothing (no forged confirmations).
     for r in records
         .iter()
         .filter(|r| crate::signing::verify(r) != Some(false))
     {
         if let Some(rel) = &r.relation {
-            related.entry(rel.target.as_str()).or_default().push((
-                rel.kind,
-                r.id.clone(),
-                r.provenance.author,
-            ));
+            related.entry(rel.target.as_str()).or_default().push(r);
         }
     }
     records
         .iter()
         .filter(|r| r.kind != Kind::Relation)
         .map(|r| {
-            let rels = related.get(r.id.as_str()).cloned().unwrap_or_default();
+            let mut revs = related.get(r.id.as_str()).cloned().unwrap_or_default();
+            revs.sort_by(|a, b| a.created.cmp(&b.created).then(a.id.cmp(&b.id)));
+            let rels: Vec<(RelationKind, String, AuthorKind)> = revs
+                .iter()
+                .filter_map(|x| {
+                    Some((x.relation.as_ref()?.kind, x.id.clone(), x.provenance.author))
+                })
+                .collect();
             let mut status = Status::Active;
             let mut current = Vec::new();
             for a in &r.anchors {
@@ -721,6 +829,49 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
             if counts(RelationKind::Retracts) {
                 status = Status::Retracted;
             }
+            let counted = |x: &Record| {
+                let k = x.relation.as_ref().map(|rel| rel.kind);
+                matches!(k, Some(RelationKind::Confirms | RelationKind::Disputes))
+                    || x.provenance.author == AuthorKind::Human
+                    || !human_backed
+            };
+            let retire = |x: &Record| {
+                x.fields
+                    .get("retire")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            };
+            let history: Vec<Event> = revs
+                .iter()
+                .filter_map(|x| {
+                    let kind = x.relation.as_ref()?.kind;
+                    let action = match retire(x).as_deref() {
+                        Some("outdated") => "archive",
+                        Some("wrong") => "invalidate",
+                        _ => kind.as_str(),
+                    };
+                    let auto = x.title.starts_with(&format!("{kind:?}: "));
+                    Some(Event {
+                        id: x.id.clone(),
+                        action: action.into(),
+                        who: x.provenance.who(),
+                        at: x.created.clone(),
+                        reason: if auto { String::new() } else { x.title.clone() },
+                        counted: counted(x),
+                    })
+                })
+                .collect();
+            let retired = (status == Status::Retracted)
+                .then(|| {
+                    revs.iter()
+                        .rev()
+                        .find(|x| {
+                            x.relation.as_ref().map(|rel| rel.kind) == Some(RelationKind::Retracts)
+                                && counted(x)
+                        })
+                        .and_then(|x| retire(x))
+                })
+                .flatten();
             let trust = match r.provenance.author {
                 AuthorKind::Human => Trust::T3,
                 _ if confirmed_by_human => Trust::T3,
@@ -742,6 +893,9 @@ pub fn derive(records: &[Record], symbols: &[Symbol]) -> Vec<Entry> {
                 current,
                 related: rels.into_iter().map(|(k, id, _)| (k, id)).collect(),
                 verified,
+                by: r.provenance.who(),
+                history,
+                retired,
             }
         })
         .collect()
@@ -876,17 +1030,25 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             .collect();
         o.push_str(&format!("- about: {}\n", at.join(", ")));
         o.push_str(&format!(
-            "- by {} via {} on {} · id `{}`\n",
-            match r.provenance.author {
-                AuthorKind::Human => "a human",
-                AuthorKind::Agent => "an agent",
-                AuthorKind::Harvested => "harvesting",
-                AuthorKind::Distilled => "the distiller",
-            },
-            r.provenance.source,
+            "- by {} on {} · id `{}`\n",
+            e.by,
             r.created.get(..10).unwrap_or(&r.created),
             r.id
         ));
+        for h in &e.history {
+            let reason = if h.reason.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", h.reason)
+            };
+            let note = if h.counted { "" } else { " (pending a person)" };
+            o.push_str(&format!(
+                "- {} by {} on {}{reason}{note}\n",
+                h.action,
+                h.who,
+                h.at.get(..10).unwrap_or(&h.at)
+            ));
+        }
         if challenged(e) {
             let by: Vec<String> = e
                 .related
@@ -924,11 +1086,13 @@ pub fn line(e: &Entry) -> String {
         format!(" · evidence {}", r.evidence.join(", "))
     };
     format!(
-        "[{} · {:?} · {}] {}{at}{ev} · id `{}`",
+        "[{} · {:?} · {}] {}{at}{ev} · by {}, {} · id `{}`",
         r.kind.as_str(),
         e.trust,
         status_label(e.status),
         r.title,
+        e.by,
+        r.created.get(..10).unwrap_or(&r.created),
         &r.id[..r.id.len().min(13)]
     )
 }
@@ -992,6 +1156,7 @@ mod tests {
             source: "test".into(),
             agent: None,
             session: None,
+            name: None,
         }
     }
 
@@ -1268,5 +1433,66 @@ mod tests {
             inbox(&e, true).first().map(|x| x.record.title.as_str()),
             Some("scope by owner")
         );
+    }
+
+    #[test]
+    fn reviews_keep_who_why_and_how() {
+        let s = sym("f", 1, 1);
+        let ada = Provenance {
+            name: Some("Ada".into()),
+            ..prov(AuthorKind::Human)
+        };
+        let bot = Provenance {
+            agent: Some("claude-code".into()),
+            ..ada.clone()
+        };
+        let bot = Provenance {
+            author: AuthorKind::Agent,
+            ..bot
+        };
+        let rule = Record::new(
+            Kind::Constraint,
+            "lock the row",
+            vec![Anchor::of(&s)],
+            ada.clone(),
+        );
+        let old = Record::new(
+            Kind::Gotcha,
+            "cache is per pod",
+            vec![Anchor::of(&s)],
+            ada.clone(),
+        );
+        let mut tries =
+            Record::review(&rule, "invalidate", "row lock removed", bot.clone()).unwrap();
+        tries.created = "2026-01-01T00:00:00Z".into();
+        let archive = Record::review(&old, "archive", "moved to redis", ada.clone()).unwrap();
+        assert!(Record::review(&old, "shred", "", ada).is_err());
+        let e = derive(&[rule, old, tries, archive], std::slice::from_ref(&s));
+
+        assert_eq!(e[0].by, "Ada");
+        assert_eq!(
+            e[0].status,
+            Status::Active,
+            "an agent cannot invalidate a person's record"
+        );
+        let h = &e[0].history[0];
+        assert_eq!(
+            (
+                h.action.as_str(),
+                h.who.as_str(),
+                h.reason.as_str(),
+                h.counted
+            ),
+            (
+                "invalidate",
+                "claude-code for Ada",
+                "row lock removed",
+                false
+            )
+        );
+
+        assert_eq!(e[1].status, Status::Retracted);
+        assert_eq!(e[1].retired.as_deref(), Some("outdated"));
+        assert!(markdown("t", &[&e[1]]).contains("- archive by Ada on"));
     }
 }

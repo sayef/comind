@@ -59,6 +59,7 @@ fn bench(c: &mut Criterion) {
                     source: "bench".into(),
                     agent: None,
                     session: None,
+                    name: None,
                 },
             );
             rec.body = "Lookups must stay scoped to the customer.".into();

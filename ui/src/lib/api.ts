@@ -47,7 +47,7 @@ export interface LedgerRecord {
   fields: Record<string, unknown>;
   anchors: Anchor[];
   evidence: string[];
-  provenance: { author: string; actor: string; source: string; agent: string | null };
+  provenance: { author: string; actor: string; source: string; agent: string | null; name?: string };
   created: string;
 }
 
@@ -58,7 +58,21 @@ export interface Entry {
   current: string[];
   related: [string, string][];
   verified: boolean | null;
+  by: string;
+  history: LedgerEvent[];
+  retired: "outdated" | "wrong" | null;
 }
+
+export interface LedgerEvent {
+  id: string;
+  action: string;
+  who: string;
+  at: string;
+  reason: string;
+  counted: boolean;
+}
+
+export type ReviewAction = "confirm" | "archive" | "invalidate";
 
 export interface Convention {
   id: string;
@@ -130,7 +144,15 @@ export const api = {
   },
   find: (q: string) => get<Node[]>(`/api/find?q=${encodeURIComponent(q)}`),
   node: (focus: string) => get<NodeDetail>(`/api/node?focus=${encodeURIComponent(focus)}`),
-  review: async (id: string, action: "confirm" | "retract", reason = "") => {
+  erase: async (id: string) => {
+    const r = await fetch("/api/erase", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    return (await r.json()) as { ok: boolean; message: string };
+  },
+  review: async (id: string, action: ReviewAction, reason = "") => {
     const r = await fetch("/api/review", {
       method: "POST",
       headers: { "content-type": "application/json" },

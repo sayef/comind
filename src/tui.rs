@@ -148,13 +148,7 @@ impl App {
         let Some(target) = self.entries().get(selected).map(|e| e.record.clone()) else {
             return;
         };
-        let prov = crate::ledger::Provenance {
-            author: crate::ledger::AuthorKind::Human,
-            actor: crate::ledger::actor(),
-            source: "ui".into(),
-            agent: None,
-            session: None,
-        };
+        let prov = crate::ledger::Provenance::human("ui");
         let rec = crate::ledger::Record::relation(kind, &target, "", prov);
         self.status = match crate::ledger::put_blocking(&root, &rec) {
             Ok(()) => {

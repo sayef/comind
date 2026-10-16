@@ -20,13 +20,24 @@ confirms them:
 
 ```bash
 comind ledger --inbox                       # stale, orphaned and unconfirmed records
-comind review <id> confirm                  # or: retract --reason "…", supersede, dispute
+comind review <id> confirm                  # still true
+comind review <id> archive --reason "…"     # was true, no longer applies (kept as history)
+comind review <id> invalidate --reason "…"  # was wrong (kept, marked invalid)
+comind review <id> supersede                # or: dispute
+comind erase <id> --yes                     # remove permanently, with its reviews
 comind ui --web                             # the same, with a timeline, in the browser
 ```
 
+Agents use the same actions through the MCP `review` tool; deleting is for people only (CLI and web UI).
+Every record and review shows who made it and when: the person's name (config `author_name`, else git
+`user.name`), and for agents also the agent ("claude-code for Ada Lovelace", taken from the MCP client
+or `COMIND_AGENT`). Set `record_names = false` to store only the pseudonymous actor id; `comind erase
+--actor` removes everything one person wrote.
+
 Nothing is mined from git history or merge requests. Only a person can retire a human-backed record
-(written or confirmed by a person). When an agent retracts or supersedes one, the record stays active, is marked **challenged**, and goes to the top of the inbox. Machine-written
-records can be superseded by machines.
+(written or confirmed by a person). When an agent archives, invalidates or supersedes one, the record
+stays active, is marked **challenged**, and goes to the top of the inbox. Machine-written records can
+be retired by machines.
 
 Ten minutes a week of review is what keeps the ledger worth reading. Agent session transcripts
 are never read.

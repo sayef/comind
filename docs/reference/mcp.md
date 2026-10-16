@@ -19,4 +19,4 @@ structured JSON attached (`--format json` for JSON only).
 | `guide` | Measured conventions and change recipes for a repository, file or symbol |
 | `why` | Recorded reasoning about a symbol, with status and trust |
 | `remember` | Record a decision, failed attempt, constraint, gotcha, intent or question |
-| `review` | Confirm, retract, supersede or dispute a record (machines can only challenge human-backed ones) |
+| `review` | Confirm, archive (no longer applies), invalidate (was wrong), supersede or dispute a record (machines can only challenge human-backed ones) |

@@ -20,7 +20,8 @@ All notable changes to this project are documented here. The format follows
   conventions from the CLI or the web UI.
 - Reasoning ledger: typed records anchored to symbols, stored in your own store, with derived staleness,
   trust levels, review (`remember`, `why`, `review`, `ledger`), self-enforcing constraint checks, SSH
-  signing, compaction and erasure. Records come from people and from agents through MCP and hooks.
+  signing, compaction and erasure. Records come from people and from agents through MCP and hooks, show
+  who wrote and reviewed them, and can be confirmed, archived, invalidated or deleted.
 - `comind preflight` for uncommitted changes and MR pipelines; Claude Code and generic agent hooks with a
   local mirror for remote indexes; `comind doctor`.
 - Terminal UI (`comind ui`) and local web UI (`comind ui --web`): a React app embedded in the binary,

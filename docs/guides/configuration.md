@@ -20,10 +20,12 @@ guide       = true
 # cache_ttl_secs = 300                          # local mirror of a remote index (hooks)
 # signing_key = "~/.ssh/id_ed25519.pub"          # sign ledger records (default: git user.signingkey)
 # allowed_signers = "~/.config/git/allowed_signers"
+# author_name = "Ada Lovelace"                  # name on ledger records (default: git user.name)
+# record_names = false                          # keep names off new records
 ```
 
 Environment: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`, `COMIND_LLM_BASE_URL`,
-`COMIND_FORMAT`, `COMIND_SIGNING_KEY`, `COMIND_ALLOWED_SIGNERS`.
+`COMIND_FORMAT`, `COMIND_SIGNING_KEY`, `COMIND_ALLOWED_SIGNERS`, `COMIND_AUTHOR_NAME`, `COMIND_AGENT`.
 
 Secrets stay in the environment: `OPENAI_API_KEY` for the LLM, the standard AWS variables or an SSO profile
 for `s3://` indexes.

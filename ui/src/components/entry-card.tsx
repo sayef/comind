@@ -1,11 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { Archive, Ban, Check, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { api, type Entry, isChallenged, when } from "@/lib/api";
+import { api, type Entry, isChallenged, type ReviewAction, when } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<string, "brand" | "warning" | "danger" | "outline"> = {
@@ -17,50 +18,80 @@ const STATUS: Record<string, "brand" | "warning" | "danger" | "outline"> = {
   retracted: "outline",
 };
 
+const TRUST: Record<string, [string, string]> = {
+  T4: ["enforced", "A constraint whose check passes on the current code"],
+  T3: ["confirmed", "Written or confirmed by a person"],
+  T2: ["with evidence", "Written by an agent, citing evidence (a commit, test or MR)"],
+  T1: ["unverified", "Written by an agent without evidence; a person should confirm it"],
+  T0: ["untrusted", "Failed signature or unsafe content: agents never see it"],
+};
+
+const PROMPT: Record<"archive" | "invalidate", [string, string]> = {
+  archive: ["Archive", "What changed? It was true, but no longer applies."],
+  invalidate: ["Invalidate", "Why is it wrong?"],
+};
+
 export function TrustBadge({ trust }: { trust: string }) {
+  const [label, hint] = TRUST[trust] ?? [trust, ""];
   const high = trust === "T3" || trust === "T4";
   return (
-    <Badge variant={high ? "brand" : trust === "T0" ? "danger" : "default"} title="Trust level">
-      {trust}
+    <Badge variant={high ? "brand" : trust === "T0" ? "danger" : "outline"} title={hint}>
+      {label}
     </Badge>
   );
+}
+
+function statusLabel(e: Entry) {
+  if (e.retired === "outdated") return "archived";
+  if (e.retired === "wrong") return "invalid";
+  return e.status;
 }
 
 export function EntryCard({ entry, writable, compact = false }: { entry: Entry; writable?: boolean; compact?: boolean }) {
   const r = entry.record;
   const qc = useQueryClient();
-  const [retracting, setRetracting] = useState(false);
+  const [asking, setAsking] = useState<"archive" | "invalidate" | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [reason, setReason] = useState("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["ledger"] });
+    qc.invalidateQueries({ queryKey: ["overview"] });
+    qc.invalidateQueries({ queryKey: ["node"] });
+  };
   const review = useMutation({
-    mutationFn: ({ action, why }: { action: "confirm" | "retract"; why?: string }) => api.review(r.id, action, why),
+    mutationFn: ({ action, why }: { action: ReviewAction; why?: string }) => api.review(r.id, action, why),
     onSuccess: () => {
-      setRetracting(false);
-      qc.invalidateQueries({ queryKey: ["ledger"] });
-      qc.invalidateQueries({ queryKey: ["overview"] });
-      qc.invalidateQueries({ queryKey: ["node"] });
+      setAsking(null);
+      setReason("");
+      refresh();
     },
   });
+  const erase = useMutation({ mutationFn: () => api.erase(r.id), onSuccess: () => (setDeleting(false), refresh()) });
   const retired = entry.status === "retracted" || entry.status === "superseded";
   const challenged = isChallenged(entry);
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
 
   return (
-    <Card className={cn("p-4", retired && "opacity-60")}>
+    <Card className={cn("p-4", retired && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <Badge variant="outline" className="capitalize">
           {r.kind}
         </Badge>
+        <Badge variant={STATUS[entry.status] ?? "outline"}>{statusLabel(entry)}</Badge>
         <TrustBadge trust={entry.trust} />
-        <Badge variant={STATUS[entry.status] ?? "outline"}>{entry.status}</Badge>
-        {challenged && <Badge variant="warning">challenged</Badge>}
+        {challenged && (
+          <Badge variant="warning" title="An agent proposed retiring this; a person decides">
+            challenged
+          </Badge>
+        )}
         {entry.verified === true && <ShieldCheck className="size-3.5 text-brand" aria-label="signature verified" />}
         {entry.verified === false && <ShieldAlert className="size-3.5 text-danger" aria-label="signature invalid" />}
         <span className="ml-auto">
-          {when(entry).slice(0, 10)} · {r.provenance.author}
+          <span className="font-medium text-foreground">{entry.by}</span> · {when(entry).slice(0, 10)}
         </span>
       </div>
       <h4 className="mt-2.5 font-medium leading-snug">{r.title}</h4>
-      {!compact && r.body && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
+      {!compact && r.body && r.body !== r.title && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
       {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0) && (
         <dl className="mt-3 grid gap-1 text-xs">
           {r.trigger && (
@@ -90,37 +121,69 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           </span>
         ))}
       </div>
-      {writable && !retired && !compact && (
+      {!compact && entry.history.length > 0 && (
+        <ol className="mt-3 flex flex-col gap-1 border-l pl-3 text-xs text-muted-foreground">
+          {entry.history.map((h) => (
+            <li key={h.id} className={cn(!h.counted && "italic")}>
+              <span className="font-medium text-foreground">{h.action}</span> by {h.who} · {h.at.slice(0, 10)}
+              {h.reason && <span>: {h.reason}</span>}
+              {!h.counted && <span> (waiting for a person)</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+      {writable && !compact && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {retracting ? (
+          {asking ? (
             <>
-              <Input
-                autoFocus
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Why is this no longer true?"
-                className="h-8 max-w-sm text-xs"
-              />
-              <Button size="sm" variant="outline" onClick={() => review.mutate({ action: "retract", why: reason })}>
-                Retract
+              <Input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={PROMPT[asking][1]} className="h-8 max-w-sm text-xs" />
+              <Button size="sm" variant="outline" disabled={!reason.trim() || review.isPending} onClick={() => review.mutate({ action: asking, why: reason })}>
+                {PROMPT[asking][0]}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setRetracting(false)}>
+              <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>
                 Cancel
               </Button>
             </>
           ) : (
             <>
-              <Button size="sm" variant="brand" onClick={() => review.mutate({ action: "confirm" })} disabled={review.isPending}>
-                <Check /> Confirm
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setRetracting(true)}>
-                <X /> Retract
+              {!retired && (
+                <>
+                  <Button size="sm" variant="brand" onClick={() => review.mutate({ action: "confirm" })} disabled={review.isPending} title="Still true">
+                    <Check /> Confirm
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setAsking("archive")} title="Was true, no longer applies; kept as history">
+                    <Archive /> Archive
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setAsking("invalidate")} title="Was never right; kept, marked invalid">
+                    <Ban /> Invalidate
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="ghost" className="ml-auto text-danger hover:text-danger" onClick={() => setDeleting(true)} title="Remove permanently">
+                <Trash2 /> Delete
               </Button>
             </>
           )}
-          {review.data && <span className="text-xs text-muted-foreground">{review.data.message}</span>}
+          {review.data && !review.data.ok && <span className="text-xs text-danger">{review.data.message}</span>}
         </div>
       )}
+      <Dialog open={deleting} onOpenChange={setDeleting}>
+        <DialogContent className="p-5">
+          <DialogTitle className="text-base font-semibold">Delete this record permanently?</DialogTitle>
+          <p className="mt-2 text-sm text-muted-foreground">
+            “{r.title}” and its review history are removed from the ledger for everyone. To keep it as history, archive or invalidate it instead.
+          </p>
+          {erase.data && !erase.data.ok && <p className="mt-2 text-xs text-danger">{erase.data.message}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDeleting(false)}>
+              Cancel
+            </Button>
+            <Button className="bg-danger text-white hover:bg-danger/90" disabled={erase.isPending} onClick={() => erase.mutate()}>
+              <Trash2 /> Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

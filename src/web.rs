@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 use crate::graph::{Node, Zoom};
-use crate::ledger::{AuthorKind, Entry, Provenance, Record, RelationKind, Status};
+use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
 mod assets {
@@ -48,6 +48,7 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/find", get(find))
         .route("/api/node", get(node))
         .route("/api/review", post(review))
+        .route("/api/erase", post(erase))
         .fallback(get(asset))
         .layer(axum::middleware::from_fn(local_only))
         .with_state(state);
@@ -485,7 +486,7 @@ async fn review(State(s): State<Shared>, Json(b): Json<ReviewBody>) -> impl Into
 
 async fn apply_review(s: &AppState, b: &ReviewBody) -> Result<String> {
     let root = s.data.root.as_deref().context("read-only UI")?;
-    let kind = RelationKind::parse(&b.action).context("unknown action")?;
+    let (kind, _) = crate::ledger::review_action(&b.action).context("unknown action")?;
     let ledger = crate::ledger::Ledger::open(root)?;
     let target = {
         let entries = s.entries.read().await;
@@ -498,18 +499,12 @@ async fn apply_review(s: &AppState, b: &ReviewBody) -> Result<String> {
     if matches!(kind, RelationKind::Retracts) && target.kind == crate::ledger::Kind::Relation {
         anyhow::bail!("relations cannot be retracted");
     }
-    let rec = Record::relation(
-        kind,
+    let rec = Record::review(
         &target,
+        &b.action,
         &b.reason,
-        Provenance {
-            author: AuthorKind::Human,
-            actor: crate::ledger::actor(),
-            source: "comind-web".into(),
-            agent: None,
-            session: None,
-        },
-    );
+        Provenance::human("comind-web"),
+    )?;
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
     let fresh = crate::ledger::derive(&records, &s.data.symbols);
@@ -519,6 +514,31 @@ async fn apply_review(s: &AppState, b: &ReviewBody) -> Result<String> {
         .map_or(Status::Active, |e| e.status);
     *s.entries.write().await = fresh;
     Ok(format!("{} → {:?}", target.title, status))
+}
+
+#[derive(Deserialize)]
+struct EraseBody {
+    id: String,
+}
+
+/// Permanently delete a record and the reviews about it.
+async fn erase(State(s): State<Shared>, Json(b): Json<EraseBody>) -> impl IntoResponse {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        let ledger = crate::ledger::Ledger::open(root)?;
+        let gone = ledger.erase(|r| r.id == b.id, true).await?;
+        anyhow::ensure!(!gone.is_empty(), "no such record");
+        let records = ledger.all().await?;
+        *s.entries.write().await = crate::ledger::derive(&records, &s.data.symbols);
+        anyhow::Ok(format!("deleted {} record(s)", gone.len()))
+    };
+    match run.await {
+        Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "message": format!("{e:#}")})),
+        ),
+    }
 }
 
 #[cfg(test)]

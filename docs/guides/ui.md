@@ -11,7 +11,8 @@ nothing else is needed.
 - **Contracts**: every route, queue, topic, bucket and table with its providers and consumers, filtered
   by type, by whether both sides are indexed, and by name.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
-  records) with confirm and retract, and the full timeline.
+  records) and the full timeline. Each record shows who wrote it and its review history; confirm,
+  archive, invalidate or delete it.
 - **Explorer**: one symbol with its neighbourhood graph, blast radius, contracts and recorded reasoning.
 - **Conventions**: measured conventions per repository and org-wide; add your own, edit or hide
   measured ones (hidden ones can be restored).
