@@ -22,9 +22,7 @@
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
 | `comind ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comind erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
-| `comind distill git <repo> \| mr <repo> [--iid N] [--list] [--dry-run]` | Propose ledger records (failed attempts, decisions, constraints, gotchas) from commit messages, or from the merged GitLab MR of the current commit (run per merge in CI, no backfill; `@mentions` removed; `--list` shows what would be sent). Needs `GITLAB_TOKEN` for `mr`. Proposals land at T1 in the review inbox. Agent sessions are never read |
 | `comind doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
-| `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |

@@ -26,4 +26,4 @@ Environment: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`, `COMI
 `COMIND_FORMAT`, `COMIND_SIGNING_KEY`, `COMIND_ALLOWED_SIGNERS`.
 
 Secrets stay in the environment: `OPENAI_API_KEY` for the LLM, the standard AWS variables or an SSO profile
-for `s3://` indexes, `GITLAB_TOKEN` for the merge-request distiller.
+for `s3://` indexes.

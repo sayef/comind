@@ -289,23 +289,6 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Propose ledger records from commit history (sends commit messages to the configured LLM;
-    /// proposals land at T1 for human review). Agent sessions are never read.
-    Distill {
-        #[command(subcommand)]
-        what: DistillWhat,
-    },
-    /// Seed the ledger from git history: reverts → failed attempts, commit trailers → records
-    Harvest {
-        /// Repository paths (already indexed)
-        #[arg(required = true)]
-        repos: Vec<String>,
-        /// How many first-parent commits to scan per repo
-        #[arg(long, default_value_t = 2000)]
-        limit: usize,
-        #[arg(long = "index-dir")]
-        index_dir: Option<String>,
-    },
     /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
     /// Check this machine's setup: index, ledger, hooks, keys, signing, SCIP indexers
     Doctor {
@@ -378,43 +361,6 @@ enum Cmd {
 enum CacheWhat {
     /// Bring the local mirror of a remote index up to date
     Refresh {
-        #[arg(long = "index-dir")]
-        index_dir: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum DistillWhat {
-    /// A merged GitLab MR (default: the one that merged the repo's HEAD commit, as in a
-    /// main-branch CI pipeline). Needs `GITLAB_TOKEN` (read_api) or `CI_JOB_TOKEN`
-    Mr {
-        /// Local checkout of the repo (for anchoring to indexed symbols)
-        repo: String,
-        /// GitLab project path, e.g. `group/sub/repo` (default: `CI_PROJECT_PATH`)
-        #[arg(long)]
-        project: Option<String>,
-        /// MR number; default: the merged MR containing `--commit`
-        #[arg(long)]
-        iid: Option<u64>,
-        /// Commit to look up (default: the repo's HEAD)
-        #[arg(long)]
-        commit: Option<String>,
-        /// Show what would be sent; no LLM call
-        #[arg(long)]
-        list: bool,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long = "index-dir")]
-        index_dir: Option<String>,
-    },
-    /// Commit messages of a repo (squash-merged MR descriptions, reverts with reasons)
-    Git {
-        repo: String,
-        /// How many first-parent commits to read
-        #[arg(long, default_value_t = 300)]
-        limit: usize,
-        #[arg(long)]
-        dry_run: bool,
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
@@ -647,40 +593,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Cmd::Distill {
-            what:
-                DistillWhat::Mr {
-                    repo,
-                    project,
-                    iid,
-                    commit,
-                    list,
-                    dry_run,
-                    index_dir,
-                },
-        } => cmd_distill_mr(
-            &repo,
-            project.or_else(|| std::env::var("CI_PROJECT_PATH").ok()),
-            iid,
-            commit,
-            list,
-            dry_run,
-            index_dir.as_deref(),
-        ),
-        Cmd::Distill {
-            what:
-                DistillWhat::Git {
-                    repo,
-                    limit,
-                    dry_run,
-                    index_dir,
-                },
-        } => cmd_distill_git(&repo, limit, dry_run, index_dir.as_deref()),
-        Cmd::Harvest {
-            repos,
-            limit,
-            index_dir,
-        } => cmd_harvest(&repos, limit, index_dir.as_deref()),
         Cmd::Preflight {
             repo,
             base,
@@ -1592,54 +1504,6 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
     }
 }
 
-fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
-    let cfg = comind::config::Config::load();
-    let symbols = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
-        Ok((s, _)) => s,
-        Err(e) => {
-            comind::ui::err(&format!("index the repos first: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let root = cfg.index_dir(from);
-    let mut existing: HashSet<String> = comind::ledger::all_blocking(&root)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| r.id)
-        .collect();
-    existing.extend(comind::ledger::erased_blocking(&root).unwrap_or_default());
-    let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
-    for path in repos {
-        let name = repo_name(path);
-        let history = match comind::git::all_history(Path::new(path), limit) {
-            Ok(h) => h,
-            Err(e) => {
-                comind::ui::warn(&format!("{name}: {e:#}"));
-                continue;
-            }
-        };
-        for rec in comind::ledger::harvest(&name, &history, &symbols) {
-            if existing.contains(&rec.id) {
-                continue;
-            }
-            match comind::ledger::put_blocking(&root, &rec) {
-                Ok(()) => *by_kind.entry(rec.kind.as_str()).or_default() += 1,
-                Err(e) => comind::ui::warn(&format!("{name}: {e:#}")),
-            }
-        }
-    }
-    let parts: Vec<String> = by_kind.iter().map(|(k, n)| format!("{n} {k}")).collect();
-    comind::ui::ok(&format!(
-        "harvested {}",
-        if parts.is_empty() {
-            "nothing new".into()
-        } else {
-            parts.join(", ")
-        }
-    ));
-    ExitCode::SUCCESS
-}
-
 /// Claude Code hook: emit `additionalContext` with ledger records relevant to the session/edit.
 /// Never blocks or approves anything; any failure prints nothing and exits 0.
 /// Graph symbols and ledger records for a hook: a remote (S3) index is read from its local
@@ -1676,79 +1540,6 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
         serde_json::Value::Array(a) => a.iter().find_map(|x| find_str(x, key)),
         _ => None,
     }
-}
-
-/// Run the distiller over bundles and record (or print) what passes validation.
-fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: &str) -> ExitCode {
-    let llm = match comind::llm::LlmClient::from_env() {
-        Ok(l) => l,
-        Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => {
-            comind::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let (mut kept, mut dropped) = (0, 0);
-    for b in bundles {
-        let out = match rt.block_on(comind::distill::run(&llm, b)) {
-            Ok(o) => o,
-            Err(e) => {
-                comind::ui::err(&format!("distiller: {e:#}"));
-                return ExitCode::FAILURE;
-            }
-        };
-        for (rec, why) in out {
-            if let Some(why) = why {
-                dropped += 1;
-                comind::ui::note(&format!("dropped `{}`: {why}", rec.title));
-                continue;
-            }
-            kept += 1;
-            println!(
-                "- [{}] {} — evidence {}",
-                rec.kind.as_str(),
-                rec.title,
-                rec.evidence.join(", ")
-            );
-            if dry_run {
-                // Enough to judge the proposal without recording it.
-                if !rec.body.is_empty() {
-                    println!("    {}", rec.body);
-                }
-                if let Some(t) = &rec.trigger {
-                    println!("    relevant when: {t}");
-                }
-                let at: Vec<String> = rec
-                    .anchors
-                    .iter()
-                    .map(|a| format!("{}:{}", a.path, a.name))
-                    .collect();
-                if !at.is_empty() {
-                    println!("    about: {}", at.join(", "));
-                }
-            } else {
-                if let Err(e) = comind::ledger::put_blocking(root, &rec) {
-                    comind::ui::err(&format!("not recorded: {e:#}"));
-                }
-            }
-        }
-    }
-    let (i, o) = llm.token_usage();
-    let verb = if dry_run {
-        "proposed"
-    } else {
-        "recorded for review (T1)"
-    };
-    comind::ui::ok(&format!(
-        "{kept} {verb}, {dropped} dropped · tokens {i} in / {o} out"
-    ));
-    ExitCode::SUCCESS
 }
 
 fn cmd_doctor(from: Option<&str>) -> ExitCode {
@@ -1815,12 +1606,7 @@ fn cmd_doctor(from: Option<&str>) -> ExitCode {
     check(
         set("OPENAI_API_KEY") || cfg.llm_base_url().is_some(),
         &format!("LLM configured (model {})", cfg.llm_model()),
-        "no LLM key: enrichment, flows and the distiller are off (indexing works without)",
-    );
-    check(
-        comind::gitlab::token_from_env().is_some() || set("CI_JOB_TOKEN"),
-        "GitLab token present (MR distiller)",
-        "no GITLAB_TOKEN: `comind distill mr` unavailable",
+        "no LLM key: enrichment and flows are off (indexing works without)",
     );
     check(
         comind::signing::signing_key().is_some(),
@@ -1851,175 +1637,6 @@ fn cmd_doctor(from: Option<&str>) -> ExitCode {
         comind::ui::ok("all good");
     }
     ExitCode::SUCCESS
-}
-
-fn cmd_distill_mr(
-    repo: &str,
-    project: Option<String>,
-    iid: Option<u64>,
-    commit: Option<String>,
-    list: bool,
-    dry_run: bool,
-    from: Option<&str>,
-) -> ExitCode {
-    let Some(project) = project else {
-        comind::ui::err("pass --project group/repo (or run in GitLab CI)");
-        return ExitCode::FAILURE;
-    };
-    let name = std::fs::canonicalize(repo)
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-        .unwrap_or_else(|| repo_name(repo));
-    let client = match comind::gitlab::Client::from_env(&project) {
-        Ok(c) => c,
-        Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let commit = match (iid, commit) {
-        (Some(_), _) => None,
-        (None, Some(c)) => Some(c),
-        (None, None) => match comind::git::head_commit(Path::new(repo)) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                comind::ui::err(&format!("{e:#}"));
-                return ExitCode::FAILURE;
-            }
-        },
-    };
-    let cfg = comind::config::Config::load();
-    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
-        comind::ui::err("no index; run `comind link` first");
-        return ExitCode::FAILURE;
-    };
-    let root = cfg.index_dir(from);
-    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
-    let entries = comind::ledger::derive(&records, &symbols);
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => {
-            comind::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let fetched = rt.block_on(async {
-        let mrs = match (iid, &commit) {
-            (Some(i), _) => vec![client.merge_request(i).await?],
-            (None, Some(sha)) => client.merged_for_commit(sha).await?,
-            _ => Vec::new(),
-        };
-        let mut out = Vec::new();
-        for mr in mrs {
-            let notes = client.notes(mr.iid).await?;
-            let files = client.files(mr.iid).await.unwrap_or_default();
-            out.push((mr, notes, files));
-        }
-        anyhow::Ok(out)
-    });
-    let fetched = match fetched {
-        Ok(x) => x,
-        Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let mut bundles = Vec::new();
-    for (mr, notes, files) in &fetched {
-        let used = records
-            .iter()
-            .any(|r| r.evidence.contains(&format!("mr:!{}", mr.iid)));
-        let touched = comind::distill::touched(&symbols, Some(&name), files);
-        let why_not = if used {
-            Some("already distilled")
-        } else if !comind::gitlab::eligible(mr, notes) {
-            Some("no discussion or description to learn from")
-        } else if touched.is_empty() {
-            Some("touches no indexed code")
-        } else {
-            None
-        };
-        if let Some(w) = why_not {
-            comind::ui::note(&format!("skip !{} {}: {w}", mr.iid, mr.title));
-            continue;
-        }
-        if list {
-            println!(
-                "- !{} {} ({} comments, {} indexed symbols)",
-                mr.iid,
-                mr.title,
-                notes.iter().filter(|n| !n.system).count(),
-                touched.len()
-            );
-            continue;
-        }
-        let spans = comind::gitlab::spans(mr, notes, 1);
-        bundles.push(comind::distill::bundle(spans, touched, &entries, "gitlab"));
-    }
-    if fetched.is_empty() {
-        comind::ui::ok("no merged MR for this commit");
-    }
-    if list || bundles.is_empty() {
-        return ExitCode::SUCCESS;
-    }
-    distill_and_record(&bundles, dry_run, &root)
-}
-
-fn cmd_distill_git(repo: &str, limit: usize, dry_run: bool, from: Option<&str>) -> ExitCode {
-    let name = std::fs::canonicalize(repo)
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-        .unwrap_or_else(|| repo_name(repo));
-    let history = match comind::git::history(Path::new(repo), limit) {
-        Ok(h) => h,
-        Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let cfg = comind::config::Config::load();
-    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
-        comind::ui::err("no index; run `comind link` first");
-        return ExitCode::FAILURE;
-    };
-    let root = cfg.index_dir(from);
-    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
-    // Commits already cited by a record are not sent again.
-    let cited: HashSet<String> = records
-        .iter()
-        .flat_map(|r| r.evidence.iter())
-        .filter_map(|e| e.strip_prefix("commit:"))
-        .map(|s| s.chars().take(10).collect())
-        .collect();
-    let entries = comind::ledger::derive(&records, &symbols);
-    let spans = comind::distill::commits(&history, &cited);
-    if spans.is_empty() {
-        comind::ui::ok("no new commits with an explanatory message");
-        return ExitCode::SUCCESS;
-    }
-    let by_sha: HashMap<String, &comind::git::CommitFiles> = history
-        .iter()
-        .map(|c| (c.sha.chars().take(10).collect(), c))
-        .collect();
-    let bundles: Vec<comind::distill::Bundle> = spans
-        .chunks(8)
-        .map(|chunk| {
-            let files: Vec<String> = chunk
-                .iter()
-                .filter_map(|s| s.cite.strip_prefix("commit:"))
-                .filter_map(|sha| by_sha.get(sha))
-                .flat_map(|c| c.changed.iter().cloned())
-                .collect();
-            let touched = comind::distill::touched(&symbols, Some(&name), &files);
-            comind::distill::bundle(chunk.to_vec(), touched, &entries, "git")
-        })
-        .collect();
-    comind::ui::note(&format!(
-        "{} commit(s) in {} batch(es) go to the configured LLM",
-        spans.len(),
-        bundles.len()
-    ));
-    distill_and_record(&bundles, dry_run, &root)
 }
 
 fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {

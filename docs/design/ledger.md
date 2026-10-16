@@ -1,6 +1,9 @@
 # Comind Ledger — design plan
 
 > Status: **plan, not implemented**. Date: 2026-10-13. Sequencing: [roadmap.md](roadmap.md) (Track B).
+> Decision 2026-10-16: no automatic sources. Git harvest and the MR distiller were removed; records
+> come from people (`comind remember`) and agents (MCP, hooks). Sections on harvest and the distiller
+> are historical.
 > One line: *the code graph says what breaks; the ledger says why it is this way, what was
 > already tried, and what must not be done — anchored to symbols, across repos, never stale.*
 

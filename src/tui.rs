@@ -448,7 +448,7 @@ impl App {
         let text = match self.entries().get(selected) {
             Some(e) => crate::ledger::markdown("record", &[e]),
             None => {
-                "no ledger records — add some with `comind remember` or `comind harvest`".into()
+                "no ledger records — add some with `comind remember` or through MCP".into()
             }
         };
         f.render_widget(

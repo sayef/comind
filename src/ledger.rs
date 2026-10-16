@@ -96,8 +96,8 @@ pub struct Relation {
 pub enum AuthorKind {
     Human,
     Agent,
+    /// Legacy (removed git harvest and distiller); kept so older records still read.
     Harvested,
-    /// Proposed by the distiller from a transcript or commits; T1 until a human confirms.
     Distilled,
 }
 
@@ -465,16 +465,6 @@ impl Ledger {
         Ok(out)
     }
 
-    /// Ids of erased records.
-    pub async fn erased(&self) -> Result<std::collections::HashSet<String>> {
-        let dir = self.root.clone().join("erased");
-        let metas: Vec<_> = self.store.list(Some(&dir)).try_collect().await?;
-        Ok(metas
-            .into_iter()
-            .filter_map(|m| m.location.filename().map(str::to_string))
-            .collect())
-    }
-
     pub async fn all(&self) -> Result<Vec<Record>> {
         Ok(self.keyed().await?.into_iter().map(|(_, r)| r).collect())
     }
@@ -510,10 +500,7 @@ impl Ledger {
             .filter(|(_, r)| ids.contains(r.id.as_str()))
             .collect();
         if apply {
-            for (key, r) in &doomed {
-                // An id-only tombstone keeps harvest from re-creating the record.
-                let stone = self.root.clone().join("erased").join(r.id.as_str());
-                self.store.put(&stone, PutPayload::new()).await?;
+            for (key, _) in &doomed {
                 self.store.delete(key).await?;
             }
             self.compact().await?;
@@ -598,129 +585,6 @@ impl Ledger {
     }
 }
 
-/// Records derived from commit history: reverts become `attempt`s, trailers
-/// (`Constraint:`, `Rejected:`, `Decision:`, `Gotcha:`, `Intent:`) become typed records.
-/// Ids are deterministic so re-harvesting never duplicates.
-pub fn harvest(repo: &str, history: &[crate::git::CommitFiles], symbols: &[Symbol]) -> Vec<Record> {
-    let files: HashMap<&str, &Symbol> = symbols
-        .iter()
-        .filter(|s| s.kind == SymbolKind::File && s.repo.0 == repo)
-        .map(|s| (s.file_path.as_str(), s))
-        .collect();
-    let subjects: HashMap<&str, &str> = history
-        .iter()
-        .map(|c| (c.sha.as_str(), c.subject.as_str()))
-        .collect();
-    let prov = Provenance {
-        author: AuthorKind::Harvested,
-        actor: "git".into(),
-        source: "git".into(),
-        agent: None,
-        session: None,
-    };
-    let mut out = Vec::new();
-    for c in history {
-        let anchors: Vec<Anchor> = c
-            .changed
-            .iter()
-            .filter_map(|p| files.get(p.as_str()))
-            .take(4)
-            .map(|s| Anchor::of(s))
-            .collect();
-        if anchors.is_empty() {
-            continue;
-        }
-        let short = &c.sha[..c.sha.len().min(10)];
-        let make = |kind: Kind, n: usize, title: &str| {
-            let mut r = Record::new(kind, title, anchors.clone(), prov.clone());
-            r.id = uuid::Uuid::new_v5(
-                &uuid::Uuid::NAMESPACE_OID,
-                format!("comind-harvest:{repo}:{}:{n}", c.sha).as_bytes(),
-            )
-            .to_string();
-            r.evidence.push(format!("commit:{short}"));
-            // When it happened (`created` is when it was recorded).
-            if let Some(t) = chrono::DateTime::from_timestamp(c.time, 0) {
-                r.fields.insert(
-                    "at".into(),
-                    serde_json::Value::String(t.format("%Y-%m-%d").to_string()),
-                );
-            }
-            r
-        };
-        // A manual revert ("Reverted the X changes") without git's marker.
-        let manual = c.subject.to_ascii_lowercase();
-        if !c.message.contains("This reverts commit ")
-            && (manual.starts_with("revert ") || manual.starts_with("reverted "))
-        {
-            let what = c.subject.split_once(' ').map_or("", |(_, w)| w).trim();
-            let title: String = format!("Reverted: {what}").chars().take(160).collect();
-            let mut r = make(Kind::Attempt, 0, &title);
-            r.fields.insert(
-                "outcome".into(),
-                serde_json::Value::String("reverted".into()),
-            );
-            r.body = c.message.trim().chars().take(1500).collect();
-            out.push(r);
-        }
-        // `git revert`: "Revert \"…\"" + "This reverts commit <sha>."
-        if let Some(original) = c
-            .message
-            .split("This reverts commit ")
-            .nth(1)
-            .and_then(|r| r.split(|ch: char| !ch.is_ascii_hexdigit()).next())
-            .filter(|s| s.len() >= 7)
-        {
-            let what = subjects
-                .iter()
-                .find(|(sha, _)| sha.starts_with(original))
-                .map(|(_, subj)| subj.to_string())
-                .unwrap_or_else(|| {
-                    c.subject
-                        .trim_start_matches("Revert ")
-                        .trim_matches('"')
-                        .to_string()
-                });
-            let title: String = format!("Reverted: {what}").chars().take(160).collect();
-            let mut r = make(Kind::Attempt, 0, &title);
-            r.fields.insert(
-                "outcome".into(),
-                serde_json::Value::String("reverted".into()),
-            );
-            r.evidence
-                .push(format!("commit:{}", &original[..original.len().min(10)]));
-            r.body = c.message.trim().chars().take(1500).collect();
-            out.push(r);
-        }
-        for (n, line) in c.message.lines().enumerate() {
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let kind = match key.trim() {
-                "Constraint" | "Directive" => Kind::Constraint,
-                "Rejected" | "Decision" => Kind::Decision,
-                "Gotcha" => Kind::Gotcha,
-                "Intent" => Kind::Intent,
-                _ => continue,
-            };
-            let value = value.trim();
-            if value.is_empty() {
-                continue;
-            }
-            let title: String = value.chars().take(160).collect();
-            let mut r = make(kind, n + 1, &title);
-            if key.trim() == "Rejected" {
-                r.fields
-                    .insert("rejected".into(), serde_json::Value::String(value.into()));
-            }
-            r.body = c.subject.clone();
-            out.push(r);
-        }
-    }
-    out.retain(|r| r.validate().is_ok());
-    out
-}
-
 /// Blocking helpers for the CLI.
 pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
     let ledger = Ledger::open(index_root)?;
@@ -732,11 +596,6 @@ pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
 pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {
     let ledger = Ledger::open(index_root)?;
     runtime()?.block_on(ledger.compact())
-}
-
-pub fn erased_blocking(index_root: &str) -> Result<std::collections::HashSet<String>> {
-    let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.erased())
 }
 
 pub fn erase_blocking(
@@ -1307,8 +1166,6 @@ mod tests {
             .map(|r| r.title)
             .collect();
         assert_eq!(left, vec!["other".to_string()]);
-        let stones = ledger.erased().await.unwrap();
-        assert!(stones.contains(&mine.id) && stones.contains(&confirm.id));
         assert_eq!(ledger.snapshot().await.unwrap().len(), 1);
         let db = lancedb::connect(&ledger.tables).execute().await.unwrap();
         let tbl = db.open_table(SNAPSHOT).execute().await.unwrap();

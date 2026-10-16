@@ -12,11 +12,9 @@ pub mod checks;
 pub mod config;
 pub mod configvals;
 pub mod conventions;
-pub mod distill;
 
 pub mod facts;
 pub mod git;
-pub mod gitlab;
 pub mod lang;
 pub mod manifests;
 pub mod packages;

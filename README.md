@@ -118,7 +118,7 @@ Add to your MCP client (e.g. Claude Code):
 - **Before a change:** `ripple` (blast radius, across repos and service contracts), `context_pack` (minimal read-set + known constraints), `preflight` (constraints, dead ends, contracts, missing companions for a planned edit), `contracts` (HTTP routes, queues, buckets, tables and who uses them), `guide` (measured conventions and recipes).
 - **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
 
-Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, the distiller, signing and privacy are described in the **[docs](https://comind.pages.dev/)** ([guides](docs/guides/)).
+Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, signing and privacy are described in the **[docs](https://comind.pages.dev/)** ([guides](docs/guides/)).
 
 ## Commands
 
@@ -144,9 +144,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind review <id> <confirm\|retract\|supersede\|dispute>` | Act on a ledger record |
 | `comind ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comind erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
-| `comind distill git <repo> \| mr <repo> [--iid N] [--list] [--dry-run]` | Propose ledger records (failed attempts, decisions, constraints, gotchas) from commit messages, or from the merged GitLab MR of the current commit (run per merge in CI, no backfill; `@mentions` removed; `--list` shows what would be sent). Needs a GitLab token for `mr` (`GITLAB_TOKEN`, `GITLAB_API_PRIVATE_TOKEN` or `GITLAB_PRIVATE_TOKEN`; `GITLAB_API_ENDPOINT` for self-hosted). Proposals land at T1 in the review inbox. Agent sessions are never read |
 | `comind doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
-| `comind harvest <repos…>` | Seed the ledger from git history (reverts, commit trailers) |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
@@ -259,7 +257,7 @@ Environment overrides: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MOD
 Engine: parse → resolve (tree-sitter + SCIP) → index → graph → embed → enrich → search → serve,
 git-incremental at repo and org level. On top: the service-contract graph (HTTP, queues, topics,
 buckets, tables, Terraform), conventions and recipes, the reasoning ledger (records, staleness,
-harvest, MR distiller, self-enforcing checks, signing, erasure), preflight, and terminal and web
+self-enforcing checks, signing, erasure), preflight, and terminal and web
 UIs. Progress and open items: [`docs/design/roadmap.md`](docs/design/roadmap.md).
 
 ## Development

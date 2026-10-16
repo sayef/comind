@@ -80,7 +80,6 @@ jobs:
           ENRICH=""
           [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich"
           COMIND_MAX_ENRICH=200 "$BIN" link repos/*/ --index-dir "$INDEX_DIR" --embed --incremental $ENRICH
-          "$BIN" harvest repos/*/ --index-dir "$INDEX_DIR"
           "$BIN" ledger --compact --index-dir "$INDEX_DIR"
 
       - name: Upload index artifact

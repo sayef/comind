@@ -88,32 +88,17 @@ pub fn changed_files(repo_path: &Path, base_sha: &str) -> Result<ChangeSet> {
 pub struct CommitFiles {
     pub sha: String,
     pub subject: String,
-    /// Full commit message (for revert markers and trailers).
-    pub message: String,
-    /// Commit time, seconds since the Unix epoch.
-    pub time: i64,
     pub added: Vec<String>,
     pub changed: Vec<String>,
 }
 
 /// The last `limit` first-parent commits with their added and changed files.
 pub fn history(repo_path: &Path, limit: usize) -> Result<Vec<CommitFiles>> {
-    walk(repo_path, limit, true)
-}
-
-/// The last `limit` commits on any branch reachable from HEAD (side branches included).
-pub fn all_history(repo_path: &Path, limit: usize) -> Result<Vec<CommitFiles>> {
-    walk(repo_path, limit, false)
-}
-
-fn walk(repo_path: &Path, limit: usize, first_parent: bool) -> Result<Vec<CommitFiles>> {
     let repo = Repository::open(repo_path)
         .with_context(|| format!("open git repo at {}", repo_path.display()))?;
     let mut walk = repo.revwalk()?;
     walk.push_head()?;
-    if first_parent {
-        walk.simplify_first_parent()?;
-    }
+    walk.simplify_first_parent()?;
     let mut out = Vec::new();
     for oid in walk.take(limit) {
         let commit = repo.find_commit(oid?)?;
@@ -128,8 +113,6 @@ fn walk(repo_path: &Path, limit: usize, first_parent: bool) -> Result<Vec<Commit
                 .flatten()
                 .unwrap_or_default()
                 .to_string(),
-            message: commit.message().unwrap_or_default().to_string(),
-            time: commit.time().seconds(),
             added: Vec::new(),
             changed: Vec::new(),
         };

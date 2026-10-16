@@ -136,31 +136,6 @@ comind-preflight:
 After linking, the scheduled index job should also run, against the same `--index-dir`:
 
 ```bash
-comind harvest <repos…> --index-dir "$COMIND_INDEX"     # reverts and commit trailers → records (no LLM)
 comind ledger --compact --index-dir "$COMIND_INDEX"     # fold new records into the snapshot
 comind ledger --check --index-dir "$COMIND_INDEX"       # optional: fail on violated `must` rules
 ```
-
-Harvested ids are deterministic, so re-running it never duplicates records.
-
-
-## Distil the merged MR (forward only)
-
-On each pipeline of the default branch, `comind distill mr` finds the merge request that merged
-the commit and, if it has a human discussion or a real description, asks the configured LLM for
-at most three ledger records (failed attempts, decisions, constraints, gotchas). `@mentions` are
-removed before sending; proposals land at T1 and need a human confirmation before agents see
-them. Past MRs are not mined.
-
-```yaml
-comind-distill:
-  stage: .post
-  rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' }]
-  allow_failure: true
-  script:
-    - comind distill mr . --index-dir "$COMIND_INDEX"
-```
-
-Variables: `GITLAB_TOKEN` (project access token, `read_api`; the job token cannot read MR
-discussions) and `OPENAI_API_KEY` (or `COMIND_LLM_BASE_URL` for a self-hosted model). Use
-`--list` to see what would be sent without calling the LLM.

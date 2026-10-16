@@ -35,8 +35,8 @@ anchored to symbols with a fingerprint of the code they describe:
 |---|---|
 | T4 | a constraint whose check passes on the current code |
 | T3 | written or confirmed by a person |
-| T2 | an agent or git history, with evidence |
-| T1 | an agent without evidence, or a distiller proposal |
+| T2 | an agent, with evidence |
+| T1 | an agent without evidence |
 | T0 | untrusted (failed signature, unsafe content) |
 
 Hooks and context packs only use T2 and above.

@@ -18,8 +18,8 @@ All notable changes to this project are documented here. The format follows
 - Package versions and version skew across repos (`comind packages`).
 - Conventions and co-change recipes (`comind conventions`, MCP `guide`).
 - Reasoning ledger: typed records anchored to symbols, stored in your own store, with derived staleness,
-  trust levels, review (`remember`, `why`, `review`, `ledger`), harvest from git, a distiller for merged
-  MRs and commits, self-enforcing constraint checks, SSH signing, compaction and erasure.
+  trust levels, review (`remember`, `why`, `review`, `ledger`), self-enforcing constraint checks, SSH
+  signing, compaction and erasure. Records come from people and from agents through MCP and hooks.
 - `comind preflight` for uncommitted changes and MR pipelines; Claude Code and generic agent hooks with a
   local mirror for remote indexes; `comind doctor`.
 - Terminal UI (`comind ui`) and local web UI (`comind ui --web`): a React app embedded in the binary,

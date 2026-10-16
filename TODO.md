@@ -5,7 +5,6 @@ Open items: things to try, measure or set up. Remove an item once it is done. Th
 
 ## To try
 
-- **Merge-request distiller in CI.** Tried on skill-graph !669 and !673 (2 good proposals, 1 correct "nothing"); next, the CI job in the pilot repositories.
 - **Team pilot** on two or three repositories: shared index on S3 from CI, hooks and MCP for a few
   developers, preflight in their MR pipelines.
 
