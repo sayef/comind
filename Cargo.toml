@@ -36,7 +36,7 @@ anyhow = "1"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net"] }
 futures = "0.3"
 rayon = "1"
-ignore = "=0.4.23"
+ignore = "=0.4.33"
 petgraph = "0.8.3"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 tree-sitter = "0.27"
