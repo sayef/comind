@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/sayef/comind/releases/tag/v0.4.0) - 2026-10-16
+
 ### Added
 
 - Evaluation harness (`comind eval graph`) with a fixture org and gold edges, run as a test.
