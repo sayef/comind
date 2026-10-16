@@ -1,16 +1,25 @@
-import Graph from "graphology";
-import forceAtlas2 from "graphology-layout-forceatlas2";
-import { useEffect, useRef } from "react";
-import Sigma from "sigma";
-import { drawDiscNodeLabel, type NodeHoverDrawingFunction } from "sigma/rendering";
+import { Graph, layout } from "@dagrejs/dagre";
+import {
+  Background,
+  BackgroundVariant,
+  Controls,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+  type Edge,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { useMemo, useState } from "react";
 import { useTheme } from "@/components/theme";
-import { CONTRACTS, repoHue } from "@/lib/utils";
+import { CONTRACTS, cn, repoHue } from "@/lib/utils";
 
 export interface GraphNode {
   id: string;
   label: string;
   repo: string;
-  size?: number;
 }
 
 export interface GraphEdge {
@@ -30,145 +39,164 @@ interface Props {
   className?: string;
 }
 
-function hslToHex(h: number, s: number, l: number) {
-  const a = (s / 100) * Math.min(l / 100, 1 - l / 100);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const c = l / 100 - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * c)
-      .toString(16)
-      .padStart(2, "0");
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
+type Data = { label: string; repo: string; focus: boolean; dim: boolean; more: boolean; showRepo: boolean; large: boolean };
+
+/** Neighbours shown per side of the focus before the rest fold into a "+N more" node. */
+const PER_SIDE = 12;
+const HEIGHT = 44;
+
+const color = (repo: string) => (repo === CONTRACTS ? "var(--color-warning)" : `hsl(${repoHue(repo)} 55% 52%)`);
+const isContract = (kind: string) => kind === "contract" || kind === "counterpart";
+
+function SymbolNode({ data }: NodeProps<Node<Data>>) {
+  return (
+    <div
+      className={cn(
+        "flex h-11 max-w-[260px] cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 text-xs shadow-xs transition-opacity",
+        data.large && "text-sm font-medium",
+        data.focus && "border-brand font-semibold ring-2 ring-brand/30",
+        data.more && "cursor-default border-dashed text-muted-foreground",
+        data.dim && "opacity-25",
+      )}
+    >
+      <Handle type="target" position={data.large ? Position.Top : Position.Left} className="!pointer-events-none !opacity-0" />
+      {!data.more && <span className="size-2.5 shrink-0 rounded-full" style={{ background: color(data.repo) }} />}
+      <div className="min-w-0">
+        <div className={cn("truncate", data.repo === CONTRACTS && "font-mono")}>{data.label}</div>
+        {data.showRepo && <div className="truncate text-[10px] font-normal text-muted-foreground">{data.repo}</div>}
+      </div>
+      <Handle type="source" position={data.large ? Position.Bottom : Position.Right} className="!pointer-events-none !opacity-0" />
+    </div>
+  );
 }
 
-/** Sigma's hover box is hard-coded white; this one follows the theme. */
-const hoverDrawer =
-  (dark: boolean): NodeHoverDrawingFunction =>
-  (ctx, data, settings) => {
-    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
-    const pad = 3;
-    const h = settings.labelSize + 2 * pad;
-    const r = Math.max(data.size, h / 2) + pad;
-    const w = data.label ? ctx.measureText(data.label).width + r + 2 * pad : 0;
-    ctx.fillStyle = dark ? "#1f2633" : "#ffffff";
-    ctx.shadowColor = dark ? "rgba(0,0,0,0.6)" : "rgba(15,23,42,0.25)";
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(data.x, data.y, r, 0, Math.PI * 2);
-    if (w) ctx.roundRect(data.x, data.y - h / 2, w, h, 4);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    drawDiscNodeLabel(ctx, data, settings);
+const nodeTypes = { symbol: SymbolNode };
+
+/** One edge per pair; a pair counts as a contract only when nothing else links it. */
+function merge(edges: GraphEdge[]) {
+  const by = new Map<string, GraphEdge>();
+  for (const e of edges) {
+    const k = `${e.src}->${e.dst}`;
+    const prev = by.get(k);
+    if (!prev) by.set(k, { ...e });
+    else {
+      prev.weight = (prev.weight ?? 1) + (e.weight ?? 1);
+      if (!isContract(e.kind)) prev.kind = e.kind;
+    }
+  }
+  return [...by.values()];
+}
+
+/** Keep the focus and up to PER_SIDE dependents and dependencies; fold the rest. */
+function cap(nodes: GraphNode[], all: GraphEdge[], focus?: string) {
+  const edges = merge(all);
+  if (!focus || nodes.length <= PER_SIDE * 2 + 1) return { nodes, edges };
+  const incoming = edges.filter((e) => e.dst === focus).map((e) => e.src);
+  const outgoing = edges.filter((e) => e.src === focus).map((e) => e.dst);
+  const keep = new Set([focus, ...incoming.slice(0, PER_SIDE), ...outgoing.slice(0, PER_SIDE)]);
+  const kept = nodes.filter((n) => keep.has(n.id));
+  const keptEdges = edges.filter((e) => keep.has(e.src) && keep.has(e.dst));
+  const fold = (ids: string[], side: "in" | "out") => {
+    const rest = ids.length - PER_SIDE;
+    if (rest <= 0) return;
+    const id = `more:${side}`;
+    kept.push({ id, label: `+${rest} more ${side === "in" ? "dependents" : "dependencies"}`, repo: "" });
+    keptEdges.push(side === "in" ? { src: id, dst: focus, kind: "more" } : { src: focus, dst: id, kind: "more" });
   };
+  fold(incoming, "in");
+  fold(outgoing, "out");
+  return { nodes: kept, edges: keptEdges };
+}
 
-const nodeColor = (repo: string) => (repo === CONTRACTS ? "#d9a52b" : hslToHex(repoHue(repo), 55, 52));
+function place(nodes: GraphNode[], edges: GraphEdge[], wide: boolean) {
+  const g = new Graph();
+  g.setGraph({ rankdir: wide ? "TB" : "LR", nodesep: wide ? 48 : 14, ranksep: wide ? 50 : 110, marginx: 16, marginy: 16 });
+  g.setDefaultEdgeLabel(() => ({}));
+  const width = (n: GraphNode) => Math.min(260, Math.max(120, 44 + Math.max(n.label.length, n.repo.length * 0.8) * (wide ? 8 : 6.6)));
+  for (const n of nodes) g.setNode(n.id, { width: width(n), height: HEIGHT });
+  for (const e of edges) if (e.src !== e.dst) g.setEdge(e.src, e.dst);
+  layout(g);
+  const at = new Map(
+    nodes.map((n) => {
+      const p = g.node(n.id);
+      return [n.id, { x: p.x - p.width / 2, y: p.y - HEIGHT / 2 }];
+    }),
+  );
+  return { at, height: g.graph().height ?? 0 };
+}
 
-/** A WebGL graph: ForceAtlas2 layout, nodes coloured by repository, contracts in amber. */
+/** A dependency graph, dependents before dependencies: left to right around a focus, top down for the org. */
 export function GraphView({ nodes, edges, focus, highlight, onPick, className }: Props) {
-  const container = useRef<HTMLDivElement>(null);
-  const sigma = useRef<Sigma | null>(null);
-  const hovered = useRef<string | null>(null);
-  const lit = useRef<Set<string> | null>(null);
   const { theme } = useTheme();
-  const pick = useRef(onPick);
-  pick.current = onPick;
+  const [hovered, setHovered] = useState<string | null>(null);
+  const shown = useMemo(() => cap(nodes, edges, focus), [nodes, edges, focus]);
+  const { at: positions, height: laid } = useMemo(() => place(shown.nodes, shown.edges, !focus), [shown, focus]);
+  const focusRepo = shown.nodes.find((n) => n.id === focus)?.repo;
+  const maxW = Math.max(1, ...shown.edges.map((e) => e.weight ?? 1));
+  const height = focus ? Math.min(680, Math.max(300, laid + 60)) : undefined;
 
-  useEffect(() => {
-    if (!container.current) return;
-    const dark = theme === "dark";
-    const g = new Graph({ type: "directed", multi: false });
-    nodes.forEach((n, i) => {
-      const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2;
-      g.addNode(n.id, {
-        label: n.label,
-        x: n.id === focus ? 0 : Math.cos(angle) * 10,
-        y: n.id === focus ? 0 : Math.sin(angle) * 10,
-        size: n.size ?? (n.id === focus ? 12 : 6),
-        color: nodeColor(n.repo),
-        repo: n.repo,
-      });
-    });
-    const maxW = Math.max(1, ...edges.map((e) => e.weight ?? 1));
-    for (const e of edges) {
-      if (!g.hasNode(e.src) || !g.hasNode(e.dst) || g.hasEdge(e.src, e.dst)) continue;
-      g.addEdge(e.src, e.dst, {
-        kind: e.kind,
-        size: e.weight ? 1 + (Math.log(e.weight + 1) / Math.log(maxW + 1)) * 4 : 1.2,
-        color: e.kind === "contract" || e.kind === "counterpart" ? (dark ? "#b8892a" : "#e0b65a") : dark ? "#55627a" : "#b7c0cf",
-        type: "arrow",
-      });
-    }
-    if (g.order > 1) {
-      forceAtlas2.assign(g, {
-        iterations: 300,
-        settings: { ...forceAtlas2.inferSettings(g), gravity: 1.2, scalingRatio: 12, barnesHutOptimize: g.order > 400 },
-      });
-    }
+  const flowNodes: Node<Data>[] = shown.nodes.map((n) => ({
+    id: n.id,
+    type: "symbol",
+    position: positions.get(n.id) ?? { x: 0, y: 0 },
+    data: {
+      label: n.label,
+      repo: n.repo,
+      focus: n.id === focus,
+      more: n.id.startsWith("more:"),
+      dim: !!highlight && !highlight.has(n.id) && n.id !== focus,
+      showRepo: !!n.repo && n.repo !== CONTRACTS && !!focus && n.repo !== focusRepo,
+      large: !focus,
+    },
+  }));
 
-    const renderer = new Sigma(g, container.current, {
-      renderEdgeLabels: false,
-      defaultEdgeType: "arrow",
-      labelFont: "Inter, ui-sans-serif, system-ui",
-      labelSize: 12,
-      labelWeight: "500",
-      labelColor: { color: dark ? "#d5dbe5" : "#2b3445" },
-      labelRenderedSizeThreshold: 5,
-      zIndex: true,
-      stagePadding: 48,
-      defaultDrawNodeHover: hoverDrawer(dark),
-      nodeReducer: (node, data) => {
-        const on = lit.current;
-        const hover = hovered.current;
-        const res = { ...data };
-        if (node === focus || node === hover) {
-          res.highlighted = true;
-          res.zIndex = 2;
-        }
-        if (on && !on.has(node) && node !== focus) {
-          res.color = dark ? "#2f3747" : "#e3e7ee";
-          res.label = "";
-          res.zIndex = 0;
-        }
-        if (hover && node !== hover && !g.areNeighbors(node, hover)) {
-          res.label = "";
-        }
-        return res;
-      },
-      edgeReducer: (edge, data) => {
-        const on = lit.current;
-        const [s, t] = g.extremities(edge);
-        const res = { ...data };
-        if (on && (!(on.has(s) || s === focus) || !(on.has(t) || t === focus))) {
-          res.color = dark ? "#262d3a" : "#eef1f5";
-        }
-        const hover = hovered.current;
-        if (hover && s !== hover && t !== hover) res.color = dark ? "#2a3140" : "#edf0f4";
-        return res;
-      },
+  const flowEdges: Edge[] = shown.edges
+    .filter((e) => e.src !== e.dst)
+    .map((e) => {
+      const touched = hovered === e.src || hovered === e.dst;
+      const lit = !highlight || ((highlight.has(e.src) || e.src === focus) && (highlight.has(e.dst) || e.dst === focus));
+      const stroke = touched ? "var(--color-brand)" : isContract(e.kind) ? "var(--color-warning)" : "var(--color-muted-foreground)";
+      const width = e.weight ? 1 + (Math.log(e.weight + 1) / Math.log(maxW + 1)) * 3 : 1.25;
+      return {
+        id: `${e.src}->${e.dst}`,
+        source: e.src,
+        target: e.dst,
+        style: {
+          stroke,
+          strokeWidth: touched ? width + 0.75 : width,
+          strokeDasharray: e.kind === "more" ? "4 4" : undefined,
+          opacity: lit ? (hovered && !touched ? 0.25 : 0.8) : 0.08,
+        },
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 14, height: 14 },
+        zIndex: touched ? 1 : 0,
+      };
     });
-    renderer.on("enterNode", ({ node }) => {
-      hovered.current = node;
-      if (container.current) container.current.style.cursor = "pointer";
-      renderer.refresh({ skipIndexation: true });
-    });
-    renderer.on("leaveNode", () => {
-      hovered.current = null;
-      if (container.current) container.current.style.cursor = "default";
-      renderer.refresh({ skipIndexation: true });
-    });
-    renderer.on("clickNode", ({ node }) => pick.current?.(node));
-    sigma.current = renderer;
-    return () => {
-      renderer.kill();
-      sigma.current = null;
-    };
-  }, [nodes, edges, focus, theme]);
 
-  useEffect(() => {
-    lit.current = highlight ?? null;
-    sigma.current?.refresh({ skipIndexation: true });
-  }, [highlight]);
-
-  return <div ref={container} className={className ?? "h-[420px] w-full"} />;
+  return (
+    <div className={cn("relative", className ?? "h-[420px] w-full")} style={height ? { height } : undefined}>
+      <ReactFlow
+        key={shown.nodes.map((n) => n.id).join("|")}
+        nodes={flowNodes}
+        edges={flowEdges}
+        nodeTypes={nodeTypes}
+        colorMode={theme === "dark" ? "dark" : "light"}
+        fitView
+        fitViewOptions={{ padding: 0.12, maxZoom: 1.2 }}
+        minZoom={0.15}
+        zoomOnScroll={false}
+        panOnScroll={false}
+        preventScrolling={false}
+        zoomOnDoubleClick={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        onNodeClick={(_, n) => !n.id.startsWith("more:") && onPick?.(n.id)}
+        onNodeMouseEnter={(_, n) => setHovered(n.id)}
+        onNodeMouseLeave={() => setHovered(null)}
+        style={{ background: "transparent" }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
+        <Controls showInteractive={false} position="bottom-right" />
+      </ReactFlow>
+    </div>
+  );
 }

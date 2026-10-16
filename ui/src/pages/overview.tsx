@@ -66,7 +66,7 @@ export function OverviewPage() {
     () =>
       map
         ? {
-            nodes: map.nodes.map((n) => ({ id: n.id, label: n.name, repo: n.repo, size: 10 })),
+            nodes: map.nodes.map((n) => ({ id: n.id, label: n.name, repo: n.repo })),
             edges: map.edges.map((e) => ({ src: e.src, dst: e.dst, kind: e.kind, weight: e.weight })),
           }
         : null,
@@ -124,10 +124,10 @@ export function OverviewPage() {
                 edges={graph.edges}
                 highlight={highlight}
                 onPick={(id) => setSelected((s) => (s === id ? null : id))}
-                className="h-[440px] w-full"
+                className="h-[520px] w-full"
               />
             ) : (
-              <Skeleton className="h-[440px] rounded-none" />
+              <Skeleton className="h-[520px] rounded-none" />
             )}
           </div>
           {selected && reach && (

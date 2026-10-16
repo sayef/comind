@@ -375,10 +375,13 @@ impl CodeGraph {
     /// Providers and consumers of a contract node.
     fn sides(&self, contract: NodeIndex) -> (Vec<Node>, Vec<Node>) {
         let (mut p, mut c) = (Vec::new(), Vec::new());
+        let (mut seen_p, mut seen_c) = (HashSet::new(), HashSet::new());
         for e in self.g.edges_directed(contract, Incoming) {
             if PROVIDES.contains(e.weight()) {
-                p.push(self.node_of(e.source()));
-            } else if is_contract_role(e.weight()) {
+                if seen_p.insert(e.source()) {
+                    p.push(self.node_of(e.source()));
+                }
+            } else if is_contract_role(e.weight()) && seen_c.insert(e.source()) {
                 c.push(self.node_of(e.source()));
             }
         }
@@ -431,14 +434,18 @@ impl CodeGraph {
                 }
             }
         }
+        let mut roles = HashSet::new();
+        let me = self.g[focus].sym.id.render();
         for e in self.g.edges_directed(focus, Outgoing) {
-            if is_contract_role(e.weight()) {
+            if is_contract_role(e.weight()) && roles.insert((e.weight().clone(), e.target())) {
                 let provider = PROVIDES.contains(e.weight());
                 let (providers, consumers) = self.sides(e.target());
+                let mut counterparts = if provider { consumers } else { providers };
+                counterparts.retain(|n| n.id != me);
                 z.contracts.push(ContractRole {
                     role: e.weight().clone(),
                     contract: self.node_of(e.target()),
-                    counterparts: if provider { consumers } else { providers },
+                    counterparts,
                 });
             }
         }
