@@ -61,7 +61,7 @@ jobs:
           workspaces: comind
 
       - name: Restore previous index (enables incremental)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/comind-index/org
           key: comind-index-${{ github.run_id }}
