@@ -31,6 +31,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::{schemars, tool, tool_router, ServiceExt};
 use serde::{Deserialize, Serialize};
 
+/// Ledger records and when they were read.
+type Cached = (std::time::Instant, Vec<crate::ledger::Record>);
+
 /// Per-symbol LLM enrichment keyed by rendered symbol id: `(summary, generated_queries)`.
 type Enrichment = HashMap<String, (String, Vec<String>)>;
 
@@ -46,6 +49,10 @@ pub struct ComindServer {
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
     embedder: Arc<Option<Embedder>>,
     uri: Arc<String>,
+    /// Index root for the ledger and conventions (the graph may be a local mirror).
+    root: Arc<String>,
+    /// Ledger records with when they were read; re-read at most once a minute.
+    records: Arc<tokio::sync::Mutex<Option<Cached>>>,
     /// Manifest/lockfile rows for internal-dependency answers.
     packages: Arc<Vec<crate::manifests::PackageRow>>,
     /// Measured conventions (per repo + org baseline), computed at startup from stored facts.
@@ -57,13 +64,31 @@ pub struct ComindServer {
 }
 
 impl ComindServer {
-    /// The index root holding `_graph` and `_ledger`.
+    /// The index root holding `_ledger` and `_conventions`.
     fn ledger_root(&self) -> String {
-        self.uri
-            .trim_end_matches('/')
-            .strip_suffix("/_graph")
-            .unwrap_or(&self.uri)
-            .to_string()
+        self.root.to_string()
+    }
+
+    async fn records(&self) -> Vec<crate::ledger::Record> {
+        let mut cached = self.records.lock().await;
+        if let Some((at, r)) = cached.as_ref() {
+            if at.elapsed() < std::time::Duration::from_secs(60) {
+                return r.clone();
+            }
+        }
+        let r = match crate::ledger::Ledger::open(&self.ledger_root()) {
+            Ok(l) => l.all().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        *cached = Some((std::time::Instant::now(), r.clone()));
+        r
+    }
+
+    /// Show a record this server just wrote without waiting for the next re-read.
+    async fn wrote(&self, rec: &crate::ledger::Record) {
+        if let Some((_, r)) = self.records.lock().await.as_mut() {
+            r.push(rec.clone());
+        }
     }
 
     /// The calling agent: `COMIND_AGENT`, else the client name from the MCP handshake.
@@ -76,10 +101,7 @@ impl ComindServer {
 
     /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
     async fn known(&self, ids: &[String], limit: usize) -> Vec<String> {
-        let Ok(ledger) = crate::ledger::Ledger::open(&self.ledger_root()) else {
-            return Vec::new();
-        };
-        let records = ledger.all().await.unwrap_or_default();
+        let records = self.records().await;
         if records.is_empty() {
             return Vec::new();
         }
@@ -133,6 +155,7 @@ impl ComindServer {
         crate::ledger::Ledger::open(&self.ledger_root())?
             .put(&rec)
             .await?;
+        self.wrote(&rec).await;
         Ok(format!(
             "recorded {} `{}` (id `{}`); it is unconfirmed until a human reviews it",
             kind.as_str(),
@@ -147,7 +170,7 @@ impl ComindServer {
         by: crate::ledger::Provenance,
     ) -> anyhow::Result<String> {
         let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
-        let records = ledger.all().await?;
+        let records = self.records().await;
         let target = records
             .iter()
             .find(|r| r.id == p.id || r.id.starts_with(&p.id))
@@ -155,6 +178,7 @@ impl ComindServer {
         let reason = p.reason.as_deref().unwrap_or_default();
         let rec = crate::ledger::Record::review(target, &p.action, reason, by)?;
         ledger.put(&rec).await?;
+        self.wrote(&rec).await;
         Ok(format!("{}: `{}`", p.action, target.title))
     }
 
@@ -745,10 +769,7 @@ impl ComindServer {
             let md = format!("_{}_", dto.message);
             return self.reply(&dto, md);
         };
-        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
-            Ok(l) => l.all().await.unwrap_or_default(),
-            Err(_) => Vec::new(),
-        };
+        let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
         let entries = crate::ledger::derive(&records, &symbols);
         let about = crate::ledger::about(&entries, &ids);
@@ -790,10 +811,7 @@ impl ComindServer {
                 });
             }
         }
-        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
-            Ok(l) => l.all().await.unwrap_or_default(),
-            Err(_) => Vec::new(),
-        };
+        let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
         let entries = crate::ledger::derive(&records, &symbols);
         let findings = crate::checks::run(&entries, &symbols, &self.edges, &self.packages);
@@ -1384,15 +1402,14 @@ fn md_guide(d: &GuideDto) -> String {
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
 /// client disconnects. `markdown` controls whether tool results are handed back as markdown
 /// text (default) or raw JSON.
-pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
+/// Serve the graph at `uri` (a local mirror for a remote index); the ledger lives under `root`.
+pub async fn serve_stdio(uri: &str, root: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let mut conventions = match crate::index::read_facts(uri).await {
         Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
         _ => Vec::new(),
     };
     conventions.extend(crate::index::read_recipes(uri).await.unwrap_or_default());
-    let root = uri.trim_end_matches('/');
-    let root = root.strip_suffix("/_graph").unwrap_or(root);
     let manual = match crate::conventions::Store::open(root) {
         Ok(s) => s.all().await.unwrap_or_default(),
         Err(_) => Vec::new(),
@@ -1449,6 +1466,8 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
+        root: Arc::new(root.to_string()),
+        records: Arc::new(tokio::sync::Mutex::new(None)),
         packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
         conventions: Arc::new(conventions),
         edges: Arc::new(edges),

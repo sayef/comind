@@ -239,10 +239,7 @@ struct AtQ {
 }
 
 fn graph_uri(s: &AppState) -> Option<String> {
-    s.data
-        .root
-        .as_ref()
-        .map(|r| format!("{}/_graph", r.trim_end_matches('/')))
+    s.data.graph_dir.clone()
 }
 
 async fn versions(State(s): State<Shared>) -> Json<Value> {

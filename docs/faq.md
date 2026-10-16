@@ -12,7 +12,10 @@ or indexer is present, its answers are used as well.
 agents through MCP and hooks.
 
 **How fresh is the index?** As fresh as the last build. CI builds a new version on each merge; readers
-switch atomically, and hooks on a remote index read a local mirror that refreshes in the background.
+switch atomically. For a remote index, the MCP server, the web UI and hooks read a local copy (under
+`~/.cache/comind`) that is synced when they start and refreshed when older than `cache_ttl_secs`
+(five minutes); only new files are downloaded. Ledger and convention changes are written straight
+to the remote store.
 
 **What if a record is wrong?** Retract it (`comind review <id> retract`). Records follow the code: changed
 code marks them stale, deleted code orphans them, and agents only see trusted ones.

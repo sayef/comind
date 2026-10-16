@@ -29,6 +29,8 @@ comind init-hooks claude                                # Claude Code hooks to p
 - **MCP tools**: navigation (`search`, `find`, `zoom`, `thread`, `flow`), impact (`ripple`,
   `context_pack`, `preflight`, `contracts`), conventions (`guide`) and the ledger (`why`,
   `remember`, `review`).
-- **Hooks** inject a short digest at session start and the records about a file just before an
-  agent edits it (about 60 ms; a remote index is read from a local mirror refreshed in the
-  background). Other agents: `comind hook generic pre-edit` prints plain markdown.
+- **Hooks** inject the records about the repository at session start and about a file just before
+  an agent edits it (about 60 ms).
+- **A local copy**: `comind serve`, `comind ui` and hooks read a remote index from a copy under
+  `~/.cache/comind`, synced at start and when older than `cache_ttl_secs`, so tool calls take
+  milliseconds instead of S3 round trips. Writes go to the bucket. Other agents: `comind hook generic pre-edit` prints plain markdown.
