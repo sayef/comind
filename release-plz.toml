@@ -1,6 +1,7 @@
 [workspace]
-# Publish only when a release PR is merged, not on every push to main.
-release_always = false
+# Publishing is started by hand (Release-plz → Run workflow); it then publishes whatever version on main
+# is not published yet, even if other commits landed after the release PR.
+release_always = true
 pr_labels = ["release"]
 # The library is comind's engine, not a stable public API; the CLI and MCP tools are the interface.
 semver_check = false

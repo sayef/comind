@@ -57,6 +57,13 @@ trait; contract linking in `src/resolve/contracts.rs`.
   context unless it is grounded and trusted.
 - Measure before optimising, and include the numbers in the pull request.
 
+## Releasing
+
+Every push to `main` opens or updates a release pull request (version bump and changelog entry). Merging
+it publishes nothing. To release, run the **Release-plz** workflow by hand (Actions → Release-plz → Run
+workflow, or `gh workflow run release-plz.yml`): it publishes the crate, tags `v<version>`, creates the
+GitHub release, and the Release workflow attaches the binaries.
+
 ## Commit messages
 
 One short line in the imperative mood ("Add Express route detection"). The pull request description says
