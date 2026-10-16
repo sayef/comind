@@ -2,18 +2,17 @@
 name = "comind"
 version = "0.3.0"
 edition = "2021"
-rust-version = "1.94"
+rust-version = "1.94.1"
 license = "MIT"
 repository = "https://github.com/sayef/comind"
 authors = ["Saiful Islam"]
 description = "Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary."
 readme = "README.md"
 homepage = "https://github.com/sayef/comind"
+documentation = "https://docs.rs/comind"
 keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
 categories = ["development-tools", "command-line-utilities"]
-# Dev-only files that shouldn't ship in the published crate (rust-toolchain.toml would otherwise
-# force our pinned toolchain on anyone running `cargo install`).
-exclude = ["rust-toolchain.toml", ".github", ".pre-commit-config.yaml", "docs", "assets", "scripts"]
+exclude = [".github", ".pre-commit-config.yaml", "docs", "assets", "scripts", "tests/", "examples/"]
 
 # Library (the engine, one module per stage) + the `comind` binary. main.rs uses the lib as `comind::`.
 [lib]
@@ -33,22 +32,40 @@ indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
 console = "0.16" # styled status lines + TTY detection
 comfy-table = "7" # unicode result tables
 anyhow = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net"] }
 futures = "0.3"
 rayon = "1"
 ignore = "=0.4.23"
 petgraph = "0.8.3"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
-tree-sitter = "0.25"
-tree-sitter-python = "0.23"
+tree-sitter = "0.27"
+tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
 model2vec-rs = "0.2.1"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
-lancedb = { version = "0.31.0", default-features = false, features = ["aws"] }
-lance-index = "=8.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
+lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
+lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
 rig-core = "0.36"
-rmcp = { version = "2.2.0", features = ["server", "transport-io"] } # MCP server
+rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
+blake3 = "1"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-rust = "0.24"
+scip = "0.10"
+protobuf = "=3.7.2"
+sqlparser = "0.63"
+object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
+uuid = { version = "1.24", features = ["v7", "serde", "v5"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
+crossterm = "0.29"
+globset = "0.4"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+yaml-rust2 = "0.10"
+hcl-rs = "0.18"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 
 [profile.release]
 lto = "thin"
@@ -62,3 +79,10 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "graph"
+harness = false

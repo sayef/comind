@@ -1,0 +1,5 @@
+{
+  "name": "web-app",
+  "version": "0.1.0",
+  "dependencies": { "@acme/ui-kit": "^2.0.0" }
+}

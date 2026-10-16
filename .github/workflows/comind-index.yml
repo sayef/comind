@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout comind (the engine)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: comind
 
@@ -80,9 +80,11 @@ jobs:
           ENRICH=""
           [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich"
           COMIND_MAX_ENRICH=200 "$BIN" link repos/*/ --index-dir "$INDEX_DIR" --embed --incremental $ENRICH
+          "$BIN" harvest repos/*/ --index-dir "$INDEX_DIR"
+          "$BIN" ledger --compact --index-dir "$INDEX_DIR"
 
       - name: Upload index artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: comind-index
           # Upload the index dir (contains _graph) so consumers point --index-dir at it.

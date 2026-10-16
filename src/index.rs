@@ -1,15 +1,17 @@
 //! Comind index — the versioned LanceDB store (local dir or S3).
 //!
-//! Tables: `symbols`, `edges`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
+//! Tables: `symbols`, `edges`, `file_facts`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
 //! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
 //! is the atomic "latest" pointer. S3 uses the standard AWS environment for credentials/region.
 
 use std::sync::Arc;
 
+use crate::facts::FileFacts;
 use crate::model::{Edge, Symbol};
 use anyhow::{Context, Result};
 use lancedb::arrow::arrow_array::{
-    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray, UInt32Array,
+    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
+    UInt32Array, UInt64Array,
 };
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use lancedb::table::AddDataMode;
@@ -40,6 +42,9 @@ fn symbols_schema() -> Arc<Schema> {
         Field::new("col_end", DataType::UInt32, false),
         Field::new("signature", DataType::Utf8, true),
         Field::new("docstring", DataType::Utf8, true),
+        Field::new("fp_sig", DataType::UInt64, true),
+        Field::new("fp_body", DataType::UInt64, true),
+        Field::new("fp_shape", DataType::UInt64, true),
     ]))
 }
 
@@ -105,6 +110,15 @@ fn symbols_batch(symbols: &[Symbol]) -> Result<RecordBatch> {
         )),
         Arc::new(StringArray::from_iter(
             symbols.iter().map(|s| s.docstring.clone()),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.sig)),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.body)),
+        )),
+        Arc::new(UInt64Array::from_iter(
+            symbols.iter().map(|s| s.fingerprint.map(|f| f.shape)),
         )),
     ];
     RecordBatch::try_new(symbols_schema(), arrays).context("build symbols batch")
@@ -179,7 +193,9 @@ pub async fn latest_versions(uri: &str) -> Result<(u64, u64)> {
 
 // ---- reading the persisted graph back into core types ----------------------------------
 
-use crate::model::{EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind};
+use crate::model::{
+    EdgeKind, Fingerprint, GlobalSymbolId, Language, Position, Range, RepoId, SymbolKind,
+};
 use futures::TryStreamExt;
 use lancedb::arrow::arrow_array::Array;
 use lancedb::query::ExecutableQuery;
@@ -202,6 +218,7 @@ fn kind_from_str(s: &str) -> SymbolKind {
         "Import" => SymbolKind::Import,
         "TypeAlias" => SymbolKind::TypeAlias,
         "Process" => SymbolKind::Process,
+        "Contract" => SymbolKind::Contract,
         _ => SymbolKind::Variable,
     }
 }
@@ -269,13 +286,26 @@ fn u32_col<'a>(
 /// Load the persisted org graph back into core types. This is the fast consumer path:
 /// `serve`/`explore` load once from Lance (local mmap or S3) instead of re-parsing.
 pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
+    read_graph_at(uri, None).await
+}
+
+/// The graph at given `(symbols, edges)` table versions, or the latest.
+pub async fn read_graph_at(uri: &str, at: Option<(u64, u64)>) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     let db = lancedb::connect(uri).execute().await?;
+    let open = |name: &'static str, v: Option<u64>| {
+        let db = &db;
+        async move {
+            let t = db.open_table(name).execute().await?;
+            if let Some(v) = v {
+                t.checkout(v).await?;
+            }
+            anyhow::Ok(t)
+        }
+    };
 
     // symbols
     let mut symbols = Vec::new();
-    let mut st = db
-        .open_table("symbols")
-        .execute()
+    let mut st = open("symbols", at.map(|a| a.0))
         .await?
         .query()
         .execute()
@@ -303,6 +333,12 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
         );
         let sig = str_col(&b, "signature")?;
         let doc = str_col(&b, "docstring")?;
+        // Absent in indexes written before fingerprints existed.
+        let fp = |name: &str| {
+            b.column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<UInt64Array>())
+        };
+        let (fs, fb, fsh) = (fp("fp_sig"), fp("fp_body"), fp("fp_shape"));
         for i in 0..b.num_rows() {
             symbols.push(Symbol {
                 id: GlobalSymbolId {
@@ -329,15 +365,21 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
                 },
                 signature: (!sig.is_null(i)).then(|| sig.value(i).to_string()),
                 docstring: (!doc.is_null(i)).then(|| doc.value(i).to_string()),
+                fingerprint: match (fs, fb, fsh) {
+                    (Some(a), Some(c), Some(d)) if !a.is_null(i) => Some(Fingerprint {
+                        sig: a.value(i),
+                        body: c.value(i),
+                        shape: d.value(i),
+                    }),
+                    _ => None,
+                },
             });
         }
     }
 
     // edges
     let mut edges = Vec::new();
-    let mut st = db
-        .open_table("edges")
-        .execute()
+    let mut st = open("edges", at.map(|a| a.1))
         .await?
         .query()
         .execute()
@@ -373,17 +415,50 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
         "Contains" => EdgeKind::Contains,
         "Imports" => EdgeKind::Imports,
         "Calls" => EdgeKind::Calls,
+        "Instantiates" => EdgeKind::Instantiates,
         "Inherits" => EdgeKind::Inherits,
         "Implements" => EdgeKind::Implements,
         "References" => EdgeKind::References,
         "Defines" => EdgeKind::Defines,
         "Uses" => EdgeKind::Uses,
         "ParticipatesIn" => EdgeKind::ParticipatesIn,
+        "Serves" => EdgeKind::Serves,
+        "Consumes" => EdgeKind::Consumes,
+        "Publishes" => EdgeKind::Publishes,
+        "Subscribes" => EdgeKind::Subscribes,
+        "Reads" => EdgeKind::Reads,
+        "Writes" => EdgeKind::Writes,
         _ => EdgeKind::References,
     }
 }
 
 /// Blocking wrapper for [`read_graph`].
+/// Graph versions as `(symbols version, edges version, UTC time)`, oldest first. Each graph
+/// write commits both tables, so the n-th versions of each belong together.
+pub async fn graph_versions(uri: &str) -> Result<Vec<(u64, u64, String)>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let s = db
+        .open_table("symbols")
+        .execute()
+        .await?
+        .list_versions()
+        .await?;
+    let e = db
+        .open_table("edges")
+        .execute()
+        .await?
+        .list_versions()
+        .await?;
+    Ok(s.iter()
+        .zip(e.iter())
+        .map(|(a, b)| (a.version, b.version, a.timestamp.to_rfc3339()))
+        .collect())
+}
+
+pub fn graph_versions_blocking(uri: &str) -> Result<Vec<(u64, u64, String)>> {
+    runtime()?.block_on(graph_versions(uri))
+}
+
 pub fn read_graph_blocking(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     runtime()?.block_on(read_graph(uri))
 }
@@ -847,6 +922,161 @@ pub fn write_style_guide_blocking(uri: &str, rows: &[(String, String)]) -> Resul
 /// Blocking wrapper for [`read_style_guide`].
 pub fn read_style_guide_blocking(uri: &str) -> Result<Vec<(String, String)>> {
     runtime()?.block_on(read_style_guide(uri))
+}
+
+/// Persist per-file parse facts (JSON per file) so incremental runs can re-resolve everything.
+pub async fn write_facts(uri: &str, facts: &[FileFacts]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("path", DataType::Utf8, false),
+        Field::new("facts", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = facts
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize facts")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|f| f.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|f| f.path.as_str()),
+            )),
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build file_facts batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "file_facts", batch).await?;
+    Ok(())
+}
+
+/// Read persisted facts; `None` for indexes written before facts were stored.
+pub async fn read_facts(uri: &str) -> Result<Option<Vec<FileFacts>>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("file_facts").execute().await else {
+        return Ok(None);
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "facts")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse facts row")?);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// Persist derived conventions (e.g. history recipes), JSON per row.
+pub async fn write_recipes(uri: &str, rows: &[crate::conventions::Convention]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("row", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = rows
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize recipes")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build recipes batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "recipes", batch).await?;
+    Ok(())
+}
+
+pub async fn read_recipes(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("recipes").execute().await else {
+        return Ok(Vec::new());
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "row")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse recipe row")?);
+        }
+    }
+    Ok(out)
+}
+
+pub fn write_recipes_blocking(uri: &str, rows: &[crate::conventions::Convention]) -> Result<()> {
+    runtime()?.block_on(write_recipes(uri, rows))
+}
+
+pub fn read_recipes_blocking(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
+    runtime()?.block_on(read_recipes(uri))
+}
+
+/// Persist manifest/lockfile package rows (JSON per row).
+pub async fn write_packages(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("row", DataType::Utf8, false),
+    ]));
+    let json: Vec<String> = rows
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()
+        .context("serialize packages")?;
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.repo.as_str()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(json)),
+        ],
+    )
+    .context("build packages batch")?;
+    let db = lancedb::connect(uri).execute().await?;
+    write_versioned(&db, "packages", batch).await?;
+    Ok(())
+}
+
+pub async fn read_packages(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
+    let db = lancedb::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("packages").execute().await else {
+        return Ok(Vec::new());
+    };
+    let mut st = tbl.query().execute().await?;
+    let mut out = Vec::new();
+    while let Some(b) = st.try_next().await? {
+        let col = str_col(&b, "row")?;
+        for i in 0..b.num_rows() {
+            out.push(serde_json::from_str(col.value(i)).context("parse package row")?);
+        }
+    }
+    Ok(out)
+}
+
+pub fn write_packages_blocking(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
+    runtime()?.block_on(write_packages(uri, rows))
+}
+
+pub fn read_packages_blocking(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
+    runtime()?.block_on(read_packages(uri))
+}
+
+pub fn write_facts_blocking(uri: &str, facts: &[FileFacts]) -> Result<()> {
+    runtime()?.block_on(write_facts(uri, facts))
+}
+
+pub fn read_facts_blocking(uri: &str) -> Result<Option<Vec<FileFacts>>> {
+    runtime()?.block_on(read_facts(uri))
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime> {

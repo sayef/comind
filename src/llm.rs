@@ -27,6 +27,9 @@ pub struct LlmClient {
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
     client: openai::CompletionsClient,
     model: String,
+    // OpenAI's own API takes `max_completion_tokens` (required by newer models); compatible
+    // servers (Ollama, vLLM, LiteLLM) expect `max_tokens`.
+    openai_native: bool,
     // Cumulative token usage across all calls (for live progress + a final total).
     input_tokens: Arc<AtomicU64>,
     output_tokens: Arc<AtomicU64>,
@@ -48,6 +51,8 @@ impl LlmClient {
         let model = cfg.llm_model();
         // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
         // (LiteLLM proxy, Ollama, vLLM, Azure) with COMIND_LLM_BASE_URL.
+        let openai_native = cfg.llm_base_url().is_none()
+            && std::env::var("OPENAI_BASE_URL").map_or(true, |u| u.contains("api.openai.com"));
         let client = match cfg.llm_base_url() {
             Some(base) => {
                 let key =
@@ -68,6 +73,7 @@ impl LlmClient {
         Ok(Self {
             client,
             model,
+            openai_native,
             input_tokens: Arc::new(AtomicU64::new(0)),
             output_tokens: Arc::new(AtomicU64::new(0)),
         })
@@ -84,12 +90,17 @@ impl LlmClient {
     async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String> {
         // A Rig "agent" with a preamble is just a system-prompted completion — no tools/RAG.
         // Use the completion API (not `prompt()`) so we get token `usage` back from the provider.
-        let agent = self
-            .client
-            .agent(&self.model)
-            .preamble(system)
-            .max_tokens(max_tokens as u64)
-            .build();
+        let builder = self.client.agent(&self.model).preamble(system);
+        // Reasoning models spend part of the completion budget thinking, hence the headroom.
+        let agent = if self.openai_native {
+            builder
+                .additional_params(serde_json::json!({
+                    "max_completion_tokens": (max_tokens as u64 * 4).max(4000)
+                }))
+                .build()
+        } else {
+            builder.max_tokens(max_tokens as u64).build()
+        };
         let resp = agent
             .completion(user, Vec::<rig::completion::Message>::new())
             .await
@@ -174,6 +185,11 @@ impl LlmClient {
             "Repository: {repo}\nSection: {title}\nWhat to cover: {guidance}\n\n# Evidence\n\n{evidence}"
         );
         self.complete(system, &user, 900).await
+    }
+
+    /// Distiller call: JSON proposals for ledger records (see [`crate::distill`]).
+    pub async fn distill(&self, system: &str, user: &str) -> Result<String> {
+        self.complete(system, user, 1500).await
     }
 
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a

@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comind</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+  --accent: #2f6fdb; --accent-ink: #ffffff; --good: #2e8b57; --warn: #b7791f; --bad: #c0392b;
+  --chip: #efeeea; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413; --panel: #1d1d1b; --ink: #ecebe6; --muted: #9a9a93; --line: #2f2f2c;
+    --accent: #6b9cf0; --accent-ink: #0d1b33; --good: #5cc28a; --warn: #e0a84a; --bad: #ef6b5e;
+    --chip: #2a2a27;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 24px; padding: 12px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2;
+  flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { border: 0; background: none; color: var(--muted); padding: 6px 12px; border-radius: 6px;
+  font: inherit; cursor: pointer; }
+nav button.on { background: var(--chip); color: var(--ink); }
+main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+section { display: none; } section.on { display: block; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.card b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.card span { color: var(--muted); font-size: 12px; }
+h2 { font-size: 14px; margin: 20px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 12px; }
+tr:last-child td { border-bottom: 0; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.chip { display: inline-block; background: var(--chip); border-radius: 4px; padding: 0 6px; margin: 1px 2px 1px 0; font-size: 12px; }
+a.sym { color: var(--accent); cursor: pointer; text-decoration: none; }
+a.sym:hover { text-decoration: underline; }
+.muted { color: var(--muted); }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+input, select { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--ink); min-width: 0; }
+input[type=search] { flex: 1 1 260px; }
+button.act { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button.act.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.entry { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.entry h3 { margin: 4px 0 6px; font-size: 15px; }
+.entry .meta { font-size: 12px; color: var(--muted); }
+.st-active, .st-moved { color: var(--good); } .st-stale { color: var(--warn); }
+.st-orphaned, .st-retracted, .st-superseded { color: var(--bad); }
+.explore { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; }
+.results { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; max-height: 75vh; overflow: auto; }
+.results div { padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.results div:hover { background: var(--chip); }
+.detail { min-width: 0; }
+canvas { width: 100%; height: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: block; }
+.legend { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.toast { position: fixed; bottom: 16px; right: 16px; background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 6px; display: none; }
+@media (max-width: 760px) {
+  main { padding: 16px; }
+  .explore { grid-template-columns: 1fr; }
+  .results { max-height: 240px; }
+  th, td { word-break: break-word; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Comind</h1>
+  <nav id="tabs">
+    <button data-t="overview" class="on">Overview</button>
+    <button data-t="contracts">Contracts</button>
+    <button data-t="ledger">Ledger</button>
+    <button data-t="explorer">Explorer</button>
+    <button data-t="conventions">Conventions</button>
+  </nav>
+</header>
+<main>
+  <section id="overview" class="on"></section>
+  <section id="contracts">
+    <div class="toolbar">
+      <input type="search" id="cq" placeholder="Filter contracts, providers, consumers">
+      <select id="ct"><option value="">All types</option><option>http</option><option>sqs</option>
+        <option>sns</option><option>s3</option><option>table</option></select>
+      <label class="muted"><input type="checkbox" id="cd"> dangling only</label>
+    </div>
+    <div id="clist"></div>
+  </section>
+  <section id="ledger">
+    <div class="toolbar">
+      <input type="search" id="lq" placeholder="Filter records">
+      <select id="ls"><option value="">All statuses</option><option>active</option><option>stale</option>
+        <option>moved</option><option>orphaned</option><option>superseded</option><option>retracted</option></select>
+      <select id="lo"><option value="review">Needs review first</option><option value="time">Timeline (when it happened)</option></select>
+    </div>
+    <div id="llist"></div>
+  </section>
+  <section id="explorer">
+    <div class="toolbar"><input type="search" id="eq" placeholder="Find a symbol, file or contract (e.g. get_user, http:GET)"></div>
+    <div class="explore">
+      <div class="results" id="eres"><div class="muted">Type to search.</div></div>
+      <div class="detail" id="edet"><p class="muted">Pick a symbol to see its neighbourhood, blast radius, contracts and recorded reasoning.</p></div>
+    </div>
+  </section>
+  <section id="conventions">
+    <div class="toolbar"><select id="vr"></select></div>
+    <div id="vlist"></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = (p, o) => fetch(p, o).then(r => r.json());
+let state = {writable: false, contracts: null, ledger: null};
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2600);
+}
+function symLink(n) {
+  return `<a class="sym" data-id="${esc(n.id)}" title="${esc(n.location)}">${esc(n.repo === "_contracts" ? n.name : n.repo + ":" + n.name)}</a>`;
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest("a.sym");
+  if (a) { e.preventDefault(); openNode(a.dataset.id); }
+});
+
+function show(tab) {
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === tab));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("on", s.id === tab));
+  if (tab === "contracts" && !state.contracts) loadContracts();
+  if (tab === "ledger" && !state.ledger) loadLedger();
+  if (tab === "conventions" && !$("#vr").options.length) loadConventions();
+  try { localStorage.setItem("comind.tab", tab); } catch (_) {}
+}
+$("#tabs").addEventListener("click", e => { if (e.target.dataset.t) show(e.target.dataset.t); });
+
+async function loadOverview() {
+  const o = await api("/api/overview");
+  state.writable = o.writable;
+  const led = Object.entries(o.ledger).map(([k, v]) => `<span class="chip st-${k}">${esc(k)} ${v}</span>`).join("") || '<span class="muted">no records</span>';
+  $("#overview").innerHTML = `
+    <div class="cards">
+      <div class="card"><b>${o.repos.length}</b><span>repos</span></div>
+      <div class="card"><b>${o.symbols.toLocaleString()}</b><span>symbols</span></div>
+      <div class="card"><b>${o.edges.toLocaleString()}</b><span>edges</span></div>
+      <div class="card"><b>${o.cross_repo_edges.toLocaleString()}</b><span>cross-repo edges</span></div>
+      <div class="card"><b>${o.linked_contracts} / ${o.contracts}</b><span>contracts linked</span></div>
+    </div>
+    <h2>Org map</h2>
+    <canvas id="org"></canvas>
+    <div class="legend">Click a repo to see what a change there can affect · arrows point from dependent to dependency · solid: code (imports, calls, inheritance) · dashed: service contracts (HTTP, queues, tables) · label = edge count</div>
+    <div id="orgtime"></div>
+    <div id="orglens"></div>
+    <h2>Ledger</h2><p>${led}</p>
+    <h2>Repos</h2>
+    <table><tr><th>Repo</th><th>Symbols</th></tr>
+      ${o.repos.map(r => `<tr><td>${esc(r.repo)}</td><td class="mono">${r.symbols}</td></tr>`).join("")}</table>
+    <h2>Version skew</h2>
+    ${o.skew.length ? `<table><tr><th>Package</th><th>Published by</th><th>Consumer</th><th>Locked</th></tr>
+      ${o.skew.map(s => `<tr><td>${esc(s.package)}</td><td>${esc(s.publisher)} @ ${esc(s.published)}</td><td>${esc(s.consumer)}</td><td class="mono">${esc(s.locked)}</td></tr>`).join("")}</table>`
+      : '<p class="muted">No internal dependency pins a version other than its publisher.</p>'}`;
+  const latest = await api("/api/orgmap");
+  showOrg(latest);
+  const versions = await api("/api/versions");
+  if (versions.length > 1) {
+    const last = versions.length - 1;
+    $("#orgtime").innerHTML = `<div class="toolbar"><input type="range" id="orgv" min="0" max="${last}" value="${last}" style="flex:1">
+      <span class="muted mono" id="orgvl">${esc(versions[last].slice(0, 16).replace("T", " "))} · latest</span></div><div id="orgdiff"></div>`;
+    let t;
+    $("#orgv").oninput = () => {
+      const i = +$("#orgv").value;
+      $("#orgvl").textContent = versions[i].slice(0, 16).replace("T", " ") + (i === last ? " · latest" : ` · version ${i + 1} of ${last + 1}`);
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        const g = i === last ? latest : await api("/api/orgmap?at=" + i);
+        showOrg(g);
+        $("#orgdiff").innerHTML = i === last ? "" : linkDiff(g, latest, versions[i].slice(0, 10));
+      }, 250);
+    };
+  }
+}
+
+// Repo links that appeared or disappeared between an earlier map and the latest.
+function linkDiff(then, now, when) {
+  const key = e => `${e.src} → ${e.dst} (${e.kind})`;
+  const a = new Set(then.edges.map(key)), b = new Set(now.edges.map(key));
+  const added = [...b].filter(k => !a.has(k)), gone = [...a].filter(k => !b.has(k));
+  if (!added.length && !gone.length) return `<p class="muted">No repo links changed since ${esc(when)}.</p>`;
+  const chips = xs => xs.map(x => `<span class="chip">${esc(x)}</span>`).join(" ");
+  return `<p>Since ${esc(when)}: ${added.length ? "new " + chips(added) : ""} ${gone.length ? " · gone " + chips(gone) : ""}</p>`;
+}
+
+function showOrg(org) {
+  let selected = null;
+  const pick = id => {
+    selected = selected === id ? null : id;
+    if (selected) history.replaceState(null, "", "#lens=" + encodeURIComponent(selected));
+    const hit = selected ? dependents(org, selected) : null;
+    map.lens(selected, hit && new Set(hit.keys()));
+    $("#orglens").innerHTML = !selected ? "" : hit.size
+      ? `<p><b>${esc(selected)}</b>: a change can reach ${[...hit].map(([r, d]) => `<span class="chip">${esc(r)} · ${d} hop${d > 1 ? "s" : ""}</span>`).join(" ")}</p>`
+      : `<p><b>${esc(selected)}</b>: no other indexed repo depends on it.</p>`;
+  };
+  const map = drawGraph($("#org"), org, {spread: 200, curve: 22, onPick: pick});
+  if (location.hash.startsWith("#lens=")) pick(decodeURIComponent(location.hash.slice(6)));
+}
+
+// Repos that depend on `repo`, directly or transitively (code or contracts), with hop count.
+function dependents(g, repo) {
+  const seen = new Map(), queue = [[repo, 0]];
+  while (queue.length) {
+    const [r, d] = queue.shift();
+    for (const e of g.edges) if (e.dst === r && e.src !== repo && !seen.has(e.src)) {
+      seen.set(e.src, d + 1); queue.push([e.src, d + 1]);
+    }
+  }
+  return seen;
+}
+
+async function loadContracts() {
+  state.contracts = await api("/api/contracts");
+  renderContracts();
+}
+function renderContracts() {
+  const q = $("#cq").value.toLowerCase(), t = $("#ct").value, dangling = $("#cd").checked;
+  const rows = state.contracts.filter(c => {
+    if (t && !c.contract.name.startsWith(t + ":")) return false;
+    if (dangling && c.providers.length && c.consumers.length) return false;
+    if (!q) return true;
+    return [c.contract, ...c.providers, ...c.consumers].some(n => (n.repo + ":" + n.name).toLowerCase().includes(q));
+  });
+  $("#clist").innerHTML = `<p class="muted">${rows.length} of ${state.contracts.length}</p>
+    <table><tr><th>Contract</th><th>Provided by</th><th>Used by</th></tr>
+    ${rows.slice(0, 500).map(c => `<tr><td class="mono">${symLink(c.contract)}</td>
+      <td>${c.providers.map(symLink).join("<br>") || '<span class="muted">—</span>'}</td>
+      <td>${c.consumers.map(symLink).join("<br>") || '<span class="muted">—</span>'}</td></tr>`).join("")}</table>`;
+}
+["#cq", "#ct", "#cd"].forEach(s => $(s).addEventListener("input", () => state.contracts && renderContracts()));
+
+async function loadLedger() {
+  state.ledger = await api("/api/ledger");
+  renderLedger();
+}
+function entryHtml(e, actions) {
+  const r = e.record;
+  const fields = Object.entries(r.fields || {}).map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(typeof v === "string" ? v : JSON.stringify(v))}</div>`).join("");
+  const about = r.anchors.map(a => `<span class="chip mono">${esc(a.repo)}:${esc(a.name)}</span>`).join("");
+  const btns = actions && state.writable && !["retracted", "superseded"].includes(e.status)
+    ? `<div style="margin-top:8px"><button class="act primary" data-rv="confirm" data-id="${esc(r.id)}">Confirm</button>
+       <button class="act" data-rv="retract" data-id="${esc(r.id)}">Retract</button></div>` : "";
+  return `<div class="entry">
+    <div class="meta">${esc(r.kind)} · ${esc(e.trust)} · <span class="st-${esc(e.status)}">${esc(e.status)}</span>${challenged(e) ? ' · <span class="st-stale">challenged</span>' : ""} · ${esc(when(e).slice(0, 10))} · ${esc(r.provenance.author)}</div>
+    <h3>${esc(r.title)}</h3>
+    ${r.body ? `<div>${esc(r.body)}</div>` : ""}${fields}
+    ${r.trigger ? `<div><span class="muted">relevant when:</span> ${esc(r.trigger)}</div>` : ""}
+    ${r.evidence.length ? `<div><span class="muted">evidence:</span> <span class="mono">${r.evidence.map(esc).join(", ")}</span></div>` : ""}
+    <div style="margin-top:4px">${about}</div>${btns}</div>`;
+}
+const when = e => (e.record.fields && e.record.fields.at) || e.record.created;
+const TRUST = {T0: 0, T1: 1, T2: 2, T3: 3, T4: 4};
+const challenged = e => !["superseded", "retracted"].includes(e.status)
+  && e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));
+const needsReview = e => challenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : (TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3);
+function renderLedger() {
+  const q = $("#lq").value.toLowerCase(), st = $("#ls").value, order = $("#lo").value;
+  const rows = state.ledger.filter(e => (!st || e.status === st) && (!q || JSON.stringify(e.record).toLowerCase().includes(q)));
+  if (order === "time") rows.sort((a, b) => when(b).localeCompare(when(a)));
+  else rows.sort((a, b) => needsReview(a) - needsReview(b) || b.record.created.localeCompare(a.record.created));
+  let month = "", html = "";
+  for (const e of rows) {
+    const m = when(e).slice(0, 7);
+    if (order === "time" && m !== month) { month = m; html += `<h2>${esc(m)}</h2>`; }
+    html += entryHtml(e, true);
+  }
+  $("#llist").innerHTML = `<p class="muted">${rows.length} of ${state.ledger.length}${state.writable ? "" : " · read-only"}</p>` +
+    (html || '<p class="muted">No records. Add one with <span class="mono">comind remember</span>.</p>');
+}
+["#lq", "#ls", "#lo"].forEach(s => $(s).addEventListener("input", () => state.ledger && renderLedger()));
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button[data-rv]");
+  if (!b) return;
+  const reason = b.dataset.rv === "retract" ? (prompt("Why retract it?") ?? null) : "";
+  if (reason === null) return;
+  const r = await api("/api/review", {method: "POST", headers: {"content-type": "application/json"},
+    body: JSON.stringify({id: b.dataset.id, action: b.dataset.rv, reason})});
+  toast(r.message);
+  if (r.ok) { state.ledger = null; await loadLedger(); loadOverview(); }
+});
+
+let findTimer;
+$("#eq").addEventListener("input", () => {
+  clearTimeout(findTimer);
+  findTimer = setTimeout(async () => {
+    const q = $("#eq").value.trim();
+    if (!q) return;
+    const res = await api("/api/find?q=" + encodeURIComponent(q));
+    $("#eres").innerHTML = res.map(n => `<div data-id="${esc(n.id)}"><b>${esc(n.name)}</b>
+      <div class="muted mono">${esc(n.kind)} · ${esc(n.repo)} · ${esc(n.location)}</div></div>`).join("") || '<div class="muted">No matches.</div>';
+  }, 180);
+});
+$("#eres").addEventListener("click", e => { const d = e.target.closest("[data-id]"); if (d) openNode(d.dataset.id); });
+
+async function openNode(id) {
+  show("explorer");
+  history.replaceState(null, "", "#node=" + encodeURIComponent(id));
+  const r = await fetch("/api/node?focus=" + encodeURIComponent(id));
+  if (!r.ok) { toast("Not found"); return; }
+  const d = await r.json(), z = d.zoom, f = z.focus;
+  const list = (title, xs) => xs.length ? `<h2>${title}</h2><div>${xs.slice(0, 60).map(symLink).join(" · ")}${xs.length > 60 ? ` <span class="muted">+${xs.length - 60}</span>` : ""}</div>` : "";
+  const roles = z.contracts.map(c => `<div><span class="chip">${esc(c.role)}</span> ${symLink(c.contract)} ${c.counterparts.length ? "↔ " + c.counterparts.map(symLink).join(", ") : '<span class="muted">no counterpart indexed</span>'}</div>`).join("");
+  const repos = Object.entries(d.ripple.repos).map(([r, n]) => `<span class="chip">${esc(r)} ${n}</span>`).join("");
+  $("#edet").innerHTML = `
+    <h3 style="margin:0">${esc(f.name)} <span class="muted" style="font-weight:400">${esc(f.kind)}</span></h3>
+    <div class="muted mono">${esc(f.repo)} · ${esc(f.location)}</div>
+    ${f.signature ? `<pre class="mono" style="white-space:pre-wrap;margin:8px 0">${esc(f.signature)}</pre>` : ""}
+    <canvas id="g"></canvas>
+    <div class="legend">Drag to move nodes · click a node to re-centre · squares are contracts</div>
+    <h2>Blast radius</h2><div>${d.ripple.total} dependents ${repos}</div>
+    ${roles ? `<h2>Contracts</h2>${roles}` : ""}
+    ${d.ledger.length ? `<h2>Recorded reasoning</h2>${d.ledger.map(e => entryHtml(e, false)).join("")}` : ""}
+    ${list("Callers", z.callers)}${list("Callees", z.callees)}${list("Imported by", z.importers)}
+    ${list("Providers", z.providers)}${list("Consumers", z.consumers)}${list("Members", z.members)}`;
+  drawGraph($("#g"), d.graph);
+}
+
+function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+function drawGraph(cv, g, opt = {}) {
+  const spread = opt.spread || 110, onPick = opt.onPick === undefined ? openNode : opt.onPick;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const ink = css.getPropertyValue("--ink"), muted = css.getPropertyValue("--muted"), line = css.getPropertyValue("--line");
+  const panel = css.getPropertyValue("--panel"), curve = opt.curve || 0;
+  const halo = (t, x, y, align, color) => {
+    ctx.textAlign = align; ctx.lineWidth = 3; ctx.strokeStyle = panel; ctx.strokeText(t, x, y);
+    ctx.fillStyle = color; ctx.fillText(t, x, y); ctx.lineWidth = 1;
+  };
+  const nodes = g.nodes.map((n, i) => {
+    const a = (i / Math.max(1, g.nodes.length)) * Math.PI * 2;
+    const focus = n.id === g.focus;
+    return {...n, x: focus ? W / 2 : W / 2 + Math.cos(a) * W / 3, y: focus ? H / 2 : H / 2 + Math.sin(a) * H / 3, vx: 0, vy: 0, focus};
+  });
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = g.edges.map(e => ({...e, a: byId[e.src], b: byId[e.dst]})).filter(e => e.a && e.b);
+  let drag = null, ticks = 0, lensOn = null, lensSet = null;
+  // A redraw on the same canvas retires the previous animation loop.
+  const gen = (cv._gen = (cv._gen || 0) + 1);
+  const lit = id => !lensOn || id === lensOn || lensSet.has(id);
+  function step() {
+    for (const a of nodes) for (const b of nodes) {
+      if (a === b) continue;
+      const dx = a.x - b.x, dy = a.y - b.y, d2 = Math.max(80, dx * dx + dy * dy);
+      a.vx += dx / d2 * 900; a.vy += dy / d2 * 900;
+    }
+    for (const e of edges) {
+      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.max(1, Math.hypot(dx, dy)), k = (d - spread) * 0.01;
+      e.a.vx += dx / d * k; e.a.vy += dy / d * k; e.b.vx -= dx / d * k; e.b.vy -= dy / d * k;
+    }
+    for (const n of nodes) {
+      if (n.focus || n === drag) { n.vx = n.vy = 0; continue; }
+      n.vx += (W / 2 - n.x) * 0.002; n.vy += (H / 2 - n.y) * 0.002;
+      n.x = Math.min(W - 20, Math.max(20, n.x + (n.vx *= 0.82)));
+      n.y = Math.min(H - 14, Math.max(14, n.y + (n.vy *= 0.82)));
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineWidth = 1;
+    ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
+    for (const e of edges) {
+      ctx.strokeStyle = e.kind === "calls" || e.kind === "code" ? muted : e.kind === "contract" ? "#b7791f" : line;
+      ctx.lineWidth = e.weight ? Math.min(5, 1 + Math.log10(e.weight)) : 1;
+      ctx.setLineDash(e.kind === "contract" ? [5, 4] : []);
+      // Curve to one side by direction, so A→B and B→A stay apart.
+      const bend = e.kind === "contract" ? curve * 2.2 : curve;
+      const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2, len = Math.max(1, Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y));
+      const cx = mx - (e.b.y - e.a.y) / len * bend, cy = my + (e.b.x - e.a.x) / len * bend;
+      ctx.globalAlpha = lit(e.a.id) && lit(e.b.id) ? 1 : 0.12;
+      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.quadraticCurveTo(cx, cy, e.b.x, e.b.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.lineWidth = 1;
+      const ang = Math.atan2(e.b.y - cy, e.b.x - cx), tx = e.b.x - Math.cos(ang) * 10, ty = e.b.y - Math.sin(ang) * 10;
+      ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - Math.cos(ang - .4) * 8, ty - Math.sin(ang - .4) * 8);
+      ctx.lineTo(tx - Math.cos(ang + .4) * 8, ty - Math.sin(ang + .4) * 8); ctx.fill();
+      if (e.weight) halo(String(e.weight), (e.a.x + 2 * cx + e.b.x) / 4, (e.a.y + 2 * cy + e.b.y) / 4, "center", muted);
+      ctx.globalAlpha = 1;
+    }
+    ctx.font = "12px system-ui, sans-serif"; ctx.textBaseline = "middle";
+    for (const n of nodes) {
+      ctx.globalAlpha = lit(n.id) ? 1 : 0.2;
+      const r = n.focus || n.id === lensOn ? 9 : 6;
+      ctx.fillStyle = n.repo === "_contracts" ? "#b7791f" : `hsl(${hue(n.repo)} 55% 52%)`;
+      ctx.beginPath();
+      if (n.repo === "_contracts") ctx.rect(n.x - r, n.y - r, r * 2, r * 2); else ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (n.focus) { ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+      const label = n.name.length > 34 ? n.name.slice(0, 33) + "…" : n.name, left = n.x > W - 200;
+      if (lensOn && lensSet.has(n.id)) { ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1; }
+      halo(label, left ? n.x - r - 4 : n.x + r + 4, n.y, left ? "right" : "left", n.focus || n.id === lensOn ? ink : muted);
+      ctx.globalAlpha = 1;
+    }
+  }
+  function loop() {
+    if (cv._gen !== gen) return;
+    if (ticks++ < 260 || drag) step();
+    draw();
+    if (ticks < 260 || drag) requestAnimationFrame(loop);
+  }
+  const at = ev => { const b = cv.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+  const hit = (x, y) => nodes.find(n => Math.hypot(n.x - x, n.y - y) < 12);
+  let moved = false;
+  cv.onpointerdown = ev => { const [x, y] = at(ev); drag = hit(x, y); moved = false; if (drag) { cv.setPointerCapture(ev.pointerId); requestAnimationFrame(loop); } };
+  cv.onpointermove = ev => { if (!drag) return; const [x, y] = at(ev); drag.x = x; drag.y = y; moved = true; };
+  cv.onpointerup = () => { const n = drag; drag = null; ticks = 200; if (n && !moved && !n.focus && onPick) onPick(n.id); else requestAnimationFrame(loop); };
+  loop();
+  return { lens(sel, set) { lensOn = sel; lensSet = set || new Set(); draw(); } };
+}
+
+async function loadConventions() {
+  const all = await api("/api/conventions");
+  const repos = [...new Set(all.map(c => c.repo))].sort();
+  $("#vr").innerHTML = repos.map(r => `<option value="${esc(r)}">${r === "*" ? "Org baseline" : esc(r)}</option>`).join("");
+  const render = () => {
+    const rows = all.filter(c => c.repo === $("#vr").value);
+    $("#vlist").innerHTML = `<table><tr><th>Dimension</th><th>Convention</th><th>Support</th><th>Exemplars</th></tr>
+      ${rows.map(c => `<tr><td>${esc(c.dimension)}</td><td>${esc(c.rule)}</td><td class="mono">${c.support}/${c.total}</td>
+        <td class="mono">${c.exemplars.slice(0, 3).map(esc).join("<br>")}</td></tr>`).join("")}</table>`;
+  };
+  $("#vr").onchange = render; render();
+}
+
+loadOverview();
+if (location.hash.startsWith("#node=")) openNode(decodeURIComponent(location.hash.slice(6)));
+else try { const t = localStorage.getItem("comind.tab"); if (t) show(t); } catch (_) {}
+</script>
+</body>
+</html>

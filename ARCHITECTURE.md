@@ -89,8 +89,28 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 ```
 src/
   model.rs    domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
-  parse.rs    tree-sitter: file → symbols + intra-file edges, per-language extractors.
-  resolve.rs  cross-repo link-resolver (SCIP id binding).
+  parse.rs    tree-sitter walk: file → symbols, Contains edges, per-file facts (+ fingerprints).
+  lang/       per-language syntax adapters (python, typescript, go, java, kotlin, rust) behind LangSpec;
+              spring.rs holds the shared Spring MVC / Feign / RestTemplate rules for Java and Kotlin.
+  facts.rs    per-file facts: imports, reference paths, type hints (persisted for incremental).
+  packages.rs importable module names: pyproject, package.json, tsconfig paths, go.mod, Cargo.toml.
+  manifests.rs published packages + dependencies (requirement, locked version) for version skew.
+  conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
+  recipes.rs  change recipes from commit history (what changes together when adding code).
+  ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
+  infra.rs    Terraform: queues, topics, buckets and topic→queue subscriptions as contract facts.
+  configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
+  gitlab.rs   GitLab MRs as distiller evidence: selection, depersonalised discussion, touched files.
+  distill.rs  LLM distiller: commit-message evidence → validated ledger proposals (T1). Never reads agent sessions.
+  signing.rs  optional SSH signatures on ledger records; verification against allowed_signers.
+  cache.rs    local mirror of a remote (S3) index for hooks, refreshed in the background.
+  checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
+  preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
+  tui.rs      `comind ui`: overview, contracts, ledger, explorer, conventions (ratatui).
+  web.rs      `comind ui --web`: axum JSON API + one embedded page (web/index.html), 127.0.0.1 only.
+  resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
+  resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
+  eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).
   index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
   graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
   embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).

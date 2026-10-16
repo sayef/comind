@@ -21,8 +21,29 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
+/// Edge kinds meaning "src depends on dst": what `ripple` and ranking traverse.
+pub const DEPENDENCY: &[EdgeKind] = &[
+    EdgeKind::Calls,
+    EdgeKind::Imports,
+    EdgeKind::Instantiates,
+    EdgeKind::Inherits,
+    EdgeKind::Implements,
+    EdgeKind::Consumes,
+    EdgeKind::Subscribes,
+    EdgeKind::Reads,
+];
+
+/// Provider-side contract roles: the contract depends on its provider, so `ripple` crosses
+/// these against their direction (handler → route → every consumer).
+pub const PROVIDES: &[EdgeKind] = &[
+    EdgeKind::Serves,
+    EdgeKind::Publishes,
+    EdgeKind::Writes,
+    EdgeKind::Defines,
+];
+
 /// A node as returned to callers — flat, printable, agent-friendly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Node {
     pub id: String,
     pub name: String,
@@ -34,7 +55,7 @@ pub struct Node {
 }
 
 /// A node plus how far it sits from the focus (BFS depth) and via which relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Hop {
     pub node: Node,
     pub depth: usize,
@@ -42,7 +63,7 @@ pub struct Hop {
 }
 
 /// The 360° view of one symbol.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Zoom {
     pub focus: Option<Node>,
     pub container: Option<Node>,
@@ -50,6 +71,36 @@ pub struct Zoom {
     pub callers: Vec<Node>,
     pub callees: Vec<Node>,
     pub importers: Vec<Node>,
+    /// Contracts this symbol takes part in, with the other side of each.
+    pub contracts: Vec<ContractRole>,
+    /// When the focus is itself a contract: who provides and who consumes it.
+    pub providers: Vec<Node>,
+    pub consumers: Vec<Node>,
+}
+
+/// A symbol's role in a contract (`serves http:GET /x`) and the participants on the other side.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContractRole {
+    pub role: EdgeKind,
+    pub contract: Node,
+    pub counterparts: Vec<Node>,
+}
+
+/// A contract with everyone on each side.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContractView {
+    pub contract: Node,
+    pub providers: Vec<Node>,
+    pub consumers: Vec<Node>,
+}
+
+/// Every contract-role edge kind (provider and consumer side).
+pub fn is_contract_role(k: &EdgeKind) -> bool {
+    PROVIDES.contains(k)
+        || matches!(
+            k,
+            EdgeKind::Consumes | EdgeKind::Subscribes | EdgeKind::Reads
+        )
 }
 
 struct NodeData {
@@ -106,6 +157,32 @@ impl CodeGraph {
         self.g.edge_count()
     }
 
+    /// A symbol and its containers (class, file) as ids: what explains it, from inside out.
+    pub fn scope_of(&self, focus: &str) -> Option<(String, Vec<String>)> {
+        let idx = self.lookup(focus)?;
+        let mut ids = vec![self.node_of(idx).id];
+        let mut cur = idx;
+        for _ in 0..6 {
+            let parent = self
+                .g
+                .edges_directed(cur, Incoming)
+                .find(|e| *e.weight() == EdgeKind::Contains)
+                .map(|e| e.source());
+            match parent {
+                Some(p) => {
+                    ids.push(self.node_of(p).id);
+                    cur = p;
+                }
+                None => break,
+            }
+        }
+        Some((self.node_of(idx).name, ids))
+    }
+
+    pub fn node(&self, idx: NodeIndex) -> Node {
+        self.node_of(idx)
+    }
+
     fn node_of(&self, idx: NodeIndex) -> Node {
         let s = &self.g[idx].sym;
         Node {
@@ -140,8 +217,11 @@ impl CodeGraph {
         }
         candidates.sort_by_key(|&i| {
             let s = &self.g[i].sym;
+            let inexact = (s.name != focus) as usize;
             let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
-            (is_file, s.id.descriptor.len())
+            let path = s.file_path.to_ascii_lowercase();
+            let is_test = (path.contains("test") || path.contains("spec")) as usize;
+            (inexact, is_file, is_test, s.id.descriptor.len())
         });
         candidates.first().copied()
     }
@@ -150,7 +230,9 @@ impl CodeGraph {
     pub fn repos(&self) -> Vec<(String, usize)> {
         let mut m: BTreeMap<String, usize> = BTreeMap::new();
         for i in self.g.node_indices() {
-            *m.entry(self.g[i].sym.id.package.clone()).or_default() += 1;
+            if self.g[i].sym.kind != crate::model::SymbolKind::Contract {
+                *m.entry(self.g[i].sym.id.package.clone()).or_default() += 1;
+            }
         }
         m.into_iter().collect()
     }
@@ -164,7 +246,7 @@ impl CodeGraph {
         };
         self.g
             .edges_directed(idx, Incoming)
-            .filter(|e| matches!(e.weight(), EdgeKind::Calls | EdgeKind::Imports))
+            .filter(|e| DEPENDENCY.contains(e.weight()))
             .count()
     }
 
@@ -187,21 +269,22 @@ impl CodeGraph {
         v.into_iter().take(limit).map(|i| self.node_of(i)).collect()
     }
 
-    /// *Who breaks if I change `focus`?* Reverse reachability over `Calls`/`Imports`
+    /// *Who breaks if I change `focus`?* Reverse reachability over [`DEPENDENCY`] edges
     /// (callers of callers, importers), multi-hop, cross-repo. Structural `Contains` is
     /// ignored — a containing module is not a dependency.
     pub fn ripple(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(
-            focus,
-            max_depth,
-            Incoming,
-            &[EdgeKind::Calls, EdgeKind::Imports],
-        )
+        self.bfs(focus, max_depth, Incoming, DEPENDENCY, PROVIDES)
     }
 
     /// *What does `focus` do downstream?* Forward call trace.
     pub fn thread(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
-        self.bfs(focus, max_depth, Outgoing, &[EdgeKind::Calls])
+        self.bfs(
+            focus,
+            max_depth,
+            Outgoing,
+            &[EdgeKind::Calls, EdgeKind::Instantiates],
+            &[],
+        )
     }
 
     fn bfs(
@@ -210,6 +293,7 @@ impl CodeGraph {
         max_depth: usize,
         dir: petgraph::Direction,
         kinds: &[EdgeKind],
+        reversed: &[EdgeKind],
     ) -> Vec<Hop> {
         let mut seen: HashSet<NodeIndex> = HashSet::from([start]);
         let mut q: VecDeque<(NodeIndex, usize)> = VecDeque::from([(start, 0)]);
@@ -218,25 +302,96 @@ impl CodeGraph {
             if depth >= max_depth {
                 continue;
             }
-            for e in self.g.edges_directed(n, dir) {
-                if !kinds.contains(e.weight()) {
-                    continue;
-                }
-                let next = if dir == Incoming {
-                    e.source()
-                } else {
-                    e.target()
-                };
+            let forward = self
+                .g
+                .edges_directed(n, dir)
+                .filter(|e| kinds.contains(e.weight()))
+                .map(|e| {
+                    (
+                        e.weight(),
+                        if dir == Incoming {
+                            e.source()
+                        } else {
+                            e.target()
+                        },
+                    )
+                });
+            let backward = self
+                .g
+                .edges_directed(n, dir.opposite())
+                .filter(|e| reversed.contains(e.weight()))
+                .map(|e| {
+                    (
+                        e.weight(),
+                        if dir == Incoming {
+                            e.target()
+                        } else {
+                            e.source()
+                        },
+                    )
+                });
+            for (kind, next) in forward.chain(backward).collect::<Vec<_>>() {
                 if seen.insert(next) {
                     out.push(Hop {
                         node: self.node_of(next),
                         depth: depth + 1,
-                        via: e.weight().clone(),
+                        via: kind.clone(),
                     });
                     q.push_back((next, depth + 1));
                 }
             }
         }
+        out
+    }
+
+    /// Providers and consumers of a contract node.
+    fn sides(&self, contract: NodeIndex) -> (Vec<Node>, Vec<Node>) {
+        let (mut p, mut c) = (Vec::new(), Vec::new());
+        for e in self.g.edges_directed(contract, Incoming) {
+            if PROVIDES.contains(e.weight()) {
+                p.push(self.qualified(e.source()));
+            } else if is_contract_role(e.weight()) {
+                c.push(self.qualified(e.source()));
+            }
+        }
+        (p, c)
+    }
+
+    /// A node named `Class.method` when it is a method, so `__init__` and `get` read clearly.
+    fn qualified(&self, idx: NodeIndex) -> Node {
+        let mut n = self.node_of(idx);
+        if self.g[idx].sym.kind == crate::model::SymbolKind::Method {
+            if let Some(owner) = self
+                .g
+                .edges_directed(idx, Incoming)
+                .find(|e| *e.weight() == EdgeKind::Contains)
+                .map(|e| &self.g[e.source()].sym)
+                .filter(|o| o.kind != crate::model::SymbolKind::File)
+            {
+                n.name = format!("{}.{}", owner.name, n.name);
+            }
+        }
+        n
+    }
+
+    /// All contracts, optionally of one type (`http`, `sqs`, …) or only those missing a side.
+    pub fn contracts(&self, kind: Option<&str>, dangling: bool) -> Vec<ContractView> {
+        let mut out: Vec<ContractView> = self
+            .g
+            .node_indices()
+            .filter(|&i| self.g[i].sym.kind == crate::model::SymbolKind::Contract)
+            .filter(|&i| kind.is_none_or(|k| self.g[i].sym.name.starts_with(&format!("{k}:"))))
+            .map(|i| {
+                let (providers, consumers) = self.sides(i);
+                ContractView {
+                    contract: self.node_of(i),
+                    providers,
+                    consumers,
+                }
+            })
+            .filter(|v| !dangling || v.providers.is_empty() || v.consumers.is_empty())
+            .collect();
+        out.sort_by(|a, b| a.contract.name.cmp(&b.contract.name));
         out
     }
 
@@ -249,15 +404,39 @@ impl CodeGraph {
         for e in self.g.edges_directed(focus, Incoming) {
             match e.weight() {
                 EdgeKind::Contains => z.container = Some(self.node_of(e.source())),
-                EdgeKind::Calls => z.callers.push(self.node_of(e.source())),
+                EdgeKind::Calls | EdgeKind::Instantiates => {
+                    z.callers.push(self.node_of(e.source()))
+                }
                 EdgeKind::Imports => z.importers.push(self.node_of(e.source())),
                 _ => {}
+            }
+        }
+        for e in self.g.edges_directed(focus, Incoming) {
+            if is_contract_role(e.weight()) {
+                if PROVIDES.contains(e.weight()) {
+                    z.providers.push(self.node_of(e.source()));
+                } else {
+                    z.consumers.push(self.node_of(e.source()));
+                }
+            }
+        }
+        for e in self.g.edges_directed(focus, Outgoing) {
+            if is_contract_role(e.weight()) {
+                let provider = PROVIDES.contains(e.weight());
+                let (providers, consumers) = self.sides(e.target());
+                z.contracts.push(ContractRole {
+                    role: e.weight().clone(),
+                    contract: self.node_of(e.target()),
+                    counterparts: if provider { consumers } else { providers },
+                });
             }
         }
         for e in self.g.edges_directed(focus, Outgoing) {
             match e.weight() {
                 EdgeKind::Contains => z.members.push(self.node_of(e.target())),
-                EdgeKind::Calls => z.callees.push(self.node_of(e.target())),
+                EdgeKind::Calls | EdgeKind::Instantiates => {
+                    z.callees.push(self.node_of(e.target()))
+                }
                 _ => {}
             }
         }
@@ -288,7 +467,10 @@ impl CodeGraph {
             if rank <= 0.0 {
                 break; // unreachable from focus
             }
-            if matches!(self.g[idx].sym.kind, crate::model::SymbolKind::File) {
+            if matches!(
+                self.g[idx].sym.kind,
+                crate::model::SymbolKind::File | crate::model::SymbolKind::Contract
+            ) {
                 continue;
             }
             let t = est_tokens(&self.g[idx].sym);
@@ -312,7 +494,7 @@ impl CodeGraph {
         // Undirected neighbor lists over dependency edges only.
         let mut neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
         for e in self.g.edge_references() {
-            if !matches!(e.weight(), EdgeKind::Calls | EdgeKind::Imports) {
+            if !DEPENDENCY.contains(e.weight()) && !PROVIDES.contains(e.weight()) {
                 continue;
             }
             let (a, b) = (e.source().index(), e.target().index());
@@ -375,6 +557,7 @@ mod tests {
             },
             signature: Some(format!("def {name}(): ...")),
             docstring: None,
+            fingerprint: None,
         }
     }
     fn edge(s: &Symbol, d: &Symbol, k: EdgeKind) -> Edge {

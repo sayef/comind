@@ -1,0 +1,47 @@
+[workspace]
+# Publishing is started by hand (Release-plz → Run workflow); it then publishes whatever version on main
+# is not published yet, even if other commits landed after the release PR.
+release_always = true
+pr_labels = ["release"]
+# The library is comind's engine, not a stable public API; the CLI and MCP tools are the interface.
+semver_check = false
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+publish = true
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+"""
+
+# Only the version heading: the hand-written notes under `## [Unreleased]` become the release's entry.
+body = """
+## [{{ version }}]\
+    {%- if release_link -%}({{ release_link }}){% endif %} \
+    - {{ timestamp | date(format="%Y-%m-%d") }}
+"""
+
+trim = false
+protect_breaking_commits = true
+sort_commits = "oldest"
+
+commit_parsers = [
+    { message = "^chore(\\(.*\\))?: release", skip = true },
+    { message = "^Merge (pull request|branch)", skip = true },
+    { message = "^(feat|[Aa]dd|[Ss]upport|[Ii]ntroduce)", group = "<!-- 0 -->Added" },
+    { message = "^(deprecated|[Dd]eprecate)", group = "<!-- 2 -->Deprecated" },
+    { message = "^(remove|[Rr]emove|[Dd]elete|[Dd]rop)", group = "<!-- 3 -->Removed" },
+    { message = "^(fix|[Ff]ix)", group = "<!-- 4 -->Fixed" },
+    { message = "^(security|[Ss]ecurity)", group = "<!-- 5 -->Security" },
+    { message = "^(chore|ci|build|test|style)(\\(.*\\))?:", skip = true },
+    { message = ".*", group = "<!-- 1 -->Changed" },
+]

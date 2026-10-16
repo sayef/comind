@@ -28,7 +28,12 @@ const SECTION_BUDGET: usize = 9000; // per-section evidence cap (chars)
 type EvFn = fn(&Ctx) -> String;
 
 /// Build every guide section for one repo. Reads source lazily (cached).
-pub fn build_sections(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> Vec<Section> {
+pub fn build_sections(
+    root: &Path,
+    symbols: &[&Symbol],
+    edges: &[Edge],
+    conventions: &[crate::conventions::Convention],
+) -> Vec<Section> {
     let ctx = Ctx::new(root, symbols, edges);
     let specs: &[(&str, &str, EvFn)] = &[
         ("Stack & dependencies",
@@ -66,7 +71,8 @@ pub fn build_sections(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> Vec<S
     specs
         .iter()
         .filter_map(|(title, guidance, f)| {
-            let mut evidence = f(&ctx);
+            let mut evidence = measured(&ctx, title, conventions);
+            evidence.push_str(&f(&ctx));
             if evidence.trim().is_empty() {
                 return None;
             }
@@ -84,6 +90,49 @@ pub fn build_sections(root: &Path, symbols: &[&Symbol], edges: &[Edge]) -> Vec<S
             })
         })
         .collect()
+}
+
+/// Measured conventions for a section's dimensions, with excerpts at their exemplar locations.
+fn measured(ctx: &Ctx, title: &str, conventions: &[crate::conventions::Convention]) -> String {
+    let dims: &[&str] = match title {
+        "Stack & dependencies" => &["libraries"],
+        "Project layout & architecture" => &["layout"],
+        "Naming & formatting" => &["naming"],
+        "Function signatures & parameters" => &["signatures"],
+        "Types & data modeling" | "Design patterns & idioms" => &["models"],
+        "Library & infra usage" => &["libraries", "config"],
+        "Error handling, logging & configuration" => &["errors", "logging", "config"],
+        "Testing" => &["testing"],
+        _ => &[],
+    };
+    let relevant: Vec<_> = conventions
+        .iter()
+        .filter(|c| dims.contains(&c.dimension.as_str()))
+        .collect();
+    if relevant.is_empty() {
+        return String::new();
+    }
+    let mut o =
+        String::from("Measured conventions (authoritative: cite them, never contradict them):\n");
+    for c in &relevant {
+        let _ = writeln!(o, "- {}", c.rule);
+        if !c.counterexamples.is_empty() {
+            let _ = writeln!(o, "  deviations: {}", c.counterexamples.join(", "));
+        }
+    }
+    for c in relevant.iter().take(4) {
+        for ex in c.exemplars.iter().take(1) {
+            let Some((file, line)) = ex.rsplit_once(':') else {
+                continue;
+            };
+            let start = line.parse::<usize>().unwrap_or(1);
+            if let Some(body) = ctx.excerpt(file, start, 14) {
+                block(&mut o, &format!("{ex} — exemplar of: {}", c.generic), &body);
+            }
+        }
+    }
+    o.push('\n');
+    o
 }
 
 // ---- shared repo context -------------------------------------------------------------------

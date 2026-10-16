@@ -1,0 +1,1041 @@
+# Gold edge set for the fixture org: every import/call/inherit/implement/instantiate edge that
+# should exist. Keys are `repo:path` (file) or `repo:path::Qualified.name`; `case` names the gap.
+
+# ---- pkg-common (Python, src/ layout) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "pkg-common:src/acme/common/__init__.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "pkg-common:src/acme/common/__init__.py"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+# ---- service-a -> pkg-common (cross-repo, Python) ----
+[[edge]]
+case = "reexport-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "reexport-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "src-layout-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/base.py::BaseService"
+
+[[edge]]
+case = "module-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/events.py"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/logging.py::get_logger"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.fetch"
+dst = "pkg-common:src/acme/common/http.py::Client.get"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/http.py::Client.post"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/events.py::publish"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "service-a:service_a/users.py::normalize"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "inherits"
+kind = "inherits"
+src = "service-a:service_a/users.py::UserService"
+dst = "pkg-common:src/acme/common/base.py::BaseService"
+
+# ---- service-a internal ----
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/main.py"
+dst = "service-a:service_a/jobs.py::run"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/main.py"
+dst = "service-a:service_a/users.py::UserService"
+
+[[edge]]
+case = "ambiguous-name-call"
+kind = "calls"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/jobs.py::run"
+
+[[edge]]
+case = "type-flow-call"
+kind = "calls"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/users.py::UserService.fetch"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "service-a:service_a/main.py::main"
+dst = "service-a:service_a/users.py::UserService"
+
+# ---- ui-kit (TypeScript package with a barrel) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/button.ts"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/theme.ts"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/format.ts::formatDate"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "ui-kit:src/format.ts::Formatter.format"
+dst = "ui-kit:src/format.ts::formatDate"
+
+# ---- web-app -> ui-kit (cross-repo, TypeScript) ----
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/button.ts::Button"
+
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/theme.ts::Theme"
+
+[[edge]]
+case = "ts-package-import"
+kind = "imports"
+src = "web-app:src/app.ts"
+dst = "ui-kit:src/index.ts"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/button.ts::Button"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::formatDate"
+
+[[edge]]
+case = "implements"
+kind = "implements"
+src = "web-app:src/app.ts::DarkTheme"
+dst = "ui-kit:src/theme.ts::Theme"
+
+# ---- return-type flow ----
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "pkg-common:src/acme/common/http.py::from_env"
+dst = "pkg-common:src/acme/common/http.py::Client"
+
+[[edge]]
+case = "src-layout-import"
+kind = "imports"
+src = "service-a:service_a/users.py"
+dst = "pkg-common:src/acme/common/http.py::from_env"
+
+[[edge]]
+case = "import-call"
+kind = "calls"
+src = "service-a:service_a/users.py::ping"
+dst = "pkg-common:src/acme/common/http.py::from_env"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "service-a:service_a/users.py::ping"
+dst = "pkg-common:src/acme/common/http.py::Client.get"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "ui-kit:src/format.ts::createFormatter"
+dst = "ui-kit:src/format.ts::Formatter"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "ui-kit:src/index.ts"
+dst = "ui-kit:src/format.ts::createFormatter"
+
+[[edge]]
+case = "module-alias-call"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::createFormatter"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "web-app:src/app.ts::render"
+dst = "ui-kit:src/format.ts::Formatter.format"
+
+# ---- golib (Go: package = directory, methods declared outside their type) ----
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "golib:store/store.go::New"
+dst = "golib:store/store.go::Store"
+
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "golib:store/store.go::New"
+dst = "golib:store/db.go::DB"
+
+[[edge]]
+case = "go-field-type-call"
+kind = "calls"
+src = "golib:store/store.go::Store.Get"
+dst = "golib:store/db.go::DB.Query"
+
+[[edge]]
+case = "go-method-other-file"
+kind = "calls"
+src = "golib:store/db.go::Store.Count"
+dst = "golib:store/store.go::Store.Get"
+
+# ---- gosvc -> golib (cross-repo Go) ----
+[[edge]]
+case = "go-package-import"
+kind = "imports"
+src = "gosvc:main.go"
+dst = "golib:store/store.go"
+
+[[edge]]
+case = "go-package-import"
+kind = "imports"
+src = "gosvc:main.go"
+dst = "golib:model/model.go"
+
+[[edge]]
+case = "go-embedding"
+kind = "inherits"
+src = "gosvc:main.go::Handler"
+dst = "golib:model/model.go::Base"
+
+[[edge]]
+case = "go-struct-literal"
+kind = "instantiates"
+src = "gosvc:main.go::NewHandler"
+dst = "gosvc:main.go::Handler"
+
+[[edge]]
+case = "go-package-call"
+kind = "calls"
+src = "gosvc:main.go::NewHandler"
+dst = "golib:store/store.go::New"
+
+[[edge]]
+case = "go-field-type-call"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "golib:store/store.go::Store.Get"
+
+[[edge]]
+case = "go-embedded-method"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "golib:model/model.go::Base.Health"
+
+[[edge]]
+case = "go-same-package-call"
+kind = "calls"
+src = "gosvc:main.go::Handler.Serve"
+dst = "gosvc:util.go::helper"
+
+[[edge]]
+case = "go-package-call"
+kind = "calls"
+src = "gosvc:main.go::main"
+dst = "gosvc:main.go::NewHandler"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "gosvc:main.go::main"
+dst = "gosvc:main.go::Handler.Serve"
+
+# ---- jvm-lib (Java) ----
+[[edge]]
+case = "jvm-inherits"
+kind = "inherits"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+dst = "jvm-lib:src/main/java/com/acme/lib/Base.java::Base"
+
+[[edge]]
+case = "jvm-implements"
+kind = "implements"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+dst = "jvm-lib:src/main/java/com/acme/lib/Store.java::Store"
+
+[[edge]]
+case = "jvm-field-init"
+kind = "instantiates"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java"
+dst = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db"
+
+[[edge]]
+case = "jvm-implicit-this-field"
+kind = "calls"
+src = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo.load"
+dst = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db.query"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-lib:src/main/java/com/acme/lib/Db.java::Db.query"
+dst = "jvm-lib:src/main/java/com/acme/lib/Item.java::Item"
+
+# ---- jvm-svc (Kotlin) -> jvm-lib (Java) ----
+[[edge]]
+case = "jvm-import"
+kind = "imports"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+
+[[edge]]
+case = "jvm-import"
+kind = "imports"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt"
+dst = "jvm-lib:src/main/java/com/acme/lib/util/Strings.java::Strings"
+
+[[edge]]
+case = "jvm-property-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo.load"
+
+[[edge]]
+case = "jvm-static-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-lib:src/main/java/com/acme/lib/util/Strings.java::Strings.trim"
+
+[[edge]]
+case = "jvm-implicit-this-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.describe"
+
+[[edge]]
+case = "jvm-same-package-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::version"
+
+[[edge]]
+case = "jvm-inherited-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.describe"
+dst = "jvm-lib:src/main/java/com/acme/lib/Base.java::Base.health"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service"
+
+[[edge]]
+case = "jvm-new"
+kind = "instantiates"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+dst = "jvm-lib:src/main/java/com/acme/lib/Repo.java::Repo"
+
+[[edge]]
+case = "jvm-same-package-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::main"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::boot"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::main"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.find"
+
+[[edge]]
+case = "jvm-static-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/Main.kt::boot"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/Service.kt::Service.create"
+
+# ---- rs-lib (Rust crate acme-core) ----
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/lib.rs"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/store.rs"
+dst = "rs-lib:src/db.rs::Db"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-lib:src/store.rs"
+dst = "rs-lib:src/lib.rs::Health"
+
+[[edge]]
+case = "rust-struct-literal"
+kind = "instantiates"
+src = "rs-lib:src/store.rs::Store.new"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.new"
+dst = "rs-lib:src/db.rs::Db.open"
+
+[[edge]]
+case = "rust-field-type-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.get"
+dst = "rs-lib:src/db.rs::Db.query"
+
+[[edge]]
+case = "rust-impl-trait"
+kind = "implements"
+src = "rs-lib:src/store.rs::Store"
+dst = "rs-lib:src/lib.rs::Health"
+
+[[edge]]
+case = "rust-self-call"
+kind = "calls"
+src = "rs-lib:src/store.rs::Store.health"
+dst = "rs-lib:src/store.rs::Store.get"
+
+# ---- rs-app -> rs-lib (cross-repo Rust) ----
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/db.rs"
+
+[[edge]]
+case = "rust-use"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/db.rs::Db"
+
+[[edge]]
+case = "rust-reexport"
+kind = "imports"
+src = "rs-app:src/main.rs"
+dst = "rs-lib:src/store.rs::Store"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/store.rs::Store.new"
+
+[[edge]]
+case = "return-type-flow"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/store.rs::Store.get"
+
+[[edge]]
+case = "rust-path-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-lib:src/db.rs::Db.open"
+
+[[edge]]
+case = "rust-child-module-call"
+kind = "calls"
+src = "rs-app:src/main.rs::main"
+dst = "rs-app:src/util.rs::helper"
+
+[[edge]]
+case = "rust-crate-path-call"
+kind = "calls"
+src = "rs-app:src/util.rs::helper"
+dst = "rs-app:src/main.rs::banner"
+
+# ---- skills-svc / profile-svc: code edges ----
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "profile-svc:profile_svc/clients.py"
+dst = "profile-svc:profile_svc/config.py::settings"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "profile-svc:profile_svc/worker.py"
+dst = "profile-svc:profile_svc/config.py::settings"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/db.py::SessionLocal"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/db.py::Skill"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "skills-svc:skills_svc/api.py"
+dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+
+[[edge]]
+case = "module-import"
+kind = "imports"
+src = "skills-svc:skills_svc/main.py"
+dst = "skills-svc:skills_svc/api.py"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "profile-svc:profile_svc/config.py"
+dst = "profile-svc:profile_svc/config.py::Settings"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "skills-svc:skills_svc/db.py::Skill"
+
+# ---- contracts: HTTP (FastAPI ↔ httpx, cross-repo via router prefix + include_router) ----
+[[edge]]
+case = "contract-http-serve"
+kind = "serves"
+src = "skills-svc:skills_svc/api.py::get_skill"
+dst = "contract:http:GET /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-serve"
+kind = "serves"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "contract:http:POST /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-consume"
+kind = "consumes"
+src = "profile-svc:profile_svc/clients.py::SkillsClient.fetch"
+dst = "contract:http:GET /v1/skills/{}"
+
+[[edge]]
+case = "contract-http-consume"
+kind = "consumes"
+src = "profile-svc:profile_svc/clients.py::SkillsClient.rename"
+dst = "contract:http:POST /v1/skills/{}"
+
+# ---- contracts: tables (SQLAlchemy model, session ops, raw SQL from another repo) ----
+[[edge]]
+case = "contract-table"
+kind = "defines"
+src = "skills-svc:skills_svc/db.py::Skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table"
+kind = "reads"
+src = "skills-svc:skills_svc/api.py::get_skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table"
+kind = "writes"
+src = "skills-svc:skills_svc/api.py::update_skill"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table-raw-sql"
+kind = "reads"
+src = "profile-svc:profile_svc/reports.py::count_skills"
+dst = "contract:table:skills"
+
+# ---- contracts: AWS (values via env var, module constant, pydantic settings default) ----
+[[edge]]
+case = "contract-sns-env"
+kind = "publishes"
+src = "skills-svc:skills_svc/events.py::publish_skill_updated"
+dst = "contract:sns:{env:SKILL_EVENTS_TOPIC_ARN}"
+
+[[edge]]
+case = "contract-sqs-const"
+kind = "subscribes"
+src = "profile-svc:profile_svc/worker.py::poll"
+dst = "contract:sqs:skill-updates"
+
+[[edge]]
+case = "contract-s3-settings"
+kind = "writes"
+src = "profile-svc:profile_svc/worker.py::poll"
+dst = "contract:s3:acme-profile-exports"
+
+# ---- wrapper propagation: pkg-common's Client wraps httpx, so its verb methods are HTTP calls ----
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "contract:http:POST /users"
+
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::UserService.fetch"
+dst = "contract:http:GET /users/{}"
+
+[[edge]]
+case = "contract-http-wrapper"
+kind = "consumes"
+src = "service-a:service_a/users.py::ping"
+dst = "contract:http:GET /ping"
+
+# ---- web-app: Next.js route, fetch, interface-typed HTTP wrapper (TS → Python) ----
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "web-app:src/jobs.ts"
+dst = "web-app:src/lib/http.ts::ServiceClient"
+
+[[edge]]
+case = "relative-import"
+kind = "imports"
+src = "web-app:src/jobs.ts"
+dst = "web-app:src/lib/http.ts::services"
+
+[[edge]]
+case = "implements"
+kind = "implements"
+src = "web-app:src/lib/http.ts::UpstreamClient"
+dst = "web-app:src/lib/http.ts::ServiceClient"
+
+[[edge]]
+case = "instantiate"
+kind = "instantiates"
+src = "web-app:src/lib/http.ts"
+dst = "web-app:src/lib/http.ts::UpstreamClient"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.get"
+dst = "web-app:src/lib/http.ts::UpstreamClient.send"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.put"
+dst = "web-app:src/lib/http.ts::UpstreamClient.send"
+
+[[edge]]
+case = "same-repo-call"
+kind = "calls"
+src = "web-app:src/lib/http.ts::UpstreamClient.send"
+dst = "web-app:src/lib/http.ts::request"
+
+[[edge]]
+case = "interface-call"
+kind = "calls"
+src = "web-app:src/jobs.ts::loadSkill"
+dst = "web-app:src/lib/http.ts::ServiceClient.get"
+
+[[edge]]
+case = "contract-nextjs-route"
+kind = "serves"
+src = "web-app:src/app/api/jobs/[id]/route.ts::GET"
+dst = "contract:http:GET /api/jobs/{}"
+
+[[edge]]
+case = "contract-fetch"
+kind = "consumes"
+src = "web-app:src/jobs.ts::loadJob"
+dst = "contract:http:GET /api/jobs/{}"
+
+[[edge]]
+case = "contract-ts-wrapper"
+kind = "consumes"
+src = "web-app:src/jobs.ts::loadSkill"
+dst = "contract:http:GET /v1/skills/{}"
+
+# ---- pypika: Table set on a base class in __init__, used by a subclass ----
+[[edge]]
+case = "inherits"
+kind = "inherits"
+src = "profile-svc:profile_svc/queries.py::SkillQueries"
+dst = "profile-svc:profile_svc/queries.py::QueryBase"
+
+[[edge]]
+case = "contract-table-pypika"
+kind = "reads"
+src = "profile-svc:profile_svc/queries.py::SkillQueries.list_skills"
+dst = "contract:table:skills"
+
+[[edge]]
+case = "contract-table-pypika"
+kind = "writes"
+src = "profile-svc:profile_svc/queries.py::SkillQueries.rename"
+dst = "contract:table:skills"
+
+# ---- Spring MVC / Feign / RestTemplate (Java + Kotlin) and Go net/http ----
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.getUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.createUser"
+dst = "contract:http:POST /api/accounts"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.dropRoles"
+dst = "contract:http:DELETE /api/accounts/{}/roles"
+
+[[edge]]
+case = "contract-spring-route"
+kind = "serves"
+src = "jvm-svc:src/main/kotlin/com/acme/app/OrderController.kt::OrderController.order"
+dst = "contract:http:GET /api/orders/{}"
+
+[[edge]]
+case = "contract-feign-client"
+kind = "consumes"
+src = "jvm-svc:src/main/kotlin/com/acme/app/UsersClient.kt::UsersClient.getUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "contract-rest-template"
+kind = "consumes"
+src = "spring-svc:src/main/java/com/acme/users/OrdersClient.java::OrdersClient.order"
+dst = "contract:http:GET /api/orders/{}"
+
+[[edge]]
+case = "contract-go-route"
+kind = "serves"
+src = "gosvc:routes.go::getItem"
+dst = "contract:http:GET /api/items/{}"
+
+[[edge]]
+case = "contract-go-route"
+kind = "serves"
+src = "gosvc:routes.go::routes"
+dst = "contract:http:ANY /healthz"
+
+[[edge]]
+case = "contract-go-client"
+kind = "consumes"
+src = "gosvc:routes.go::fetchUser"
+dst = "contract:http:GET /api/accounts/{}"
+
+[[edge]]
+case = "kotlin-ctor-property-call"
+kind = "calls"
+src = "jvm-svc:src/main/kotlin/com/acme/app/OrderController.kt::OrderController.order"
+dst = "jvm-svc:src/main/kotlin/com/acme/app/UsersClient.kt::UsersClient.getUser"
+
+[[edge]]
+case = "java-new"
+kind = "instantiates"
+src = "spring-svc:src/main/java/com/acme/users/UserController.java::UserController.getUser"
+dst = "spring-svc:src/main/java/com/acme/users/User.java::User"
+
+# ---- Rust: axum method routers, actix attribute routes, reqwest ----
+[[edge]]
+case = "contract-axum-route"
+kind = "serves"
+src = "rs-api:src/main.rs::list_items"
+dst = "contract:http:GET /api/items"
+
+[[edge]]
+case = "contract-axum-route"
+kind = "serves"
+src = "rs-api:src/main.rs::create_item"
+dst = "contract:http:POST /api/items"
+
+[[edge]]
+case = "contract-actix-route"
+kind = "serves"
+src = "rs-api:src/main.rs::report"
+dst = "contract:http:GET /api/reports/{}"
+
+[[edge]]
+case = "contract-reqwest-client"
+kind = "consumes"
+src = "rs-api:src/main.rs::account"
+dst = "contract:http:GET /api/accounts/{}"
+
+# ---- Express: Router()/express() instances, use() mounts, handler references ----
+[[edge]]
+case = "contract-express-route"
+kind = "serves"
+src = "web-app:src/server.ts::listJobs"
+dst = "contract:http:GET /api/v2/jobs"
+
+[[edge]]
+case = "contract-express-route"
+kind = "serves"
+src = "web-app:src/server.ts"
+dst = "contract:http:POST /api/v2/jobs"
+
+# ---- Go route groups (gin/echo) ----
+[[edge]]
+case = "contract-go-group"
+kind = "serves"
+src = "gosvc:routes.go::listOrders"
+dst = "contract:http:GET /api/v1/orders"
+
+[[edge]]
+case = "contract-go-group"
+kind = "serves"
+src = "gosvc:routes.go::showOrder"
+dst = "contract:http:GET /api/v1/orders/{}"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::ginRoutes"
+dst = "gosvc:routes.go::engine.GET"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::ginRoutes"
+dst = "gosvc:routes.go::engine.Group"
+
+# ---- AWS through wrappers: param-flow summaries (direct params and constructor attributes) ----
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::FairQueue.send"
+dst = "pkg-common:src/acme/common/queues.py::Queue._sqs"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::Queue.send"
+dst = "pkg-common:src/acme/common/queues.py::Queue._sqs"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "pkg-common:src/acme/common/queues.py::publish"
+dst = "pkg-common:src/acme/common/queues.py::make_client"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue.send"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "calls"
+src = "service-a:service_a/notify.py::notify"
+dst = "pkg-common:src/acme/common/queues.py::publish"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "imports"
+src = "service-a:service_a/notify.py"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "imports"
+src = "service-a:service_a/notify.py"
+dst = "pkg-common:src/acme/common/queues.py::publish"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "inherits"
+src = "pkg-common:src/acme/common/queues.py::FairQueue"
+dst = "pkg-common:src/acme/common/queues.py::Queue"
+
+[[edge]]
+case = "aws-wrapper-fixture"
+kind = "instantiates"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "pkg-common:src/acme/common/queues.py::FairQueue"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/notify.py::enqueue"
+dst = "contract:sqs:user-jobs"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/notify.py::notify"
+dst = "contract:sns:user-events"
+
+[[edge]]
+case = "contract-aws-param-flow"
+kind = "publishes"
+src = "service-a:service_a/users.py::UserService.create"
+dst = "contract:sqs:users-queue"
+
+
+# ---- Settings paths resolved from YAML config files ----
+[[edge]]
+case = "contract-config-yaml"
+kind = "writes"
+src = "service-a:service_a/uploads.py::store"
+dst = "contract:s3:user-uploads"
+
+[[edge]]
+case = "module-call"
+kind = "calls"
+src = "service-a:service_a/cfg.py"
+dst = "service-a:service_a/cfg.py::load_config"
+
+[[edge]]
+case = "same-repo-import"
+kind = "imports"
+src = "service-a:service_a/uploads.py"
+dst = "service-a:service_a/cfg.py::config"
+
+[[edge]]
+case = "contract-go-default-mux"
+kind = "serves"
+src = "gosvc:routes.go::metrics"
+dst = "contract:http:ANY /metrics"
+
+# ---- Spring WebClient ----
+[[edge]]
+case = "contract-webclient"
+kind = "consumes"
+src = "jvm-svc:src/main/kotlin/com/acme/app/AccountsGateway.kt::AccountsGateway.roles"
+dst = "contract:http:DELETE /api/accounts/{}/roles"
+
+[[edge]]
+case = "contract-webclient"
+kind = "consumes"
+src = "spring-svc:src/main/java/com/acme/users/ItemsGateway.java::ItemsGateway.item"
+dst = "contract:http:GET /api/items/{}"
+
+# ---- Terraform: module-declared queue joined to the code's key, subscribed to a topic ----
+[[edge]]
+case = "infra-terraform"
+kind = "defines"
+src = "service-a:iac/main.tf"
+dst = "contract:sqs:user-jobs"
+
+[[edge]]
+case = "infra-terraform"
+kind = "subscribes"
+src = "contract:sqs:user-jobs"
+dst = "contract:sns:user-events"
+
+# ---- Indirect SNS publish: getattr via to_thread, **params, constructor attr, YAML config ----
+[[edge]]
+case = "contract-aws-indirect"
+kind = "publishes"
+src = "service-a:service_a/completion.py::build"
+dst = "contract:sns:acme-{}-completion-events.fifo"
+
+[[edge]]
+case = "same-file-call"
+kind = "calls"
+src = "service-a:service_a/completion.py::CompletionPublisher.__call__"
+dst = "service-a:service_a/completion.py::publish_to_topic"
+
+[[edge]]
+case = "same-file-instantiate"
+kind = "instantiates"
+src = "service-a:service_a/completion.py::build"
+dst = "service-a:service_a/completion.py::CompletionPublisher"
+
+# ---- chi nested Route closures ----
+[[edge]]
+case = "contract-chi-route"
+kind = "serves"
+src = "gosvc:routes.go::listInvoices"
+dst = "contract:http:GET /billing/v2/invoices"
+
+[[edge]]
+case = "go-method-call"
+kind = "calls"
+src = "gosvc:routes.go::chiRoutes"
+dst = "gosvc:routes.go::chiRouter.Route"
+
+# ---- A router mounted under two prefixes ----
+[[edge]]
+case = "contract-express-multi-mount"
+kind = "serves"
+src = "web-app:src/server.ts::listJobs"
+dst = "contract:http:GET /api/legacy/jobs"
+
+[[edge]]
+case = "contract-express-multi-mount"
+kind = "serves"
+src = "web-app:src/server.ts"
+dst = "contract:http:POST /api/legacy/jobs"

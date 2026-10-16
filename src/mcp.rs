@@ -46,11 +46,133 @@ pub struct ComindServer {
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
     embedder: Arc<Option<Embedder>>,
     uri: Arc<String>,
+    /// Manifest/lockfile rows for internal-dependency answers.
+    packages: Arc<Vec<crate::manifests::PackageRow>>,
+    /// Measured conventions (per repo + org baseline), computed at startup from stored facts.
+    conventions: Arc<Vec<crate::conventions::Convention>>,
+    /// All edges (contracts and blast radius for `preflight`).
+    edges: Arc<Vec<crate::model::Edge>>,
     /// Hand results back as markdown text (default). `false` → raw JSON text.
     markdown: bool,
 }
 
 impl ComindServer {
+    /// The index root holding `_graph` and `_ledger`.
+    fn ledger_root(&self) -> String {
+        self.uri
+            .trim_end_matches('/')
+            .strip_suffix("/_graph")
+            .unwrap_or(&self.uri)
+            .to_string()
+    }
+
+    fn agent() -> crate::ledger::Provenance {
+        crate::ledger::Provenance {
+            author: crate::ledger::AuthorKind::Agent,
+            actor: crate::ledger::actor(),
+            source: "mcp".into(),
+            agent: std::env::var("COMIND_AGENT").ok(),
+            session: None,
+        }
+    }
+
+    /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
+    async fn known(&self, ids: &[String], limit: usize) -> Vec<String> {
+        let Ok(ledger) = crate::ledger::Ledger::open(&self.ledger_root()) else {
+            return Vec::new();
+        };
+        let records = ledger.all().await.unwrap_or_default();
+        if records.is_empty() {
+            return Vec::new();
+        }
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        crate::ledger::about(&entries, ids)
+            .into_iter()
+            .filter(|e| e.trust >= crate::ledger::Trust::T2)
+            .filter(|e| {
+                matches!(
+                    e.status,
+                    crate::ledger::Status::Active
+                        | crate::ledger::Status::Moved
+                        | crate::ledger::Status::Stale
+                )
+            })
+            .take(limit)
+            .map(crate::ledger::line)
+            .collect()
+    }
+
+    async fn write_record(&self, p: RememberParam) -> anyhow::Result<String> {
+        let kind = crate::ledger::Kind::parse(&p.kind)
+            .ok_or_else(|| anyhow::anyhow!("unknown kind `{}`", p.kind))?;
+        let mut anchors = Vec::new();
+        for focus in &p.on {
+            let idx = self
+                .graph
+                .lookup(focus)
+                .ok_or_else(|| anyhow::anyhow!("no symbol matches `{focus}` — use `find` first"))?;
+            let id = self.graph.node(idx).id;
+            let s = self
+                .symbols
+                .get(&id)
+                .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
+            anchors.push(crate::ledger::Anchor::of(s));
+        }
+        let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, Self::agent());
+        rec.body = p.body.unwrap_or_default();
+        rec.trigger = p.trigger;
+        rec.evidence = p.evidence;
+        rec.fields = p
+            .fields
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect();
+        crate::ledger::Ledger::open(&self.ledger_root())?
+            .put(&rec)
+            .await?;
+        Ok(format!(
+            "recorded {} `{}` (id `{}`); it is unconfirmed until a human reviews it",
+            kind.as_str(),
+            rec.title,
+            rec.id
+        ))
+    }
+
+    async fn write_review(&self, p: ReviewParam) -> anyhow::Result<String> {
+        let kind = crate::ledger::RelationKind::parse(&p.action)
+            .ok_or_else(|| anyhow::anyhow!("unknown action `{}`", p.action))?;
+        let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
+        let records = ledger.all().await?;
+        let target = records
+            .iter()
+            .find(|r| r.id == p.id || r.id.starts_with(&p.id))
+            .ok_or_else(|| anyhow::anyhow!("no ledger record `{}`", p.id))?;
+        let rec = crate::ledger::Record::relation(
+            kind,
+            target,
+            p.reason.as_deref().unwrap_or_default(),
+            Self::agent(),
+        );
+        ledger.put(&rec).await?;
+        Ok(format!("{}: `{}`", p.action, target.title))
+    }
+
+    /// The repo a focus names: a repo itself, a file path, or a symbol.
+    fn repo_of(&self, focus: &str) -> Option<String> {
+        if self.graph.repos().iter().any(|(r, _)| r == focus) {
+            return Some(focus.to_string());
+        }
+        if let Some(s) = self
+            .symbols
+            .values()
+            .find(|s| s.kind == crate::model::SymbolKind::File && s.file_path.ends_with(focus))
+        {
+            return Some(s.repo.0.clone());
+        }
+        self.graph.lookup(focus).map(|i| self.graph.node(i).repo)
+    }
+
     /// Build a result node, attaching its LLM summary when available.
     fn node_dto(&self, n: GNode) -> NodeDto {
         let enr = self.enrichment.get(&n.id);
@@ -116,6 +238,19 @@ struct HopDto {
 struct RepoCount {
     repo: String,
     symbols: usize,
+    /// Packages published by other indexed repos that this repo depends on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    depends_on: Vec<DepDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct DepDto {
+    package: String,
+    publisher: String,
+    published: Option<String>,
+    locked: Option<String>,
+    /// Pinned to a different version than the publisher's source.
+    skew: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -153,6 +288,46 @@ struct ZoomDto {
     callees: Vec<NodeDto>,
     importers: Vec<NodeDto>,
     members: Vec<NodeDto>,
+    /// Service contracts (HTTP routes, queues, buckets, tables) this symbol takes part in.
+    contracts: Vec<ContractRoleDto>,
+    /// When the focus is a contract: its providers and consumers.
+    providers: Vec<NodeDto>,
+    consumers: Vec<NodeDto>,
+    /// Recorded constraints, failed attempts and decisions about this symbol or its containers.
+    known: Vec<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractRoleDto {
+    role: String,
+    contract: String,
+    /// Participants on the other side (consumers of what it serves, providers of what it uses).
+    counterparts: Vec<NodeDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractDto {
+    contract: String,
+    providers: Vec<NodeDto>,
+    consumers: Vec<NodeDto>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ContractsDto {
+    contracts: Vec<ContractDto>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct ContractsParam {
+    /// Only this contract type: `http`, `sqs`, `sns`, `s3` or `table`.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Only contracts missing a provider or consumer (calls to nothing, unused routes).
+    #[serde(default)]
+    dangling: Option<bool>,
+    /// Substring filter on the contract key, e.g. `/skills` or `orders`.
+    #[serde(default)]
+    query: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -175,7 +350,75 @@ struct PackItem {
 #[derive(Serialize, schemars::JsonSchema)]
 struct GuideDto {
     found: bool,
+    /// Repo the conventions are scoped to (from `focus`), if any.
+    repo: Option<String>,
+    /// Measured conventions for the repo, then the org baseline.
+    conventions: Vec<ConventionDto>,
+    /// LLM-written narrative guide (present only if the index was built with `--guide`).
     guide: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ConventionDto {
+    scope: String,
+    dimension: String,
+    rule: String,
+    exemplars: Vec<String>,
+    counterexamples: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct RememberParam {
+    /// `decision` | `attempt` | `constraint` | `gotcha` | `intent` | `question`.
+    kind: String,
+    /// Symbols (ids or names) the record is about.
+    on: Vec<String>,
+    /// One neutral, factual line.
+    title: String,
+    #[serde(default)]
+    body: Option<String>,
+    /// When a future engineer would need this.
+    #[serde(default)]
+    trigger: Option<String>,
+    /// Evidence: `commit:<sha>`, `mr:!123`, `test:<path>::<name>`, error text… Required for `attempt`.
+    #[serde(default)]
+    evidence: Vec<String>,
+    /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.
+    #[serde(default)]
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct PreflightParam {
+    /// Files you plan to change (repo-relative or absolute paths).
+    #[serde(default)]
+    files: Vec<String>,
+    /// Symbols you plan to change (ids or names).
+    #[serde(default)]
+    symbols: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct ReviewParam {
+    /// Record id (or a unique prefix) from `why`.
+    id: String,
+    /// `confirm` (verified against the code) | `retract` | `supersede` | `dispute`.
+    action: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct LedgerDto {
+    ok: bool,
+    message: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct GuideParam {
+    /// A repo name, file path or symbol: scopes conventions to its repo. Omit for org-wide.
+    #[serde(default)]
+    focus: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -185,6 +428,8 @@ struct PackDto {
     est_total_tokens: usize,
     token_budget: usize,
     items: Vec<PackItem>,
+    /// Recorded constraints and failed attempts about the focus and the packed symbols.
+    known: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -277,8 +522,9 @@ struct PackParam {
 const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed codebase.\n\
 New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
 Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
-`ripple` (who breaks if I change this), `thread` (forward call trace), `context_pack` \
-(minimal safe edit read-set), or `flow` (narrated walkthrough). `search` needs embeddings \
+`ripple` (who breaks if I change this — crosses service contracts too), `thread` (forward call \
+trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthrough). \
+`contracts` lists HTTP routes, queues, topics, buckets and tables with providers and consumers. `search` needs embeddings \
 (on by default unless the index was built with --no-embed); the graph tools always work.";
 
 #[tool_router]
@@ -328,7 +574,11 @@ impl ComindServer {
                 .graph
                 .repos()
                 .into_iter()
-                .map(|(repo, symbols)| RepoCount { repo, symbols })
+                .map(|(repo, symbols)| RepoCount {
+                    depends_on: comind_deps(&self.packages, &repo),
+                    repo,
+                    symbols,
+                })
                 .collect(),
         };
         let md = md_repos(&dto);
@@ -400,7 +650,7 @@ impl ComindServer {
         name = "zoom",
         description = "360° view of one symbol — definition, container, callers, callees, importers, members. Use to understand a symbol before changing it. Takes a symbol id/name from find/search."
     )]
-    fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
+    async fn zoom(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
         let dto = match self.graph.lookup(&p.focus) {
             None => ZoomDto {
                 found: false,
@@ -410,6 +660,10 @@ impl ComindServer {
                 callees: vec![],
                 importers: vec![],
                 members: vec![],
+                contracts: vec![],
+                providers: vec![],
+                consumers: vec![],
+                known: vec![],
             },
             Some(idx) => {
                 let z = self.graph.zoom(idx);
@@ -421,10 +675,177 @@ impl ComindServer {
                     callees: z.callees.into_iter().map(|n| self.node_dto(n)).collect(),
                     importers: z.importers.into_iter().map(|n| self.node_dto(n)).collect(),
                     members: z.members.into_iter().map(|n| self.node_dto(n)).collect(),
+                    contracts: z
+                        .contracts
+                        .into_iter()
+                        .map(|c| ContractRoleDto {
+                            role: c.role.to_string(),
+                            contract: c.contract.name,
+                            counterparts: c
+                                .counterparts
+                                .into_iter()
+                                .map(|n| self.node_dto(n))
+                                .collect(),
+                        })
+                        .collect(),
+                    providers: z.providers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    consumers: z.consumers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    known: match self.graph.scope_of(&p.focus) {
+                        Some((_, ids)) => self.known(&ids, 5).await,
+                        None => vec![],
+                    },
                 }
             }
         };
         let md = md_zoom(&p.focus, &dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "contracts",
+        description = "Service contracts across repos: HTTP routes ↔ clients, SQS/SNS queues and topics, S3 buckets, DB tables — each with providers and consumers. Use to see how services talk, find calls to routes nobody serves (`dangling`), or filter by `kind`/`query`. `ripple` already crosses these."
+    )]
+    fn contracts(&self, Parameters(p): Parameters<ContractsParam>) -> CallToolResult {
+        let views = self
+            .graph
+            .contracts(p.kind.as_deref(), p.dangling.unwrap_or(false));
+        let dto = ContractsDto {
+            contracts: views
+                .into_iter()
+                .filter(|v| {
+                    p.query
+                        .as_deref()
+                        .is_none_or(|q| v.contract.name.contains(q))
+                })
+                .take(200)
+                .map(|v| ContractDto {
+                    contract: v.contract.name,
+                    providers: v.providers.into_iter().map(|n| self.node_dto(n)).collect(),
+                    consumers: v.consumers.into_iter().map(|n| self.node_dto(n)).collect(),
+                })
+                .collect(),
+        };
+        let md = md_contracts(&dto);
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "why",
+        description = "Reasoning blame for a symbol: recorded decisions, failed attempts, constraints, gotchas and intents about it or its class/file — with status (active / stale since the code changed / orphaned), trust and evidence. Check before changing code so you don't repeat a failed approach or break a constraint."
+    )]
+    async fn why(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
+        let Some((name, ids)) = self.graph.scope_of(&p.focus) else {
+            let dto = LedgerDto {
+                ok: false,
+                message: format!("no symbol matches `{}`", p.focus),
+            };
+            let md = format!("_{}_", dto.message);
+            return self.reply(&dto, md);
+        };
+        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
+            Ok(l) => l.all().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        let about = crate::ledger::about(&entries, &ids);
+        let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
+        let dto = LedgerDto {
+            ok: true,
+            message: md.clone(),
+        };
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "preflight",
+        description = "Before you change code: given the files and/or symbols you plan to edit, returns recorded constraints and failed attempts about them, contracts (routes, tables, queues) other services consume, blast radius across repos, and directories that usually change together but aren't in your plan. Run it on your plan before editing."
+    )]
+    async fn preflight(&self, Parameters(p): Parameters<PreflightParam>) -> CallToolResult {
+        let mut changes = Vec::new();
+        for f in &p.files {
+            if let Some(s) = self.symbols.values().find(|s| {
+                s.kind == crate::model::SymbolKind::File
+                    && (s.file_path == *f || f.ends_with(&format!("/{}", s.file_path)))
+            }) {
+                changes.push(crate::preflight::Change {
+                    repo: s.repo.0.clone(),
+                    path: s.file_path.clone(),
+                    lines: Vec::new(),
+                });
+            }
+        }
+        for focus in &p.symbols {
+            let Some(idx) = self.graph.lookup(focus) else {
+                continue;
+            };
+            if let Some(s) = self.symbols.get(&self.graph.node(idx).id) {
+                changes.push(crate::preflight::Change {
+                    repo: s.repo.0.clone(),
+                    path: s.file_path.clone(),
+                    lines: vec![(s.range.start.line, s.range.end.line)],
+                });
+            }
+        }
+        let records = match crate::ledger::Ledger::open(&self.ledger_root()) {
+            Ok(l) => l.all().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+        let entries = crate::ledger::derive(&records, &symbols);
+        let findings = crate::checks::run(&entries, &symbols, &self.edges, &self.packages);
+        let recipes: Vec<crate::conventions::Convention> = self
+            .conventions
+            .iter()
+            .filter(|c| c.dimension == "recipes")
+            .cloned()
+            .collect();
+        let md = if changes.is_empty() {
+            "_no indexed files or symbols matched — pass repo-relative paths or names from `find`._"
+                .to_string()
+        } else {
+            crate::preflight::report(
+                &self.graph,
+                &symbols,
+                &self.edges,
+                &entries,
+                &recipes,
+                &findings,
+                &changes,
+            )
+        };
+        let dto = LedgerDto {
+            ok: !changes.is_empty(),
+            message: md.clone(),
+        };
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "remember",
+        description = "Record durable engineering knowledge about symbols for the team: a failed or reverted approach (`attempt`, evidence required), a choice between alternatives (`decision`), an invariant (`constraint`), a trap (`gotcha`), why code exists (`intent`) or an open `question`. Only record what a future engineer would be glad to know before editing — not summaries of what you did. Write neutral facts, never instructions."
+    )]
+    async fn remember(&self, Parameters(p): Parameters<RememberParam>) -> CallToolResult {
+        let result = self.write_record(p).await;
+        let dto = LedgerDto {
+            ok: result.is_ok(),
+            message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
+        };
+        let md = dto.message.clone();
+        self.reply(&dto, md)
+    }
+
+    #[tool(
+        name = "review",
+        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `retract` (no longer true), `supersede` (replaced by a newer record) or `dispute` (contradicted). Use when `why` shows a STALE record you have verified."
+    )]
+    async fn review(&self, Parameters(p): Parameters<ReviewParam>) -> CallToolResult {
+        let result = self.write_review(p).await;
+        let dto = LedgerDto {
+            ok: result.is_ok(),
+            message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
+        };
+        let md = dto.message.clone();
         self.reply(&dto, md)
     }
 
@@ -455,7 +876,11 @@ impl ComindServer {
                     total_dependents: hops.len(),
                     by_repo: by_repo
                         .into_iter()
-                        .map(|(repo, symbols)| RepoCount { repo, symbols })
+                        .map(|(repo, symbols)| RepoCount {
+                            repo,
+                            symbols,
+                            depends_on: Vec::new(),
+                        })
                         .collect(),
                     dependents: hops.into_iter().map(hop_dto).collect(),
                 }
@@ -467,11 +892,34 @@ impl ComindServer {
 
     #[tool(
         name = "guide",
-        description = "The repo's inferred coding style guide (naming, typing, structure)"
+        description = "Measured coding conventions to follow when editing: naming, signatures, base classes, error roots, layout, logging, config, internal libraries to use instead of raw ones, testing — each with counts, exemplar locations and known deviations. Pass `focus` (repo, file or symbol) to scope to its repo; the org baseline is always included."
     )]
-    fn guide(&self, _p: Parameters<NoArgs>) -> CallToolResult {
+    fn guide(&self, Parameters(p): Parameters<GuideParam>) -> CallToolResult {
+        let repo = p.focus.as_deref().and_then(|f| self.repo_of(f));
+        let repo_keys: std::collections::HashSet<&str> = self
+            .conventions
+            .iter()
+            .filter(|c| Some(&c.repo) == repo.as_ref())
+            .map(|c| c.key.as_str())
+            .collect();
+        let mut conventions: Vec<ConventionDto> = Vec::new();
+        for c in self.conventions.iter() {
+            let scoped = Some(&c.repo) == repo.as_ref();
+            let org = c.repo == crate::conventions::ORG && !repo_keys.contains(c.key.as_str());
+            if scoped || org {
+                conventions.push(ConventionDto {
+                    scope: c.repo.clone(),
+                    dimension: c.dimension.clone(),
+                    rule: c.rule.clone(),
+                    exemplars: c.exemplars.iter().take(2).cloned().collect(),
+                    counterexamples: c.counterexamples.iter().take(2).cloned().collect(),
+                });
+            }
+        }
         let dto = GuideDto {
-            found: self.style_guide.is_some(),
+            found: !conventions.is_empty() || self.style_guide.is_some(),
+            repo,
+            conventions,
             guide: (*self.style_guide).clone(),
         };
         let md = md_guide(&dto);
@@ -545,7 +993,7 @@ impl ComindServer {
         name = "context_pack",
         description = "The minimal token-budgeted set of symbols to read before editing the focus symbol safely. Use to assemble just-enough context for a change. Returns ranked symbols with locations + token estimates within the budget."
     )]
-    fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
+    async fn context_pack(&self, Parameters(p): Parameters<PackParam>) -> CallToolResult {
         let budget = p.token_budget.unwrap_or(1500) as usize;
         let dto = match self.graph.lookup(&p.focus) {
             None => PackDto {
@@ -554,15 +1002,21 @@ impl ComindServer {
                 est_total_tokens: 0,
                 token_budget: budget,
                 items: vec![],
+                known: vec![],
             },
             Some(idx) => {
                 let pack = self.graph.context_pack(idx, budget);
                 let est_total_tokens = pack.iter().map(|(_, t)| t).sum();
+                let mut ids: Vec<String> = pack.iter().map(|(n, _)| n.id.clone()).collect();
+                if let Some((_, scope)) = self.graph.scope_of(&p.focus) {
+                    ids.extend(scope);
+                }
                 PackDto {
                     focus: p.focus.clone(),
                     found: true,
                     est_total_tokens,
                     token_budget: budget,
+                    known: self.known(&ids, 6).await,
                     items: pack
                         .into_iter()
                         .map(|(n, t)| PackItem {
@@ -582,8 +1036,8 @@ impl ComindServer {
 
 #[rmcp::tool_handler(router = Self::tool_router())]
 impl rmcp::ServerHandler for ComindServer {
-    fn get_info(&self) -> rmcp::model::ServerInfo {
-        rmcp::model::ServerInfo::new(
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
@@ -650,8 +1104,33 @@ fn md_repos(d: &ReposDto) -> String {
     }
     for r in &d.repos {
         let _ = writeln!(o, "- **{}** — {} symbols", r.repo, r.symbols);
+        for dep in &r.depends_on {
+            let _ = writeln!(
+                o,
+                "  - uses `{}` from **{}** — locked {} vs published {}{}",
+                dep.package,
+                dep.publisher,
+                dep.locked.as_deref().unwrap_or("?"),
+                dep.published.as_deref().unwrap_or("?"),
+                if dep.skew { " ⚠ skew" } else { "" }
+            );
+        }
     }
     o
+}
+
+fn comind_deps(rows: &[crate::manifests::PackageRow], repo: &str) -> Vec<DepDto> {
+    crate::manifests::internal(rows)
+        .into_iter()
+        .filter(|d| d.consumer == repo)
+        .map(|d| DepDto {
+            skew: d.skewed(),
+            package: d.name,
+            publisher: d.publisher,
+            published: d.published,
+            locked: d.locked,
+        })
+        .collect()
 }
 
 fn md_suggest(d: &SuggestDto) -> String {
@@ -716,6 +1195,43 @@ fn md_zoom(focus: &str, d: &ZoomDto) -> String {
     node_section(&mut o, "Callers", &d.callers);
     node_section(&mut o, "Callees", &d.callees);
     node_section(&mut o, "Importers", &d.importers);
+    if !d.known.is_empty() {
+        o.push_str(
+            "\n**Known constraints & dead ends** (team ledger — verify before relying on them)\n",
+        );
+        for k in &d.known {
+            let _ = writeln!(o, "- {k}");
+        }
+    }
+    node_section(&mut o, "Provided by", &d.providers);
+    node_section(&mut o, "Used by", &d.consumers);
+    if !d.contracts.is_empty() {
+        let _ = write!(o, "\n**Contracts**\n");
+        for c in &d.contracts {
+            let _ = writeln!(o, "- {} `{}`", c.role, c.contract);
+            for n in &c.counterparts {
+                let _ = writeln!(o, "  - **{}** ({}) `{}`", n.name, n.repo, n.location);
+            }
+        }
+    }
+    o
+}
+
+fn md_contracts(d: &ContractsDto) -> String {
+    let mut o = format!("## {} contract(s)\n", d.contracts.len());
+    for c in &d.contracts {
+        let _ = writeln!(o, "\n### `{}`", c.contract);
+        let side = |o: &mut String, label: &str, ns: &[NodeDto]| {
+            if ns.is_empty() {
+                let _ = writeln!(o, "- {label}: _none indexed_");
+            }
+            for n in ns {
+                let _ = writeln!(o, "- {label}: **{}** ({}) `{}`", n.name, n.repo, n.location);
+            }
+        };
+        side(&mut o, "provided by", &c.providers);
+        side(&mut o, "used by", &c.consumers);
+    }
     o
 }
 
@@ -798,6 +1314,15 @@ fn md_pack(d: &PackDto) -> String {
         d.token_budget,
         d.items.len()
     );
+    if !d.known.is_empty() {
+        o.push_str(
+            "**Known constraints & dead ends** (team ledger — verify before relying on them)\n",
+        );
+        for k in &d.known {
+            let _ = writeln!(o, "- {k}");
+        }
+        o.push('\n');
+    }
     for (i, it) in d.items.iter().enumerate() {
         let _ = write!(
             o,
@@ -816,10 +1341,31 @@ fn md_pack(d: &PackDto) -> String {
 }
 
 fn md_guide(d: &GuideDto) -> String {
-    match &d.guide {
-        Some(g) => format!("## Style guide\n\n{g}\n"),
-        None => "## Style guide\n\n_none — index was built without `--enrich`_\n".into(),
+    let mut o = match &d.repo {
+        Some(r) => format!("## Conventions — {r}\n"),
+        None => "## Conventions — org baseline\n".to_string(),
+    };
+    if d.conventions.is_empty() {
+        o.push_str("\n_none measured — re-run `comind index`/`link` to store facts._\n");
     }
+    let mut org_header = false;
+    for c in &d.conventions {
+        if c.scope == crate::conventions::ORG && d.repo.is_some() && !org_header {
+            o.push_str("\n**Org baseline**\n");
+            org_header = true;
+        }
+        let _ = writeln!(o, "- _{}_: {}", c.dimension, c.rule);
+        if !c.exemplars.is_empty() {
+            let _ = writeln!(o, "  - e.g. `{}`", c.exemplars.join("`, `"));
+        }
+        if !c.counterexamples.is_empty() {
+            let _ = writeln!(o, "  - deviations: `{}`", c.counterexamples.join("`, `"));
+        }
+    }
+    if let Some(g) = &d.guide {
+        let _ = write!(o, "\n## Narrative guide\n\n{g}\n");
+    }
+    o
 }
 
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
@@ -827,6 +1373,11 @@ fn md_guide(d: &GuideDto) -> String {
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
+    let mut conventions = match crate::index::read_facts(uri).await {
+        Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
+        _ => Vec::new(),
+    };
+    conventions.extend(crate::index::read_recipes(uri).await.unwrap_or_default());
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
     let by_id: HashMap<String, Symbol> =
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
@@ -878,6 +1429,9 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
+        packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
+        conventions: Arc::new(conventions),
+        edges: Arc::new(edges),
         markdown,
     };
     let service = server.serve(rmcp::transport::io::stdio()).await?;

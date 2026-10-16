@@ -1,7 +1,7 @@
 //! Comind CLI — the single distributable binary.
 //!
 //! Subcommands: `index`, `link`, `explore`, `search`, `find`, `repos`, `stats`, `guide`,
-//! `flow`, `changed`, `serve`, `config`.
+//! `flow`, `changed`, `serve`, `config`, `eval`.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -52,12 +52,18 @@ enum Cmd {
         guide: bool,
         #[arg(long = "no-guide", overrides_with = "guide")]
         no_guide: bool,
+        /// Skip every LLM step (enrich, flows, guide), whatever the config says
+        #[arg(long = "no-llm")]
+        no_llm: bool,
         /// Reparse only files changed since the last indexed commit
         #[arg(long)]
         incremental: bool,
         /// Diff against this commit instead of the recorded base
         #[arg(long)]
         since: Option<String>,
+        /// SCIP: auto (index.scip or installed indexers) | require | off; config `scip`
+        #[arg(long)]
+        scip: Option<String>,
     },
     /// Link several repos into one cross-repo index (adds cross-repo edges + blast radius)
     Link {
@@ -87,9 +93,15 @@ enum Cmd {
         guide: bool,
         #[arg(long = "no-guide", overrides_with = "guide")]
         no_guide: bool,
+        /// Skip every LLM step (enrich, flows, guide), whatever the config says
+        #[arg(long = "no-llm")]
+        no_llm: bool,
         /// Recompute only symbols in files changed since the last index
         #[arg(long)]
         incremental: bool,
+        /// SCIP: auto (index.scip or installed indexers) | require | off; config `scip`
+        #[arg(long)]
+        scip: Option<String>,
     },
     /// Zoom, blast radius, and context pack for a symbol
     Explore {
@@ -185,10 +197,245 @@ enum Cmd {
         #[arg(long, short = 'o')]
         output: Option<String>,
     },
+    /// Record why code is the way it is: a decision, failed attempt, constraint, gotcha, intent or question
+    Remember {
+        /// decision | attempt | constraint | gotcha | intent | question
+        kind: String,
+        /// The symbol (or file) this is about (repeatable)
+        #[arg(long)]
+        on: Vec<String>,
+        /// One-line statement of the fact
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        body: String,
+        /// When a future reader needs this
+        #[arg(long)]
+        trigger: Option<String>,
+        /// Evidence: commit:<sha>, mr:!123, test:<path>::<name>, url:…, or text (repeatable)
+        #[arg(long)]
+        evidence: Vec<String>,
+        /// Kind-specific field `key=value` (repeatable), e.g. outcome=reverted
+        #[arg(long)]
+        field: Vec<String>,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Reasoning blame: recorded decisions, failed attempts and constraints about a symbol
+    Why {
+        focus: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Confirm, retract, supersede or dispute a ledger record
+    Review {
+        id: String,
+        /// confirm | retract | supersede | dispute
+        action: String,
+        #[arg(long, default_value = "")]
+        reason: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// The ledger with derived status; `--inbox` shows only what needs review
+    Ledger {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only stale, orphaned, or unconfirmed agent records
+        #[arg(long)]
+        inbox: bool,
+        /// Evaluate constraint checks; exits non-zero when a `must` constraint is violated (CI)
+        #[arg(long)]
+        check: bool,
+        /// Fold new inbox records into the Lance snapshot and drop erased ones
+        #[arg(long)]
+        compact: bool,
+    },
+    /// Erase ledger records (and relations about them) by id or by author; dry run without --yes
+    Erase {
+        /// Record ids or id prefixes
+        ids: Vec<String>,
+        /// Every record by this pseudonymous actor (`me` for yours)
+        #[arg(long)]
+        actor: Option<String>,
+        /// Delete for real
+        #[arg(long)]
+        yes: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Terminal UI (or `--web`: local web UI) for overview, contracts, ledger, explorer and conventions
+    Ui {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Serve the web UI on 127.0.0.1 instead of the terminal UI
+        #[arg(long)]
+        web: bool,
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+    },
+    /// Before committing: recorded constraints/dead ends, contracts, blast radius and missing
+    /// companions for your uncommitted changes
+    Preflight {
+        /// Repository path (default: current directory)
+        #[arg(default_value = ".")]
+        repo: String,
+        /// Compare the working tree against this revision
+        #[arg(long, default_value = "HEAD")]
+        base: String,
+        /// Exit non-zero when a `must` constraint check fails in a changed file (CI)
+        #[arg(long)]
+        strict: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Propose ledger records from commit history (sends commit messages to the configured LLM;
+    /// proposals land at T1 for human review). Agent sessions are never read.
+    Distill {
+        #[command(subcommand)]
+        what: DistillWhat,
+    },
+    /// Seed the ledger from git history: reverts → failed attempts, commit trailers → records
+    Harvest {
+        /// Repository paths (already indexed)
+        #[arg(required = true)]
+        repos: Vec<String>,
+        /// How many first-parent commits to scan per repo
+        #[arg(long, default_value_t = 2000)]
+        limit: usize,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Agent hook adapter: reads the hook's JSON on stdin, prints context to inject (stdout JSON)
+    /// Check this machine's setup: index, ledger, hooks, keys, signing, SCIP indexers
+    Doctor {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Local mirror of a remote index (used by hooks)
+    Cache {
+        #[command(subcommand)]
+        what: CacheWhat,
+    },
+    Hook {
+        /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
+        /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
+        agent: String,
+        /// Event: `session-start` | `pre-edit`
+        event: String,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Print the hook configuration to add to an agent's settings
+    InitHooks {
+        /// Agent: `claude` (JSON for Claude Code), or `cursor` | `gemini` | `codex` | `generic`
+        /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
+        agent: String,
+    },
+    /// Measured coding conventions per repo and org-wide, with exemplars and deviations
+    Conventions {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only this repo (and the org baseline)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Internal packages: who publishes each, who depends on it, and at which version
+    Packages {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only consumers pinned to a version other than the publisher's
+        #[arg(long)]
+        skew: bool,
+    },
+    /// Service contracts (HTTP routes, queues, topics, buckets, tables) and who uses them
+    Contracts {
+        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        /// Only contracts of this type: http, sqs, sns, s3, table
+        #[arg(long = "type")]
+        kind: Option<String>,
+        /// Only contracts missing a provider or a consumer
+        #[arg(long)]
+        dangling: bool,
+    },
+    /// Measure graph quality against a gold set
+    Eval {
+        #[command(subcommand)]
+        what: EvalWhat,
+    },
     /// Show or scaffold the config file
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheWhat {
+    /// Bring the local mirror of a remote index up to date
+    Refresh {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DistillWhat {
+    /// A merged GitLab MR (default: the one that merged the repo's HEAD commit, as in a
+    /// main-branch CI pipeline). Needs `GITLAB_TOKEN` (read_api) or `CI_JOB_TOKEN`
+    Mr {
+        /// Local checkout of the repo (for anchoring to indexed symbols)
+        repo: String,
+        /// GitLab project path, e.g. `group/sub/repo` (default: `CI_PROJECT_PATH`)
+        #[arg(long)]
+        project: Option<String>,
+        /// MR number; default: the merged MR containing `--commit`
+        #[arg(long)]
+        iid: Option<u64>,
+        /// Commit to look up (default: the repo's HEAD)
+        #[arg(long)]
+        commit: Option<String>,
+        /// Show what would be sent; no LLM call
+        #[arg(long)]
+        list: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+    /// Commit messages of a repo (squash-merged MR descriptions, reverts with reasons)
+    Git {
+        repo: String,
+        /// How many first-parent commits to read
+        #[arg(long, default_value_t = 300)]
+        limit: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalWhat {
+    /// Precision/recall of resolved edges on a fixture org (subdir per repo + expected.toml)
+    Graph {
+        /// Fixture directory
+        #[arg(default_value = "tests/fixtures/org")]
+        fixture: String,
+        /// List every missed and spurious edge
+        #[arg(long, short)]
+        verbose: bool,
+        /// Directory of `<repo>.scip` indexes to attach
+        #[arg(long)]
+        scip: Option<String>,
+        /// Limit to these fixture repos (repeatable)
+        #[arg(long)]
+        repo: Vec<String>,
     },
 }
 
@@ -217,19 +464,25 @@ fn main() -> ExitCode {
             no_flows,
             guide,
             no_guide,
+            no_llm,
             incremental,
             since,
+            scip,
         } => {
             let cfg = comind::config::Config::load();
+            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+                return ExitCode::FAILURE;
+            };
             cmd_index(
                 &repo,
                 index_dir.as_deref(),
                 tri(embed, no_embed).unwrap_or(cfg.embed()),
-                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                tri(flows, no_flows).unwrap_or(cfg.flows()),
-                tri(guide, no_guide).unwrap_or(cfg.guide()),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
+                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
                 since.as_deref(),
+                scip,
             )
         }
         Cmd::Link {
@@ -243,18 +496,24 @@ fn main() -> ExitCode {
             no_flows,
             guide,
             no_guide,
+            no_llm,
             incremental,
+            scip,
         } => {
             let cfg = comind::config::Config::load();
+            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+                return ExitCode::FAILURE;
+            };
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
                 tri(embed, no_embed).unwrap_or(cfg.embed()),
-                tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                tri(flows, no_flows).unwrap_or(cfg.flows()),
-                tri(guide, no_guide).unwrap_or(cfg.guide()),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
+                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
+                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
                 incremental,
+                scip,
             )
         }
         Cmd::Explore {
@@ -317,6 +576,138 @@ fn main() -> ExitCode {
             let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(index_dir.as_deref(), markdown)
         }
+        Cmd::Contracts {
+            index_dir,
+            kind,
+            dangling,
+        } => cmd_contracts(index_dir.as_deref(), kind.as_deref(), dangling),
+        Cmd::Packages { index_dir, skew } => cmd_packages(index_dir.as_deref(), skew),
+        Cmd::Conventions { index_dir, repo } => {
+            cmd_conventions(index_dir.as_deref(), repo.as_deref())
+        }
+        Cmd::Remember {
+            kind,
+            on,
+            title,
+            body,
+            trigger,
+            evidence,
+            field,
+            index_dir,
+        } => cmd_remember(
+            &kind,
+            &on,
+            &title,
+            &body,
+            trigger,
+            evidence,
+            &field,
+            index_dir.as_deref(),
+        ),
+        Cmd::Why { focus, index_dir } => cmd_why(&focus, index_dir.as_deref()),
+        Cmd::Review {
+            id,
+            action,
+            reason,
+            index_dir,
+        } => cmd_review(&id, &action, &reason, index_dir.as_deref()),
+        Cmd::Ledger {
+            index_dir,
+            inbox,
+            check,
+            compact,
+        } => cmd_ledger(index_dir.as_deref(), inbox, check, compact),
+        Cmd::Hook {
+            agent,
+            event,
+            index_dir,
+        } => cmd_hook(&agent, &event, index_dir.as_deref()),
+        Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+        Cmd::Doctor { index_dir } => cmd_doctor(index_dir.as_deref()),
+        Cmd::Cache {
+            what: CacheWhat::Refresh { index_dir },
+        } => {
+            let root = comind::config::Config::load().index_dir(index_dir.as_deref());
+            let Some(dir) = comind::cache::dir(&root) else {
+                comind::ui::err("no HOME for the cache");
+                return ExitCode::FAILURE;
+            };
+            match comind::cache::refresh(&root, &dir) {
+                Ok(copied) => {
+                    comind::ui::ok(if copied {
+                        "mirror updated (graph copied)"
+                    } else {
+                        "mirror up to date"
+                    });
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    comind::ui::err(&format!("{e:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Cmd::Distill {
+            what:
+                DistillWhat::Mr {
+                    repo,
+                    project,
+                    iid,
+                    commit,
+                    list,
+                    dry_run,
+                    index_dir,
+                },
+        } => cmd_distill_mr(
+            &repo,
+            project.or_else(|| std::env::var("CI_PROJECT_PATH").ok()),
+            iid,
+            commit,
+            list,
+            dry_run,
+            index_dir.as_deref(),
+        ),
+        Cmd::Distill {
+            what:
+                DistillWhat::Git {
+                    repo,
+                    limit,
+                    dry_run,
+                    index_dir,
+                },
+        } => cmd_distill_git(&repo, limit, dry_run, index_dir.as_deref()),
+        Cmd::Harvest {
+            repos,
+            limit,
+            index_dir,
+        } => cmd_harvest(&repos, limit, index_dir.as_deref()),
+        Cmd::Preflight {
+            repo,
+            base,
+            strict,
+            index_dir,
+        } => cmd_preflight(&repo, &base, strict, index_dir.as_deref()),
+        Cmd::Ui {
+            index_dir,
+            web,
+            port,
+        } => cmd_ui(index_dir.as_deref(), web.then_some(port)),
+        Cmd::Erase {
+            ids,
+            actor,
+            yes,
+            index_dir,
+        } => cmd_erase(&ids, actor.as_deref(), yes, index_dir.as_deref()),
+
+        Cmd::Eval {
+            what:
+                EvalWhat::Graph {
+                    fixture,
+                    verbose,
+                    scip,
+                    repo,
+                },
+        } => cmd_eval_graph(&fixture, verbose, scip.as_deref(), &repo),
         Cmd::Config { action } => cmd_config(action),
     }
 }
@@ -331,6 +722,37 @@ fn gate_llm_steps(enrich: bool, flows: bool, guide: bool) -> (bool, bool, bool) 
         (false, false, false)
     } else {
         (enrich, flows, guide)
+    }
+}
+
+/// `--scip` flag → config → `auto`; `None` (after an error message) for an unknown value.
+fn scip_mode(flag: Option<&str>, cfg: &comind::config::Config) -> Option<comind::scip::Mode> {
+    match flag {
+        None => Some(cfg.scip()),
+        Some(f) => comind::scip::Mode::parse(f).or_else(|| {
+            comind::ui::err(&format!("--scip must be auto, require or off (got {f:?})"));
+            None
+        }),
+    }
+}
+
+/// Attach SCIP to one parsed repo, reporting what was found.
+fn attach_scip(
+    mode: comind::scip::Mode,
+    root: &Path,
+    name: &str,
+    out: &mut comind::parse::ParseOutput,
+) -> Result<(), String> {
+    match comind::scip::ingest(mode, root, name, &out.symbols, &mut out.facts) {
+        Ok(a) if a.documents > 0 => {
+            comind::ui::note(&format!(
+                "{name}: SCIP {} index(es), {} files, {} defs, {} refs",
+                a.indexes, a.documents, a.definitions, a.references
+            ));
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("{e:#}")),
     }
 }
 
@@ -350,14 +772,17 @@ fn tri(on: bool, off: bool) -> Option<bool> {
 fn parse_and_resolve(repos: &[&str]) -> Result<(Vec<Symbol>, Vec<Edge>), String> {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
+    let mut facts = Vec::new();
     for path in repos {
         let name = repo_name(path);
         let o = comind::parse::parse_repo(Path::new(path), &name)
             .map_err(|e| format!("{name}: parse failed: {e:#}"))?;
         symbols.extend(o.symbols);
         edges.extend(o.edges);
+        facts.extend(o.facts);
     }
-    let resolved = comind::resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols);
     Ok((symbols, resolved.edges))
 }
 
@@ -824,6 +1249,1132 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 }
 
 /// `comind config <path|init>` — show or scaffold the config file.
+fn human() -> comind::ledger::Provenance {
+    comind::ledger::Provenance {
+        author: comind::ledger::AuthorKind::Human,
+        actor: comind::ledger::actor(),
+        source: "cli".into(),
+        agent: None,
+        session: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
+fn cmd_remember(
+    kind: &str,
+    on: &[String],
+    title: &str,
+    body: &str,
+    trigger: Option<String>,
+    evidence: Vec<String>,
+    fields: &[String],
+    from: Option<&str>,
+) -> ExitCode {
+    let Some(kind) = comind::ledger::Kind::parse(kind) else {
+        comind::ui::err("kind must be decision, attempt, constraint, gotcha, intent or question");
+        return ExitCode::FAILURE;
+    };
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index to anchor to: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
+    let mut anchors = Vec::new();
+    for focus in on {
+        match g.lookup(focus).and_then(|i| by_id.get(&g.node(i).id)) {
+            Some(s) => anchors.push(comind::ledger::Anchor::of(s)),
+            None => {
+                comind::ui::err(&format!("no symbol matches `{focus}` (try `comind find`)"));
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let mut rec = comind::ledger::Record::new(kind, title, anchors, human());
+    rec.body = body.to_string();
+    rec.trigger = trigger;
+    rec.evidence = evidence;
+    for f in fields {
+        if let Some((k, v)) = f.split_once('=') {
+            rec.fields.insert(
+                k.trim().to_string(),
+                serde_json::Value::String(v.trim().into()),
+            );
+        }
+    }
+    match comind::ledger::put_blocking(&cfg.index_dir(from), &rec) {
+        Ok(()) => {
+            comind::ui::ok(&format!(
+                "recorded {} `{}` ({})",
+                kind.as_str(),
+                rec.title,
+                rec.id
+            ));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let Some((name, ids)) = g.scope_of(focus) else {
+        comind::ui::err(&format!("no symbol matches `{focus}`"));
+        return ExitCode::FAILURE;
+    };
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let about = comind::ledger::about(&entries, &ids);
+    println!(
+        "{}",
+        comind::ledger::markdown(&format!("why `{name}`"), &about)
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitCode {
+    let Some(kind) = comind::ledger::RelationKind::parse(action) else {
+        comind::ui::err("action must be confirm, retract, supersede or dispute");
+        return ExitCode::FAILURE;
+    };
+    let root = comind::config::Config::load().index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    let Some(target) = records.iter().find(|r| r.id == id || r.id.starts_with(id)) else {
+        comind::ui::err(&format!("no ledger record `{id}`"));
+        return ExitCode::FAILURE;
+    };
+    let rec = comind::ledger::Record::relation(kind, target, reason, human());
+    match comind::ledger::put_blocking(&root, &rec) {
+        Ok(()) => {
+            comind::ui::ok(&format!("{action}: `{}`", target.title));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    if compact {
+        return match comind::ledger::compact_blocking(&cfg.index_dir(from)) {
+            Ok((added, removed)) => {
+                comind::ui::ok(&format!(
+                    "ledger compacted: {added} added, {removed} erased record(s) dropped"
+                ));
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                comind::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let (symbols, edges) =
+        comind::index::read_graph_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let records = match comind::ledger::all_blocking(&cfg.index_dir(from)) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut entries = comind::ledger::derive(&records, &symbols);
+    if check {
+        let packages =
+            comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+        let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+        if findings.is_empty() {
+            comind::ui::ok("no constraint carries a check (add one with --field check=...)");
+            return ExitCode::SUCCESS;
+        }
+        println!(
+            "## Constraint checks\n\n{}",
+            comind::checks::markdown(&findings, None)
+        );
+        let failed = findings
+            .iter()
+            .any(|f| f.severity == "must" && !f.violations.is_empty());
+        return if failed {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
+    }
+    let packages = comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+    comind::checks::promote(&mut entries, &findings);
+    let shown = comind::ledger::inbox(&entries, inbox);
+    let title = if inbox { "Ledger inbox" } else { "Ledger" };
+    println!("{}", comind::ledger::markdown(title, &shown));
+    let revived = comind::checks::revivals(&entries, &packages);
+    if !revived.is_empty() {
+        println!("## Retry conditions met\n");
+        for (e, why) in revived {
+            println!("- {} — {why}", comind::ledger::line(e));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>) -> ExitCode {
+    if ids.is_empty() && actor.is_none() {
+        comind::ui::err("name record ids or --actor (`me` for your own records)");
+        return ExitCode::FAILURE;
+    }
+    if let Some(short) = ids.iter().find(|i| i.len() < 8) {
+        comind::ui::err(&format!("id prefix `{short}` is too short (8+ characters)"));
+        return ExitCode::FAILURE;
+    }
+    let cfg = comind::config::Config::load();
+    let all = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    for i in ids {
+        let n = all.iter().filter(|r| r.id.starts_with(i.as_str())).count();
+        if n != 1 {
+            comind::ui::err(&format!(
+                "id prefix `{i}` matches {n} records; give a longer one"
+            ));
+            return ExitCode::FAILURE;
+        }
+    }
+    let actor = actor.map(|a| {
+        if a == "me" {
+            comind::ledger::actor()
+        } else {
+            a.to_string()
+        }
+    });
+    let pick = |r: &comind::ledger::Record| {
+        ids.iter().any(|i| r.id.starts_with(i.as_str()))
+            || actor.as_deref() == Some(r.provenance.actor.as_str())
+    };
+    match comind::ledger::erase_blocking(&cfg.index_dir(from), pick, yes) {
+        Ok(gone) => {
+            for r in &gone {
+                println!("- {} `{}` ({})", r.kind.as_str(), r.title, r.id);
+            }
+            if yes {
+                comind::ui::ok(&format!("erased {} record(s)", gone.len()));
+            } else {
+                comind::ui::ok(&format!(
+                    "{} record(s) would be erased; re-run with --yes",
+                    gone.len()
+                ));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let dir = cfg.graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut conventions = match comind::index::read_facts_blocking(&dir) {
+        Ok(Some(facts)) => comind::conventions::mine(&symbols, &edges, &facts),
+        _ => Vec::new(),
+    };
+    conventions.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let mut entries = comind::ledger::derive(&records, &symbols);
+    let packages = comind::index::read_packages_blocking(&dir).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+    comind::checks::promote(&mut entries, &findings);
+    let deps = comind::manifests::internal(&packages);
+    let graph = comind::graph::CodeGraph::build(&symbols, &edges);
+    let data = comind::tui::Data {
+        contracts: graph.contracts(None, false),
+        graph,
+        symbols,
+        edges,
+        entries,
+        conventions,
+        deps,
+        root: Some(cfg.index_dir(from)),
+    };
+    let run = match web {
+        Some(port) => comind::web::serve(data, port),
+        None => comind::tui::App::new(data).run(),
+    };
+    match run {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
+    let root = Path::new(repo);
+    let name = std::fs::canonicalize(root)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| repo_name(repo));
+    let raw = match comind::git::working_changes(root, base) {
+        Ok(c) => c,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    if raw.is_empty() {
+        comind::ui::ok("no changes against the base");
+        return ExitCode::SUCCESS;
+    }
+    let cfg = comind::config::Config::load();
+    let (symbols, edges) = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let changes: Vec<comind::preflight::Change> = raw
+        .into_iter()
+        .map(|(path, lines)| comind::preflight::Change {
+            repo: name.clone(),
+            path,
+            lines,
+        })
+        .collect();
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let recipes = comind::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let packages = comind::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
+    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
+    println!(
+        "{}",
+        comind::preflight::report(&g, &symbols, &edges, &entries, &recipes, &findings, &changes)
+    );
+    let changed: Vec<String> = changes
+        .iter()
+        .map(|c| format!("{}/{}", c.repo, c.path))
+        .collect();
+    let blocking = findings.iter().any(|f| {
+        f.severity == "must"
+            && f.violations
+                .iter()
+                .any(|v| changed.contains(&format!("{}/{}", v.repo, v.path)))
+    });
+    if strict && blocking {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn cmd_harvest(repos: &[String], limit: usize, from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let symbols = match comind::index::read_graph_blocking(&cfg.graph_dir(from)) {
+        Ok((s, _)) => s,
+        Err(e) => {
+            comind::ui::err(&format!("index the repos first: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let root = cfg.index_dir(from);
+    let mut existing: HashSet<String> = comind::ledger::all_blocking(&root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    existing.extend(comind::ledger::erased_blocking(&root).unwrap_or_default());
+    let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
+    for path in repos {
+        let name = repo_name(path);
+        let history = match comind::git::all_history(Path::new(path), limit) {
+            Ok(h) => h,
+            Err(e) => {
+                comind::ui::warn(&format!("{name}: {e:#}"));
+                continue;
+            }
+        };
+        for rec in comind::ledger::harvest(&name, &history, &symbols) {
+            if existing.contains(&rec.id) {
+                continue;
+            }
+            match comind::ledger::put_blocking(&root, &rec) {
+                Ok(()) => *by_kind.entry(rec.kind.as_str()).or_default() += 1,
+                Err(e) => comind::ui::warn(&format!("{name}: {e:#}")),
+            }
+        }
+    }
+    let parts: Vec<String> = by_kind.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    comind::ui::ok(&format!(
+        "harvested {}",
+        if parts.is_empty() {
+            "nothing new".into()
+        } else {
+            parts.join(", ")
+        }
+    ));
+    ExitCode::SUCCESS
+}
+
+/// Claude Code hook: emit `additionalContext` with ledger records relevant to the session/edit.
+/// Never blocks or approves anything; any failure prints nothing and exits 0.
+/// Graph symbols and ledger records for a hook: a remote (S3) index is read from its local
+/// mirror, refreshed in the background when stale, so the agent never waits on the network.
+fn hook_data(
+    cfg: &comind::config::Config,
+    from: Option<&str>,
+) -> Option<(Vec<Symbol>, Vec<comind::ledger::Record>)> {
+    let root = cfg.index_dir(from);
+    if comind::cache::is_remote(&root) {
+        let dir = comind::cache::dir(&root)?;
+        let ttl = std::time::Duration::from_secs(
+            cfg.cache_ttl_secs.unwrap_or(comind::cache::DEFAULT_TTL),
+        );
+        if comind::cache::stale(&dir, ttl) {
+            comind::cache::refresh_in_background(&root);
+        }
+        if let Some((symbols, _, records)) = comind::cache::read(&dir) {
+            return Some((symbols, records));
+        }
+    }
+    let (symbols, _) = comind::index::read_graph_blocking(&cfg.graph_dir(from)).ok()?;
+    let records = comind::ledger::all_blocking(&root).ok()?;
+    Some((symbols, records))
+}
+
+/// The first string under `key` anywhere in a hook payload (agents nest tool input differently).
+fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
+    match v {
+        serde_json::Value::Object(m) => m
+            .get(key)
+            .and_then(|x| x.as_str())
+            .or_else(|| m.values().find_map(|x| find_str(x, key))),
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_str(x, key)),
+        _ => None,
+    }
+}
+
+/// Run the distiller over bundles and record (or print) what passes validation.
+fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: &str) -> ExitCode {
+    let llm = match comind::llm::LlmClient::from_env() {
+        Ok(l) => l,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            comind::ui::err(&format!("runtime: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let (mut kept, mut dropped) = (0, 0);
+    for b in bundles {
+        let out = match rt.block_on(comind::distill::run(&llm, b)) {
+            Ok(o) => o,
+            Err(e) => {
+                comind::ui::err(&format!("distiller: {e:#}"));
+                return ExitCode::FAILURE;
+            }
+        };
+        for (rec, why) in out {
+            if let Some(why) = why {
+                dropped += 1;
+                comind::ui::note(&format!("dropped `{}`: {why}", rec.title));
+                continue;
+            }
+            kept += 1;
+            println!(
+                "- [{}] {} — evidence {}",
+                rec.kind.as_str(),
+                rec.title,
+                rec.evidence.join(", ")
+            );
+            if !dry_run {
+                if let Err(e) = comind::ledger::put_blocking(root, &rec) {
+                    comind::ui::err(&format!("not recorded: {e:#}"));
+                }
+            }
+        }
+    }
+    let (i, o) = llm.token_usage();
+    let verb = if dry_run {
+        "proposed"
+    } else {
+        "recorded for review (T1)"
+    };
+    comind::ui::ok(&format!(
+        "{kept} {verb}, {dropped} dropped · tokens {i} in / {o} out"
+    ));
+    ExitCode::SUCCESS
+}
+
+fn cmd_doctor(from: Option<&str>) -> ExitCode {
+    let cfg = comind::config::Config::load();
+    let root = cfg.index_dir(from);
+    let set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
+    let mut problems = 0;
+    let mut check = |good: bool, ok: &str, bad: &str| {
+        if good {
+            comind::ui::ok(ok);
+        } else {
+            problems += 1;
+            comind::ui::warn(bad);
+        }
+    };
+    comind::ui::header("comind doctor");
+    comind::ui::field("index", &root);
+    match comind::index::graph_versions_blocking(&cfg.graph_dir(from)) {
+        Ok(v) if !v.is_empty() => {
+            let (_, _, at) = v.last().cloned().unwrap_or_default();
+            check(
+                true,
+                &format!(
+                    "index readable: {} version(s), latest {}",
+                    v.len(),
+                    at.get(..16).unwrap_or(&at)
+                ),
+                "",
+            );
+        }
+        _ => check(
+            false,
+            "",
+            "no index here yet: run `comind link <repos> --index-dir …`",
+        ),
+    }
+    match comind::ledger::all_blocking(&root) {
+        Ok(r) => check(true, &format!("ledger readable: {} record(s)", r.len()), ""),
+        Err(e) => check(false, "", &format!("ledger not readable: {e:#}")),
+    }
+    if comind::cache::is_remote(&root) {
+        let fresh = comind::cache::dir(&root).is_some_and(|d| d.join("_graph").is_dir());
+        check(
+            fresh,
+            "local mirror present (hooks read it)",
+            "no local mirror yet: `comind cache refresh` (hooks create it on first use)",
+        );
+        check(
+            set("AWS_ACCESS_KEY_ID") || set("AWS_PROFILE") || set("AWS_WEB_IDENTITY_TOKEN_FILE"),
+            "AWS credentials in the environment",
+            "no AWS credentials in the environment (SSO: `aws sso login` + export)",
+        );
+    }
+    let settings = std::env::var_os("HOME")
+        .map(|h| Path::new(&h).join(".claude/settings.json"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    let local = std::fs::read_to_string(".claude/settings.json").unwrap_or_default();
+    check(
+        settings.contains("comind hook") || local.contains("comind hook"),
+        "Claude Code hooks configured",
+        "Claude Code hooks not found: `comind init-hooks claude`",
+    );
+    check(
+        set("OPENAI_API_KEY") || cfg.llm_base_url().is_some(),
+        &format!("LLM configured (model {})", cfg.llm_model()),
+        "no LLM key: enrichment, flows and the distiller are off (indexing works without)",
+    );
+    check(
+        set("GITLAB_TOKEN") || set("CI_JOB_TOKEN"),
+        "GitLab token present (MR distiller)",
+        "no GITLAB_TOKEN: `comind distill mr` unavailable",
+    );
+    check(
+        comind::signing::signing_key().is_some(),
+        "ledger records are signed",
+        "records are unsigned (optional: `signing_key` or git SSH signing)",
+    );
+    check(
+        comind::signing::allowed_signers().is_some(),
+        "signatures are verified against allowed_signers",
+        "no allowed_signers: signatures are not checked (optional)",
+    );
+    let indexers: Vec<&str> = [
+        "scip-python",
+        "scip-typescript",
+        "scip-go",
+        "rust-analyzer",
+        "scip-java",
+    ]
+    .into_iter()
+    .filter(|b| comind::scip::which(b).is_some())
+    .collect();
+    check(
+        !indexers.is_empty(),
+        &format!("SCIP indexers on PATH: {}", indexers.join(", ")),
+        "no SCIP indexers on PATH (optional: compiler-grade edges)",
+    );
+    if problems == 0 {
+        comind::ui::ok("all good");
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_distill_mr(
+    repo: &str,
+    project: Option<String>,
+    iid: Option<u64>,
+    commit: Option<String>,
+    list: bool,
+    dry_run: bool,
+    from: Option<&str>,
+) -> ExitCode {
+    let Some(project) = project else {
+        comind::ui::err("pass --project group/repo (or run in GitLab CI)");
+        return ExitCode::FAILURE;
+    };
+    let name = std::fs::canonicalize(repo)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| repo_name(repo));
+    let client = match comind::gitlab::Client::from_env(&project) {
+        Ok(c) => c,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let commit = match (iid, commit) {
+        (Some(_), _) => None,
+        (None, Some(c)) => Some(c),
+        (None, None) => match comind::git::head_commit(Path::new(repo)) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                comind::ui::err(&format!("{e:#}"));
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let cfg = comind::config::Config::load();
+    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
+        comind::ui::err("no index; run `comind link` first");
+        return ExitCode::FAILURE;
+    };
+    let root = cfg.index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            comind::ui::err(&format!("runtime: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let fetched = rt.block_on(async {
+        let mrs = match (iid, &commit) {
+            (Some(i), _) => vec![client.merge_request(i).await?],
+            (None, Some(sha)) => client.merged_for_commit(sha).await?,
+            _ => Vec::new(),
+        };
+        let mut out = Vec::new();
+        for mr in mrs {
+            let notes = client.notes(mr.iid).await?;
+            let files = client.files(mr.iid).await.unwrap_or_default();
+            out.push((mr, notes, files));
+        }
+        anyhow::Ok(out)
+    });
+    let fetched = match fetched {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut bundles = Vec::new();
+    for (mr, notes, files) in &fetched {
+        let used = records
+            .iter()
+            .any(|r| r.evidence.contains(&format!("mr:!{}", mr.iid)));
+        let touched = comind::distill::touched(&symbols, Some(&name), files);
+        let why_not = if used {
+            Some("already distilled")
+        } else if !comind::gitlab::eligible(mr, notes) {
+            Some("no discussion or description to learn from")
+        } else if touched.is_empty() {
+            Some("touches no indexed code")
+        } else {
+            None
+        };
+        if let Some(w) = why_not {
+            comind::ui::note(&format!("skip !{} {}: {w}", mr.iid, mr.title));
+            continue;
+        }
+        if list {
+            println!(
+                "- !{} {} ({} comments, {} indexed symbols)",
+                mr.iid,
+                mr.title,
+                notes.iter().filter(|n| !n.system).count(),
+                touched.len()
+            );
+            continue;
+        }
+        let spans = comind::gitlab::spans(mr, notes, 1);
+        bundles.push(comind::distill::bundle(spans, touched, &entries, "gitlab"));
+    }
+    if fetched.is_empty() {
+        comind::ui::ok("no merged MR for this commit");
+    }
+    if list || bundles.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    distill_and_record(&bundles, dry_run, &root)
+}
+
+fn cmd_distill_git(repo: &str, limit: usize, dry_run: bool, from: Option<&str>) -> ExitCode {
+    let name = std::fs::canonicalize(repo)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| repo_name(repo));
+    let history = match comind::git::history(Path::new(repo), limit) {
+        Ok(h) => h,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let cfg = comind::config::Config::load();
+    let Ok((symbols, _)) = comind::index::read_graph_blocking(&cfg.graph_dir(from)) else {
+        comind::ui::err("no index; run `comind link` first");
+        return ExitCode::FAILURE;
+    };
+    let root = cfg.index_dir(from);
+    let records = comind::ledger::all_blocking(&root).unwrap_or_default();
+    // Commits already cited by a record are not sent again.
+    let cited: HashSet<String> = records
+        .iter()
+        .flat_map(|r| r.evidence.iter())
+        .filter_map(|e| e.strip_prefix("commit:"))
+        .map(|s| s.chars().take(10).collect())
+        .collect();
+    let entries = comind::ledger::derive(&records, &symbols);
+    let spans = comind::distill::commits(&history, &cited);
+    if spans.is_empty() {
+        comind::ui::ok("no new commits with an explanatory message");
+        return ExitCode::SUCCESS;
+    }
+    let by_sha: HashMap<String, &comind::git::CommitFiles> = history
+        .iter()
+        .map(|c| (c.sha.chars().take(10).collect(), c))
+        .collect();
+    let bundles: Vec<comind::distill::Bundle> = spans
+        .chunks(8)
+        .map(|chunk| {
+            let files: Vec<String> = chunk
+                .iter()
+                .filter_map(|s| s.cite.strip_prefix("commit:"))
+                .filter_map(|sha| by_sha.get(sha))
+                .flat_map(|c| c.changed.iter().cloned())
+                .collect();
+            let touched = comind::distill::touched(&symbols, Some(&name), &files);
+            comind::distill::bundle(chunk.to_vec(), touched, &entries, "git")
+        })
+        .collect();
+    comind::ui::note(&format!(
+        "{} commit(s) in {} batch(es) go to the configured LLM",
+        spans.len(),
+        bundles.len()
+    ));
+    distill_and_record(&bundles, dry_run, &root)
+}
+
+fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
+    use std::io::Read;
+    let claude = agent == "claude";
+    if !claude && !matches!(agent, "generic" | "cursor" | "gemini" | "codex") {
+        comind::ui::err("agent must be claude, cursor, gemini, codex or generic");
+        return ExitCode::FAILURE;
+    }
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let v: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    let cwd = v
+        .get("cwd")
+        .and_then(|c| c.as_str())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default();
+    let session = [
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+    ]
+    .iter()
+    .find_map(|k| find_str(&v, k))
+    .unwrap_or("default")
+    .to_string();
+    let cfg = comind::config::Config::load();
+    let Some((symbols, records)) = hook_data(&cfg, from) else {
+        return ExitCode::SUCCESS;
+    };
+    if records.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let entries = comind::ledger::derive(&records, &symbols);
+    let (hook_event, ids): (&str, Vec<String>) = match event {
+        "session-start" => {
+            // Every symbol of the repo this session works in.
+            let repo = repo_at(&symbols, &cwd);
+            let ids = symbols
+                .iter()
+                .filter(|s| Some(&s.repo.0) == repo.as_ref())
+                .map(|s| s.id.render())
+                .collect();
+            ("SessionStart", ids)
+        }
+        "pre-edit" => {
+            let env = std::env::var("COMIND_HOOK_FILE").ok();
+            let Some(path) = env.as_deref().or_else(|| {
+                ["file_path", "filePath", "target_file", "path", "file"]
+                    .iter()
+                    .find_map(|k| find_str(&v, k))
+            }) else {
+                return ExitCode::SUCCESS;
+            };
+            let ids = symbols
+                .iter()
+                .filter(|s| !s.file_path.is_empty() && path.ends_with(&format!("/{}", s.file_path)))
+                .map(|s| s.id.render())
+                .collect();
+            ("PreToolUse", ids)
+        }
+        _ => return ExitCode::SUCCESS,
+    };
+    let seen_file = std::env::temp_dir()
+        .join("comind-hook-sessions")
+        .join(session.replace(['/', '\\'], "_"));
+    let seen: HashSet<String> = std::fs::read_to_string(&seen_file)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let fresh: Vec<&comind::ledger::Entry> = comind::ledger::about(&entries, &ids)
+        .into_iter()
+        .filter(|e| e.trust >= comind::ledger::Trust::T2)
+        .filter(|e| {
+            matches!(
+                e.status,
+                comind::ledger::Status::Active
+                    | comind::ledger::Status::Moved
+                    | comind::ledger::Status::Stale
+            )
+        })
+        .filter(|e| !seen.contains(&e.record.id))
+        .take(if hook_event == "SessionStart" { 8 } else { 4 })
+        .collect();
+    if fresh.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let mut text =
+        comind::ledger::markdown("comind ledger: reasoning recorded about this code", &fresh);
+    if text.len() > 9_000 {
+        let cut = (0..=9_000)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        text.truncate(cut);
+    }
+    let _ = std::fs::create_dir_all(seen_file.parent().unwrap_or(std::path::Path::new(".")));
+    let mut lines: Vec<String> = seen.into_iter().collect();
+    lines.extend(fresh.iter().map(|e| e.record.id.clone()));
+    let _ = std::fs::write(&seen_file, lines.join("\n"));
+    if !claude {
+        println!("{text}");
+        return ExitCode::SUCCESS;
+    }
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": hook_event,
+            "additionalContext": text,
+        }
+    });
+    println!("{out}");
+    ExitCode::SUCCESS
+}
+
+/// The indexed repo a working directory belongs to (by directory name).
+fn repo_at(symbols: &[Symbol], cwd: &Path) -> Option<String> {
+    let repos: BTreeSet<&str> = symbols.iter().map(|s| s.repo.0.as_str()).collect();
+    cwd.ancestors()
+        .filter_map(|a| a.file_name().and_then(|n| n.to_str()))
+        .find(|n| repos.contains(n))
+        .map(str::to_string)
+}
+
+fn cmd_init_hooks(agent: &str) -> ExitCode {
+    if agent != "claude" {
+        comind::ui::err("only `claude` is supported so far");
+        return ExitCode::FAILURE;
+    }
+    let snippet = serde_json::json!({
+        "hooks": {
+            "SessionStart": [{
+                "hooks": [{"type": "command", "command": "comind hook claude session-start"}]
+            }],
+            "PreToolUse": [{
+                "matcher": "Edit|MultiEdit|Write",
+                "hooks": [{"type": "command", "command": "comind hook claude pre-edit"}]
+            }]
+        }
+    });
+    comind::ui::note("add to .claude/settings.json (project) or ~/.claude/settings.json (user):");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&snippet).unwrap_or_default()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let Ok(Some(facts)) = comind::index::read_facts_blocking(&dir) else {
+        comind::ui::err("index has no stored facts; re-run `comind index`/`link`");
+        return ExitCode::FAILURE;
+    };
+    let mut all = comind::conventions::mine(&symbols, &edges, &facts);
+    all.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
+    let mut by_repo: BTreeMap<&str, Vec<&comind::conventions::Convention>> = BTreeMap::new();
+    for c in &all {
+        if repo.is_none_or(|r| c.repo == r || c.repo == comind::conventions::ORG) {
+            by_repo.entry(c.repo.as_str()).or_default().push(c);
+        }
+    }
+    for (r, cs) in by_repo {
+        let title = if r == comind::conventions::ORG {
+            "Org baseline".to_string()
+        } else {
+            r.to_string()
+        };
+        comind::ui::header(&title);
+        for c in cs {
+            comind::ui::field(&c.dimension, &c.rule);
+            if !c.exemplars.is_empty() {
+                comind::ui::note(&format!("e.g. {}", c.exemplars.join(", ")));
+            }
+            if !c.counterexamples.is_empty() {
+                comind::ui::note(&format!("except {}", c.counterexamples.join(", ")));
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let rows = match comind::index::read_packages_blocking(&dir) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let deps: Vec<_> = comind::manifests::internal(&rows)
+        .into_iter()
+        .filter(|d| !skew || d.skewed())
+        .collect();
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec![
+            "package",
+            "published by",
+            "consumer",
+            "requires",
+            "locked",
+        ]);
+    let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
+    for d in &deps {
+        let locked = match (&d.locked, d.skewed()) {
+            (Some(l), true) => format!("{l}  ≠"),
+            _ => opt(&d.locked),
+        };
+        table.add_row(vec![
+            format!("{} ({})", d.name, d.ecosystem),
+            format!("{} @ {}", d.publisher, opt(&d.published)),
+            d.consumer.clone(),
+            opt(&d.requirement),
+            locked,
+        ]);
+    }
+    comind::ui::header(&format!("Internal dependencies — {}", deps.len()));
+    println!("{table}");
+    ExitCode::SUCCESS
+}
+
+/// Change recipes from each repo's recent first-parent history.
+fn mine_recipes(repos: &[(String, std::path::PathBuf)]) -> Vec<comind::conventions::Convention> {
+    let out: Vec<_> = repos
+        .iter()
+        .filter_map(|(name, root)| {
+            comind::git::history(root, 500)
+                .ok()
+                .map(|h| comind::recipes::mine(name, &h))
+        })
+        .flatten()
+        .collect();
+    if !out.is_empty() {
+        comind::ui::ok(&format!("recipes: {} from commit history", out.len()));
+    }
+    out
+}
+
+/// Manifests and lockfiles of each repo, and a one-line internal-dependency summary.
+fn scan_packages(repos: &[(String, std::path::PathBuf)]) -> Vec<comind::manifests::PackageRow> {
+    let rows: Vec<_> = repos
+        .iter()
+        .flat_map(|(name, root)| comind::manifests::scan(root, name))
+        .collect();
+    let deps = comind::manifests::internal(&rows);
+    if !deps.is_empty() {
+        let skewed = deps.iter().filter(|d| d.skewed()).count();
+        comind::ui::ok(&format!(
+            "internal packages: {} dependency link(s), {skewed} pinned to a different version than their publisher",
+            deps.len()
+        ));
+    }
+    rows
+}
+
+fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> ExitCode {
+    let dir = comind::config::Config::load().graph_dir(from);
+    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("no index at {dir}: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let g = comind::graph::CodeGraph::build(&symbols, &edges);
+    let total = g.contracts(None, false).len();
+    let views = g.contracts(kind, dangling);
+    let list = |ns: &[comind::graph::Node]| {
+        let set: BTreeSet<String> = ns
+            .iter()
+            .map(|n| {
+                if n.repo == comind::resolve::CONTRACTS {
+                    n.name.clone()
+                } else {
+                    format!("{}:{}", n.repo, n.name)
+                }
+            })
+            .collect();
+        if set.is_empty() {
+            "—".to_string()
+        } else {
+            set.into_iter().collect::<Vec<_>>().join("\n")
+        }
+    };
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec!["contract", "provided by", "used by"]);
+    for v in &views {
+        table.add_row(vec![
+            v.contract.name.clone(),
+            list(&v.providers),
+            list(&v.consumers),
+        ]);
+    }
+    comind::ui::header(&format!("Contracts — {} shown of {total}", views.len()));
+    println!("{table}");
+    ExitCode::SUCCESS
+}
+
+fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[String]) -> ExitCode {
+    let only: Vec<&str> = repos.iter().map(String::as_str).collect();
+    let r = match comind::eval::eval_with(
+        Path::new(fixture),
+        (!only.is_empty()).then_some(only.as_slice()),
+        scip.map(Path::new),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            comind::ui::err(&format!("eval failed: {e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let pct = |x: f64| format!("{:.0}%", x * 100.0);
+    let mut kinds = comfy_table::Table::new();
+    kinds
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec![
+            "kind",
+            "found",
+            "missed",
+            "spurious",
+            "precision",
+            "recall",
+        ]);
+    for (k, c) in r.by_kind.iter().chain([(&"total".to_string(), &r.total)]) {
+        kinds.add_row(vec![
+            k.clone(),
+            c.tp.to_string(),
+            c.fn_.to_string(),
+            c.fp.to_string(),
+            pct(c.precision()),
+            pct(c.recall()),
+        ]);
+    }
+    comind::ui::header(&format!("Graph eval — {fixture}"));
+    println!("{kinds}");
+    let mut cases = comfy_table::Table::new();
+    cases
+        .load_preset(comfy_table::presets::UTF8_FULL)
+        .set_header(vec!["case", "found / expected"]);
+    for (case, (found, expected)) in &r.by_case {
+        cases.add_row(vec![case.clone(), format!("{found} / {expected}")]);
+    }
+    println!("{cases}");
+    if scip.is_some() {
+        comind::ui::note(&format!("references answered by SCIP: {}", r.scip_answers));
+    }
+    if verbose {
+        comind::ui::header("Missed");
+        for g in &r.missed {
+            comind::ui::note(&format!("[{}] {} {} -> {}", g.case, g.kind, g.src, g.dst));
+        }
+        comind::ui::header("Spurious");
+        for (k, s, d) in &r.spurious {
+            comind::ui::note(&format!("{k} {s} -> {d}"));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
     match action {
         None | Some(ConfigAction::Path) => {
@@ -892,6 +2443,7 @@ fn repo_name(path: &str) -> String {
 
 /// Parse several repos, resolve references across them, and report the cross-repo graph
 /// (the org-wide blast-radius signal that per-repo tools cannot produce).
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
 fn cmd_link(
     repos: &[&str],
     to: Option<&str>,
@@ -900,9 +2452,11 @@ fn cmd_link(
     flows: bool,
     guide: bool,
     incremental: bool,
+    scip: comind::scip::Mode,
 ) -> ExitCode {
     let mut symbols: Vec<Symbol> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
+    let mut facts = Vec::new();
     if let Some(bad) = repos.iter().find(|p| !Path::new(p).is_dir()) {
         comind::ui::err(&format!("no such repo directory: {bad}"));
         return ExitCode::FAILURE;
@@ -911,13 +2465,18 @@ fn cmd_link(
     for path in repos {
         let name = repo_name(path);
         match comind::parse::parse_repo(Path::new(path), &name) {
-            Ok(o) => {
+            Ok(mut o) => {
                 comind::ui::field(
                     &name,
-                    &format!("{} symbols, {} edges", o.symbols.len(), o.edges.len()),
+                    &format!("{} symbols, {} files", o.symbols.len(), o.facts.len()),
                 );
+                if let Err(e) = attach_scip(scip, Path::new(path), &name, &mut o) {
+                    comind::ui::err(&e);
+                    return ExitCode::FAILURE;
+                }
                 symbols.extend(o.symbols);
                 edges.extend(o.edges);
+                facts.extend(o.facts);
             }
             Err(e) => {
                 comind::ui::err(&format!("{name}: parse failed: {e:#}"));
@@ -926,12 +2485,57 @@ fn cmd_link(
         }
     }
 
-    let resolved = comind::resolve::resolve(&symbols, &edges);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols.iter().cloned());
+    if !resolved.symbols.is_empty() {
+        let mut by_type: BTreeMap<&str, usize> = BTreeMap::new();
+        for c in &resolved.symbols {
+            *by_type
+                .entry(c.name.split(':').next().unwrap_or_default())
+                .or_default() += 1;
+        }
+        let parts: Vec<String> = by_type.iter().map(|(t, n)| format!("{t} {n}")).collect();
+        comind::ui::ok(&format!(
+            "contracts: {} ({}), {} participant edges",
+            resolved.symbols.len(),
+            parts.join(", "),
+            resolved.stats.contract_edges
+        ));
+    }
     let s = &resolved.stats;
     comind::ui::ok(&format!(
-        "resolved: {} imports ({} cross-repo), {} calls; {} unresolved (third-party)",
-        s.resolved_imports, s.cross_repo_edges, s.resolved_calls, s.unresolved_imports
+        "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges{}",
+        s.resolved_imports,
+        s.resolved_calls,
+        s.type_edges,
+        s.cross_repo_edges,
+        if s.scip_answers > 0 {
+            format!(" ({} answered by SCIP)", s.scip_answers)
+        } else {
+            String::new()
+        }
     ));
+    comind::ui::note(&format!(
+        "unresolved: {} imports, {} calls (mostly third-party or dynamic)",
+        s.unresolved_imports, s.unresolved_calls
+    ));
+    let mut top: Vec<_> = resolved.unresolved_modules.iter().collect();
+    top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let top: Vec<String> = top
+        .iter()
+        .take(12)
+        .map(|(m, n)| format!("{m} {n}"))
+        .collect();
+    if !top.is_empty() {
+        comind::ui::note(&format!("top unresolved: {}", top.join(", ")));
+    }
+    if std::env::var("COMIND_DEBUG").is_ok() {
+        for (m, ex) in &resolved.unresolved_examples {
+            for e in ex {
+                comind::ui::note(&format!("  unresolved {m}: {e}"));
+            }
+        }
+    }
 
     // Rank cross-repo import targets by how many distinct repos depend on them.
     // (dst descriptor) -> (defining repo, set of importer repos, total refs)
@@ -999,7 +2603,17 @@ fn cmd_link(
         let dst = format!("{}/_graph", uri.trim_end_matches('/'));
         comind::ui::header("Persisting");
         comind::ui::step(&format!("writing org graph to {dst}"));
-        match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges) {
+        let roots: Vec<(String, std::path::PathBuf)> = repos
+            .iter()
+            .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
+            .collect();
+        let packages = scan_packages(&roots);
+        let recipes = mine_recipes(&roots);
+        match comind::index::write_graph_blocking(&dst, &symbols, &resolved.edges)
+            .and_then(|v| comind::index::write_facts_blocking(&dst, &facts).map(|_| v))
+            .and_then(|v| comind::index::write_packages_blocking(&dst, &packages).map(|_| v))
+            .and_then(|v| comind::index::write_recipes_blocking(&dst, &recipes).map(|_| v))
+        {
             Ok((sv, ev)) => comind::ui::ok(&format!(
                 "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
             )),
@@ -1551,6 +3165,10 @@ fn run_style_guides(
     };
     comind::ui::header("Style guides (per repo)");
     comind::ui::warn("--guide sends code samples + config to the LLM — opt-in egress.");
+    let conventions = match comind::index::read_facts_blocking(dst) {
+        Ok(Some(facts)) => comind::conventions::mine(symbols, edges, &facts),
+        _ => Vec::new(),
+    };
     let mut guide_rows: Vec<(String, String)> = Vec::new();
     for (repo, root) in repo_roots {
         let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
@@ -1562,7 +3180,12 @@ fn run_style_guides(
             .filter(|e| &e.src.package == repo)
             .cloned()
             .collect();
-        let sections = comind::styleguide::build_sections(root, &rsyms, &redges);
+        let rconv: Vec<_> = conventions
+            .iter()
+            .filter(|c| &c.repo == repo)
+            .cloned()
+            .collect();
+        let sections = comind::styleguide::build_sections(root, &rsyms, &redges, &rconv);
         if sections.is_empty() {
             continue;
         }
@@ -1655,6 +3278,7 @@ fn cmd_index(
     guide: bool,
     incremental: bool,
     since: Option<&str>,
+    scip: comind::scip::Mode,
 ) -> ExitCode {
     // `--since` implies incremental.
     let incremental = incremental || since.is_some();
@@ -1691,8 +3315,14 @@ fn cmd_index(
             return ExitCode::FAILURE;
         }
     };
+    if let Err(e) = attach_scip(scip, root, &repo_name, &mut out) {
+        comind::ui::err(&e);
+        return ExitCode::FAILURE;
+    }
     // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
-    out.edges = comind::resolve::resolve(&out.symbols, &out.edges).edges;
+    let resolved = comind::resolve::resolve(&out.symbols, &out.edges, &out.facts);
+    out.edges = resolved.edges;
+    out.symbols.extend(resolved.symbols);
 
     let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
     for s in &out.symbols {
@@ -1719,7 +3349,25 @@ fn cmd_index(
 
     comind::ui::header("Persisting");
     comind::ui::step(&format!("writing graph to {dst}"));
-    match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges) {
+    match comind::index::write_graph_blocking(&dst, &out.symbols, &out.edges)
+        .and_then(|v| comind::index::write_facts_blocking(&dst, &out.facts).map(|_| v))
+        .and_then(|v| {
+            // Keep other repos' package rows already in a shared index dir.
+            let mut rows: Vec<_> = comind::index::read_packages_blocking(&dst)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.repo != repo_name)
+                .collect();
+            rows.extend(scan_packages(&[(repo_name.clone(), root.to_path_buf())]));
+            comind::index::write_packages_blocking(&dst, &rows)?;
+            let mut recipes: Vec<_> = comind::index::read_recipes_blocking(&dst)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.repo != repo_name)
+                .collect();
+            recipes.extend(mine_recipes(&[(repo_name.clone(), root.to_path_buf())]));
+            comind::index::write_recipes_blocking(&dst, &recipes).map(|_| v)
+        }) {
         Ok((sv, ev)) => comind::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
         Err(e) => {
             comind::ui::err(&format!("write failed: {e:#}"));
@@ -1825,16 +3473,17 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let to_parse: Vec<String> = cs.to_parse().cloned().collect();
     let newout = comind::parse::parse_files(root, repo_name, &to_parse);
 
-    // Map each symbol id to its file so we can drop edges owned by changed files.
+    // Map this repo's symbol ids to their files so we can drop edges owned by changed files.
     let file_of: HashMap<String, String> = prior_syms
         .iter()
+        .filter(|s| s.repo.0 == repo_name)
         .map(|s| (s.id.render(), s.file_path.clone()))
         .collect();
     let before = prior_syms.len();
 
     let mut symbols: Vec<Symbol> = prior_syms
         .into_iter()
-        .filter(|s| !dropped.contains(&s.file_path))
+        .filter(|s| !(s.repo.0 == repo_name && dropped.contains(&s.file_path)))
         .collect();
     let mut edges: Vec<Edge> = prior_edges
         .into_iter()
@@ -1846,10 +3495,34 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
         .collect();
     symbols.extend(newout.symbols);
     edges.extend(newout.edges);
-    // Re-resolve so merged call edges bind to definitions (ripple/thread/context_pack).
-    let edges = comind::resolve::resolve(&symbols, &edges).edges;
+    // With stored facts, keep only structure and re-resolve everything (no stale edges).
+    let facts = match comind::index::read_facts_blocking(dst) {
+        Ok(Some(prior)) => {
+            edges.retain(|e| e.kind == EdgeKind::Contains);
+            let mut all: Vec<_> = prior
+                .into_iter()
+                .filter(|f| {
+                    f.repo != repo_name
+                        || !(dropped.contains(&f.path) || to_parse.contains(&f.path))
+                })
+                .collect();
+            all.extend(newout.facts);
+            all
+        }
+        _ => {
+            comind::ui::warn("index has no stored facts; run a full index for exact edges");
+            newout.facts
+        }
+    };
+    // Contract nodes are derived; drop the old ones and re-derive from all facts.
+    symbols.retain(|s| s.kind != SymbolKind::Contract);
+    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols);
+    let edges = resolved.edges;
 
-    if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges) {
+    if let Err(e) = comind::index::write_graph_blocking(dst, &symbols, &edges)
+        .and_then(|_| comind::index::write_facts_blocking(dst, &facts))
+    {
         comind::ui::err(&format!("write failed: {e:#}"));
         return ExitCode::FAILURE;
     }

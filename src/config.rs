@@ -26,11 +26,19 @@ pub struct Config {
     /// `serve`: `md` | `json`. Absent = `md`.
     pub format: Option<String>,
     /// Default for `index`/`link` steps; `--x` / `--no-x` on the CLI override these.
-    /// Built-in defaults: embed on (local, cheap); enrich/flows/guide off (LLM cost + egress).
+    /// Built-in defaults: all on; the LLM steps skip without a key, and `--no-llm` skips them all.
     pub embed: Option<bool>,
     pub enrich: Option<bool>,
     pub flows: Option<bool>,
     pub guide: Option<bool>,
+    /// SCIP use in `index`/`link`: `auto` (default) | `require` | `off`.
+    pub scip: Option<String>,
+    /// SSH key that signs ledger records (default: git `user.signingkey` when `gpg.format=ssh`).
+    pub signing_key: Option<String>,
+    /// `allowed_signers` file for verifying records (default: git `gpg.ssh.allowedSignersFile`).
+    pub allowed_signers: Option<String>,
+    /// Seconds between freshness checks of the local mirror of a remote index (default 300).
+    pub cache_ttl_secs: Option<u64>,
 }
 
 impl Config {
@@ -120,6 +128,14 @@ impl Config {
     pub fn guide(&self) -> bool {
         self.guide.unwrap_or(true)
     }
+
+    /// SCIP mode: `COMIND_SCIP` → file → `auto`.
+    pub fn scip(&self) -> crate::scip::Mode {
+        non_empty_env("COMIND_SCIP")
+            .or_else(|| self.scip.clone())
+            .and_then(|s| crate::scip::Mode::parse(&s))
+            .unwrap_or(crate::scip::Mode::Auto)
+    }
 }
 
 /// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
@@ -157,6 +173,9 @@ pub fn init(force: bool) -> Result<PathBuf> {
          enrich = true\n\
          flows  = true\n\
          guide  = true\n\n\
+         # SCIP (compiler-grade resolution): auto = use index.scip or installed indexers,\n\
+         # require = fail without it, off = tree-sitter only.\n\
+         scip   = \"auto\"\n\n\
          # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
          # max_enrich = 200   # max symbols enriched by --enrich\n\
          # max_flows  = 50    # max flows narrated by --flows\n",

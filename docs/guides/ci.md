@@ -1,4 +1,4 @@
-# Comind CI — building the shared org index
+# CI and merge requests
 
 **Model.** One central pipeline checks out the team's repos, runs
 `comind link … --embed [--enrich]`, and writes a new **atomically-versioned** LanceDB dataset.
@@ -12,7 +12,7 @@ approach; the GitLab example below uses S3. Both are equivalent.
 
 ## GitHub Actions (shipped)
 
-[`.github/workflows/comind-index.yml`](../.github/workflows/comind-index.yml) builds the index on a
+[`.github/workflows/comind-index.yml`](https://github.com/sayef/comind/blob/main/.github/workflows/comind-index.yml) builds the index on a
 schedule (and on demand). To enable it:
 
 - **Variable** `COMIND_INDEX_ENABLED = true` — lets the schedule run.
@@ -91,6 +91,14 @@ index:
 Secrets: `COMIND_REPO_TOKEN` (read repos), AWS creds (OIDC role or keys), and an LLM key if using
 `--enrich`.
 
+## SCIP (compiler-grade resolution)
+
+`index`/`link` default to `--scip auto`: a repo's `index.scip` (any depth ≤ 4, gitignored is fine)
+is ingested; otherwise any SCIP indexer on `PATH` that matches the repo's manifests runs
+(`scip-typescript`, `scip-python`, `scip-go`, `scip-java`, `rust-analyzer scip`). Indexers need the
+repo's dependencies installed, so install them before indexing. `--scip require` fails the job when
+a repo yields no SCIP; `--scip off` skips it. Tree-sitter resolution covers everything SCIP doesn't.
+
 ## LLM provider (for `--enrich` / `--flows`)
 
 Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENAI_API_KEY`, model
@@ -103,3 +111,56 @@ endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 `repo_meta` table) against HEAD and reparses only changed files — useful for keeping a per-repo
 dataset fresh cheaply. Today the central `link` re-parses sources; org-level re-merge from per-repo
 datasets is a future optimization.
+
+## Merge-request preflight
+
+Run `preflight` in each member repo's MR pipeline against the shared index and post the report as
+an MR note. It lists recorded constraints and dead ends on the touched code, contracts other
+services consume, blast radius, missing co-changes and failing constraint checks. `--strict` fails
+the job when a `must` constraint check is violated in a changed file. Checks run on the shared
+index, so they see the default branch plus the MR's changed paths, not edges new in the MR.
+
+```yaml
+comind-preflight:
+  stage: test
+  rules: [{ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' }]
+  script:
+    - comind preflight . --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --index-dir "$COMIND_INDEX" --strict > preflight.md || STATUS=$?
+    - |
+      jq -Rs '{body: .}' preflight.md | curl -sf -X POST \
+        -H "PRIVATE-TOKEN: $COMIND_NOTE_TOKEN" -H "Content-Type: application/json" \
+        --data @- "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    - exit ${STATUS:-0}
+```
+
+After linking, the scheduled index job should also run, against the same `--index-dir`:
+
+```bash
+comind harvest <repos…> --index-dir "$COMIND_INDEX"     # reverts and commit trailers → records (no LLM)
+comind ledger --compact --index-dir "$COMIND_INDEX"     # fold new records into the snapshot
+comind ledger --check --index-dir "$COMIND_INDEX"       # optional: fail on violated `must` rules
+```
+
+Harvested ids are deterministic, so re-running it never duplicates records.
+
+
+## Distil the merged MR (forward only)
+
+On each pipeline of the default branch, `comind distill mr` finds the merge request that merged
+the commit and, if it has a human discussion or a real description, asks the configured LLM for
+at most three ledger records (failed attempts, decisions, constraints, gotchas). `@mentions` are
+removed before sending; proposals land at T1 and need a human confirmation before agents see
+them. Past MRs are not mined.
+
+```yaml
+comind-distill:
+  stage: .post
+  rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' }]
+  allow_failure: true
+  script:
+    - comind distill mr . --index-dir "$COMIND_INDEX"
+```
+
+Variables: `GITLAB_TOKEN` (project access token, `read_api`; the job token cannot read MR
+discussions) and `OPENAI_API_KEY` (or `COMIND_LLM_BASE_URL` for a self-hosted model). Use
+`--list` to see what would be sent without calling the LLM.

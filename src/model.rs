@@ -51,6 +51,8 @@ pub enum SymbolKind {
     TypeAlias,
     /// A detected multi-step execution flow (comind-specific higher-order node).
     Process,
+    /// A cross-service contract: an HTTP route, queue, topic, bucket or table.
+    Contract,
 }
 
 /// Edge kinds between symbols. `cross_repo` on [`Edge`] marks whether an edge spans repos.
@@ -60,12 +62,20 @@ pub enum EdgeKind {
     Contains,
     Imports,
     Calls,
+    Instantiates,
     Inherits,
     Implements,
     References,
     Defines,
     Uses,
     ParticipatesIn,
+    /// Contract roles: provider side (serves/publishes/writes/defines) and consumer side.
+    Serves,
+    Consumes,
+    Publishes,
+    Subscribes,
+    Reads,
+    Writes,
 }
 
 impl EdgeKind {
@@ -75,12 +85,19 @@ impl EdgeKind {
             EdgeKind::Contains => "contains",
             EdgeKind::Imports => "imports",
             EdgeKind::Calls => "calls",
+            EdgeKind::Instantiates => "instantiates",
             EdgeKind::Inherits => "inherits",
             EdgeKind::Implements => "implements",
             EdgeKind::References => "references",
             EdgeKind::Defines => "defines",
             EdgeKind::Uses => "uses",
             EdgeKind::ParticipatesIn => "participates_in",
+            EdgeKind::Serves => "serves",
+            EdgeKind::Consumes => "consumes",
+            EdgeKind::Publishes => "publishes",
+            EdgeKind::Subscribes => "subscribes",
+            EdgeKind::Reads => "reads",
+            EdgeKind::Writes => "writes",
         }
     }
 }
@@ -161,6 +178,16 @@ pub struct Symbol {
     pub range: Range,
     pub signature: Option<String>,
     pub docstring: Option<String>,
+    #[serde(default)]
+    pub fingerprint: Option<Fingerprint>,
+}
+
+/// Normalized AST hashes: signature, body, and body with identifiers alpha-renamed (rename-stable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Fingerprint {
+    pub sig: u64,
+    pub body: u64,
+    pub shape: u64,
 }
 
 /// A directed relationship between two symbols. Edges may cross repo boundaries once the

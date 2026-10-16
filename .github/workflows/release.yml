@@ -1,77 +1,104 @@
-# Comind release — build binaries per target and publish to GitHub Releases on a version tag.
-#
-#   git tag v0.1.0 && git push origin v0.1.0
-#
-# Produces `comind-<target>.tar.gz` + `.sha256` assets that install.sh / Homebrew point at.
-name: release
+name: Release
 
+# Builds `comind-<target>.tar.gz` (+ `.sha256`) for each target and attaches them to the GitHub release
+# that release-plz created; scripts/install.sh downloads these.
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: ["v*"]
+  # release-plz pushes its tags with GITHUB_TOKEN, which does not trigger `push`.
+  workflow_run:
+    workflows: [Release-plz]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0)"
-        required: true
+        description: Release tag to build and publish, e.g. v0.4.0
+        required: false
 
 permissions:
-  contents: write # create the release + upload assets
+  contents: read
 
 jobs:
+  tag:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          case "$EVENT" in
+            workflow_run) tag=$(git tag --points-at HEAD --list 'v*' | sort -V | tail -n 1) ;;
+            workflow_dispatch) tag=$([[ "$INPUT_TAG" == v* ]] && echo "$INPUT_TAG" || true) ;;
+            *) tag=$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo "$GITHUB_REF_NAME" || true) ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=${tag:-$(git rev-parse HEAD)}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${tag:-none}"
+
   build:
+    needs: tag
+    if: needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            container: rust:1.97-bullseye # glibc 2.31 → runs on Ubuntu 20.04+, Rocky 9, etc.
+            container: rust:1.97-bullseye # glibc 2.31: runs on Ubuntu 20.04+, Rocky 9
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-            container: rust:1.97-bullseye # glibc 2.31 → runs on Ubuntu 20.04+, Rocky 9, etc.
+            container: rust:1.97-bullseye
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-latest
           - target: x86_64-apple-darwin
-            os: macos-14 # cross-compiled on Apple Silicon; Intel macos-13 runners are being retired
+            os: macos-latest # cross-compiled on Apple Silicon
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Prereqs (Linux)
-        if: runner.os == 'Linux'
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.ref }}
+          persist-credentials: false
+      - if: runner.os == 'Linux'
         run: apt-get update && apt-get install -y protobuf-compiler cmake perl
-
-      - name: Prereqs (macOS)
-        if: runner.os == 'macOS'
+      - if: runner.os == 'macOS'
         run: brew install protobuf cmake
-
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         run: |
           tar -C target/${{ matrix.target }}/release -czf "comind-${{ matrix.target }}.tar.gz" comind
           shasum -a 256 "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256" \
             2>/dev/null || sha256sum "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256"
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: comind-${{ matrix.target }}
           path: comind-${{ matrix.target }}.tar.gz*
 
-  release:
-    needs: build
+  publish:
+    needs: [tag, build]
+    if: needs.tag.outputs.tag != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with: { path: dist, merge-multiple: true }
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/download-artifact@v8
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
           files: dist/*
-          generate_release_notes: true

@@ -1,0 +1,30 @@
+/* Ink and paper, with the mark's green as the one accent. */
+:root {
+  --comind-ink: #16202e;
+  --comind-green: #30a336;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--comind-ink);
+  --md-primary-fg-color--light: #243247;
+  --md-primary-fg-color--dark: #0d141d;
+  --md-accent-fg-color: #1f7a2a;
+  --md-accent-fg-color--transparent: rgba(31, 122, 42, 0.1);
+  --md-typeset-a-color: #1f7a2a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--comind-ink);
+  --md-primary-fg-color--light: #243247;
+  --md-primary-fg-color--dark: #0d141d;
+  --md-accent-fg-color: #5cc46a;
+  --md-accent-fg-color--transparent: rgba(92, 196, 106, 0.1);
+  --md-typeset-a-color: #5cc46a;
+  --md-default-bg-color: #11161e;
+}
+
+.cm-hero { text-align: center; padding: 2rem 0 1rem; }
+.cm-hero h1 { font-weight: 700; margin: 0.6rem 0; color: var(--md-default-fg-color); }
+.cm-lede { max-width: 42rem; margin: 0 auto 1.2rem; font-size: 1.05rem; }
+.cm-actions { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
+.cm-install { display: inline-block; margin-top: 1.2rem; padding: 0.4rem 0.8rem; font-size: 0.75rem; overflow-x: auto; max-width: 100%; }
