@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { api, type OrgMap } from "@/lib/api";
+import { api, attention, type OrgMap } from "@/lib/api";
 
 function Stat({ icon: Icon, label, value, hint }: { icon: typeof Boxes; label: string; value: string; hint?: string }) {
   return (
@@ -49,6 +49,7 @@ function linkDiff(then: OrgMap, now: OrgMap) {
 
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
   const latest = useQuery({ queryKey: ["orgmap"], queryFn: () => api.orgmap() });
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const last = (versions.data?.length ?? 1) - 1;
@@ -92,7 +93,7 @@ export function OverviewPage() {
               icon={History}
               label="Ledger records"
               value={String(Object.values(o.ledger).reduce((a, b) => a + b, 0))}
-              hint={`${(o.ledger.stale ?? 0) + (o.ledger.orphaned ?? 0)} need review`}
+              hint={`${(ledger.data ?? []).filter((e) => attention(e) < 3).length} need review`}
             />
           </>
         ) : (

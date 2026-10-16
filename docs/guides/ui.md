@@ -13,7 +13,8 @@ nothing else is needed.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
   records) and the full timeline. Each record shows who wrote it and its review history; confirm,
   archive, invalidate or delete it.
-- **Explorer**: one symbol with its neighbourhood graph, blast radius, contracts and recorded reasoning.
+- **Symbol view** (open any symbol from search or a link): its dependency graph, blast radius,
+  contracts and recorded reasoning.
 - **Conventions**: measured conventions per repository and org-wide; add your own, edit or hide
   measured ones (hidden ones can be restored).
 

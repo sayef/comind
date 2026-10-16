@@ -5,11 +5,8 @@ import { EntryCard } from "@/components/entry-card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, type Entry, isChallenged, when } from "@/lib/api";
+import { api, attention, when } from "@/lib/api";
 
-const TRUST: Record<string, number> = { T0: 0, T1: 1, T2: 2, T3: 3, T4: 4 };
-const attention = (e: Entry) =>
-  isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3;
 
 export function LedgerPage() {
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });

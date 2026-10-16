@@ -165,6 +165,12 @@ export const api = {
 /** When a record's fact happened (older harvested records carry `at`), else when it was recorded. */
 export const when = (e: Entry) => (e.record.fields.at as string | undefined) ?? e.record.created;
 
+const TRUST: Record<string, number> = { T0: 0, T1: 1, T2: 2, T3: 3, T4: 4 };
+
+/** 0 challenged, 1 stale or orphaned, 2 unconfirmed machine record, 3 nothing to do. */
+export const attention = (e: Entry) =>
+  isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3;
+
 export const isChallenged = (e: Entry) =>
   !["superseded", "retracted"].includes(e.status) &&
   e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));

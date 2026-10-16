@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowUpRight, Compass, Layers, Network, Radar } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Layers, Network, Radar } from "lucide-react";
 import { useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { EntryCard } from "@/components/entry-card";
 import { GraphView } from "@/components/graph-view";
 import { RepoDot, SymbolLink } from "@/components/symbol";
@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
 
-function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof Compass; nodes: Node[] }) {
+function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof Layers; nodes: Node[] }) {
   if (nodes.length === 0) return null;
   return (
     <Card>
@@ -46,18 +46,7 @@ export function ExplorerPage() {
     [detail.data],
   );
 
-  if (!focus) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-        <Compass className="size-10 text-muted-foreground" />
-        <h1 className="text-xl font-semibold">Explore a symbol</h1>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Press <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">⌘K</kbd> and search for a function, class, file or
-          contract to see its neighbourhood, blast radius and what the team recorded about it.
-        </p>
-      </div>
-    );
-  }
+  if (!focus) return <Navigate to="/" replace />;
   if (detail.isLoading) return <Skeleton className="h-[600px] rounded-xl" />;
   if (detail.isError || !detail.data?.zoom.focus) return <p className="text-sm text-muted-foreground">Symbol not found.</p>;
 

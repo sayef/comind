@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, Compass, LayoutDashboard, Moon, Network, Ruler, Search, Sun } from "lucide-react";
+import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Ruler, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { CommandPalette } from "@/components/command-palette";
@@ -13,7 +13,6 @@ const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/contracts", label: "Contracts", icon: Network },
   { to: "/ledger", label: "Ledger", icon: BookMarked },
-  { to: "/explorer", label: "Explorer", icon: Compass },
   { to: "/conventions", label: "Conventions", icon: Ruler },
 ];
 
