@@ -24,9 +24,19 @@ cargo run -q -- eval graph -v                        # resolver quality on the f
 
 Tests that need a bucket or an LLM key are opt-in; everything else runs offline.
 
+The web UI lives in `ui/` (React, TypeScript, Vite) and is embedded into the binary at build time. Without
+a build, `comind ui --web` serves a placeholder page. With Node 24:
+
+```sh
+cd ui && npm ci && npm run build && cd ..            # embedded on the next cargo build
+comind ui --web &                                    # API on 127.0.0.1:7878
+cd ui && npm run dev                                 # hot reload on 127.0.0.1:5173, /api proxied
+```
+
 ## Checklist for a pull request
 
 - `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` are clean.
+- UI changes build with `npm run build` in `ui/` (type-checked).
 - `cargo deny check` passes (licences, advisories and sources; install with `cargo install cargo-deny --locked`).
 - New behaviour has tests. Resolver, contract and infrastructure changes add cases to
   `tests/fixtures/org` with gold edges in `expected.toml`, and `comind eval graph` stays at 100%

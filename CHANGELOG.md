@@ -22,4 +22,5 @@ All notable changes to this project are documented here. The format follows
   MRs and commits, self-enforcing constraint checks, SSH signing, compaction and erasure.
 - `comind preflight` for uncommitted changes and MR pipelines; Claude Code and generic agent hooks with a
   local mirror for remote indexes; `comind doctor`.
-- Terminal UI (`comind ui`) and local web UI (`comind ui --web`).
+- Terminal UI (`comind ui`) and local web UI (`comind ui --web`): a React app embedded in the binary,
+  with a WebGL org map and symbol graph, a version slider, contracts, ledger review and a command palette.

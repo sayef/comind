@@ -47,8 +47,27 @@ jobs:
           echo "ref=${tag:-$(git rev-parse HEAD)}" >> "$GITHUB_OUTPUT"
           echo "Release tag: ${tag:-none}"
 
-  build:
+  ui:
     needs: tag
+    if: needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci && npm run build
+        working-directory: ui
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ui-dist
+          path: ui/dist
+
+  build:
+    needs: [tag, ui]
     if: needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -71,6 +90,10 @@ jobs:
         with:
           ref: ${{ needs.tag.outputs.ref }}
           persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: ui/dist
       - if: runner.os == 'Linux'
         run: apt-get update && apt-get install -y protobuf-compiler cmake perl
       - if: runner.os == 'macOS'

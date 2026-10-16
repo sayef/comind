@@ -29,6 +29,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      # The crate ships the built web UI (see `include` in Cargo.toml).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci && npm run build
+        working-directory: ui
       - uses: dtolnay/rust-toolchain@stable
       - uses: release-plz/action@v0.5
         with:

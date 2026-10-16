@@ -107,7 +107,7 @@ src/
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
   preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
   tui.rs      `comind ui`: overview, contracts, ledger, explorer, conventions (ratatui).
-  web.rs      `comind ui --web`: axum JSON API + one embedded page (web/index.html), 127.0.0.1 only.
+  web.rs      `comind ui --web`: axum JSON API + the React app from ui/ (embedded by build.rs), 127.0.0.1 only.
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
   resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
   eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).
