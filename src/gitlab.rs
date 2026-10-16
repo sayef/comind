@@ -102,6 +102,17 @@ fn clip(s: &str, n: usize) -> String {
     }
 }
 
+/// A personal or project token: `GITLAB_TOKEN`, or the names the GitLab CLI and MCP tools use.
+pub fn token_from_env() -> Option<String> {
+    [
+        "GITLAB_TOKEN",
+        "GITLAB_API_PRIVATE_TOKEN",
+        "GITLAB_PRIVATE_TOKEN",
+    ]
+    .iter()
+    .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+}
+
 pub struct Client {
     http: reqwest::Client,
     base: String,
@@ -112,19 +123,23 @@ impl Client {
     /// `project` is the path (`group/repo`) or numeric id; base from `GITLAB_URL` (default
     /// gitlab.com, or `CI_API_V4_URL` in GitLab CI).
     pub fn from_env(project: &str) -> Result<Client> {
-        let (header, token) = match (std::env::var("GITLAB_TOKEN"), std::env::var("CI_JOB_TOKEN")) {
-            (Ok(t), _) if !t.is_empty() => ("PRIVATE-TOKEN", t),
-            (_, Ok(t)) if !t.is_empty() => ("JOB-TOKEN", t),
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let (header, token) = match (token_from_env(), var("CI_JOB_TOKEN")) {
+            (Some(t), _) => ("PRIVATE-TOKEN", t),
+            (_, Some(t)) => ("JOB-TOKEN", t),
             _ => bail!("set GITLAB_TOKEN (read_api scope) to read merge requests"),
         };
-        let base = std::env::var("CI_API_V4_URL").unwrap_or_else(|_| {
-            format!(
-                "{}/api/v4",
-                std::env::var("GITLAB_URL")
-                    .unwrap_or_else(|_| "https://gitlab.com".into())
-                    .trim_end_matches('/')
-            )
-        });
+        let base = var("CI_API_V4_URL")
+            .or_else(|| var("GITLAB_API_ENDPOINT"))
+            .map(|u| u.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| {
+                format!(
+                    "{}/api/v4",
+                    var("GITLAB_URL")
+                        .unwrap_or_else(|| "https://gitlab.com".into())
+                        .trim_end_matches('/')
+                )
+            });
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(header, token.parse().context("token header")?);
         Ok(Client {

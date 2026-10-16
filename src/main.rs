@@ -1716,7 +1716,23 @@ fn distill_and_record(bundles: &[comind::distill::Bundle], dry_run: bool, root: 
                 rec.title,
                 rec.evidence.join(", ")
             );
-            if !dry_run {
+            if dry_run {
+                // Enough to judge the proposal without recording it.
+                if !rec.body.is_empty() {
+                    println!("    {}", rec.body);
+                }
+                if let Some(t) = &rec.trigger {
+                    println!("    relevant when: {t}");
+                }
+                let at: Vec<String> = rec
+                    .anchors
+                    .iter()
+                    .map(|a| format!("{}:{}", a.path, a.name))
+                    .collect();
+                if !at.is_empty() {
+                    println!("    about: {}", at.join(", "));
+                }
+            } else {
                 if let Err(e) = comind::ledger::put_blocking(root, &rec) {
                     comind::ui::err(&format!("not recorded: {e:#}"));
                 }
@@ -1802,7 +1818,7 @@ fn cmd_doctor(from: Option<&str>) -> ExitCode {
         "no LLM key: enrichment, flows and the distiller are off (indexing works without)",
     );
     check(
-        set("GITLAB_TOKEN") || set("CI_JOB_TOKEN"),
+        comind::gitlab::token_from_env().is_some() || set("CI_JOB_TOKEN"),
         "GitLab token present (MR distiller)",
         "no GITLAB_TOKEN: `comind distill mr` unavailable",
     );
