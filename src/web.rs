@@ -25,15 +25,18 @@ mod assets {
 struct AppState {
     data: Data,
     entries: RwLock<Vec<Entry>>,
+    manual: RwLock<Vec<crate::conventions::Manual>>,
 }
 
 type Shared = Arc<AppState>;
 
 pub fn serve(mut data: Data, port: u16) -> Result<()> {
     let entries = std::mem::take(&mut data.entries);
+    let manual = std::mem::take(&mut data.manual);
     let state = Arc::new(AppState {
         data,
         entries: RwLock::new(entries),
+        manual: RwLock::new(manual),
     });
     let app = Router::new()
         .route("/api/overview", get(overview))
@@ -41,7 +44,7 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/versions", get(versions))
         .route("/api/contracts", get(contracts))
         .route("/api/ledger", get(ledger))
-        .route("/api/conventions", get(conventions))
+        .route("/api/conventions", get(conventions).post(change_convention))
         .route("/api/find", get(find))
         .route("/api/node", get(node))
         .route("/api/review", post(review))
@@ -285,13 +288,86 @@ struct RepoQ {
 }
 
 async fn conventions(State(s): State<Shared>, Query(q): Query<RepoQ>) -> Json<Value> {
-    let v: Vec<_> = s
-        .data
-        .conventions
-        .iter()
-        .filter(|c| q.repo.as_deref().is_none_or(|r| c.repo == r))
+    let manual = s.manual.read().await;
+    let mine = |r: &str| q.repo.as_deref().is_none_or(|q| r == q);
+    let shown: Vec<Value> = crate::conventions::apply(s.data.conventions.clone(), &manual)
+        .into_iter()
+        .filter(|c| mine(&c.repo))
+        .map(|c| {
+            let mut v = json!(c);
+            v["id"] = json!(c.id());
+            v
+        })
         .collect();
-    Json(json!(v))
+    let hidden: Vec<_> = manual
+        .iter()
+        .filter(|m| m.hidden && mine(&m.repo))
+        .collect();
+    Json(json!({ "conventions": shown, "hidden": hidden }))
+}
+
+#[derive(Deserialize)]
+struct ConventionBody {
+    /// `add`, `edit`, `hide` or `restore`.
+    action: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    dimension: Option<String>,
+    #[serde(default)]
+    rule: String,
+}
+
+async fn change_convention(
+    State(s): State<Shared>,
+    Json(b): Json<ConventionBody>,
+) -> impl IntoResponse {
+    match apply_convention(&s, b).await {
+        Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "message": format!("{e:#}")})),
+        ),
+    }
+}
+
+async fn apply_convention(s: &AppState, b: ConventionBody) -> Result<String> {
+    use crate::conventions::{change, Change, Manual, Write, ORG};
+    let root = s.data.root.as_deref().context("read-only UI")?;
+    let mut manual = s.manual.write().await;
+    let w = if b.action == "add" {
+        let dimension = b.dimension.as_deref().unwrap_or("team");
+        Write::Put(Manual::new(
+            b.repo.as_deref().unwrap_or(ORG),
+            dimension,
+            &b.rule,
+        ))
+    } else {
+        let what = match b.action.as_str() {
+            "edit" => Change::Edit(b.rule),
+            "hide" => Change::Hide,
+            "restore" => Change::Restore,
+            other => anyhow::bail!("unknown action {other}"),
+        };
+        let current = crate::conventions::apply(s.data.conventions.clone(), &manual);
+        change(&current, &manual, &b.id, what)?
+    };
+    crate::conventions::Store::open(root)?.write(&w).await?;
+    Ok(match w {
+        Write::Put(m) => {
+            let id = m.id.clone();
+            manual.retain(|x| x.id != id);
+            let verb = if m.hidden { "hid" } else { "saved" };
+            manual.push(m);
+            format!("{verb} {id}")
+        }
+        Write::Delete(id) => {
+            manual.retain(|x| x.id != id);
+            format!("removed {id}")
+        }
+    })
 }
 
 #[derive(Deserialize)]

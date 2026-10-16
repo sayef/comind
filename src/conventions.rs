@@ -3,7 +3,12 @@
 //! never invents them. Conventions shared by several repos form the org baseline.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
+use anyhow::{bail, Context, Result};
+use futures::TryStreamExt;
+use object_store::path::Path as ObjPath;
+use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
 use serde::{Deserialize, Serialize};
 
 use crate::facts::{FileFacts, ImportItem, RefKind, ValueExpr};
@@ -30,6 +35,235 @@ pub struct Convention {
     pub exemplars: Vec<String>,
     /// `path:line` of instances that deviate.
     pub counterexamples: Vec<String>,
+    #[serde(default)]
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    #[default]
+    Measured,
+    /// Measured, with the rule rewritten by a person.
+    Edited,
+    /// Written by a person.
+    Manual,
+}
+
+const MANUAL: &str = "manual:";
+
+impl Convention {
+    /// Stable handle for edits: a manual entry's id, or a hash of repo and key.
+    pub fn id(&self) -> String {
+        match self.key.strip_prefix(MANUAL) {
+            Some(id) => id.to_string(),
+            None => measured_id(&self.repo, &self.key),
+        }
+    }
+}
+
+fn measured_id(repo: &str, key: &str) -> String {
+    let h = blake3::hash(format!("{repo}\n{key}").as_bytes()).to_hex();
+    format!("m{}", &h[..10])
+}
+
+/// A person's change: a new convention, or an edit or hiding (`replaces`) of a measured one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Manual {
+    pub id: String,
+    /// Repo, or [`ORG`] for the whole org.
+    pub repo: String,
+    pub dimension: String,
+    /// The rule; for a hidden convention, the rule that was hidden.
+    pub rule: String,
+    /// Key of the measured convention this overrides.
+    #[serde(default)]
+    pub replaces: Option<String>,
+    #[serde(default)]
+    pub hidden: bool,
+    pub actor: String,
+    pub updated: String,
+}
+
+impl Manual {
+    pub fn new(repo: &str, dimension: &str, rule: &str) -> Manual {
+        let id = uuid::Uuid::now_v7().simple().to_string();
+        Manual {
+            id: format!("c{}", &id[id.len() - 10..]),
+            repo: repo.into(),
+            dimension: dimension.trim().to_lowercase(),
+            rule: rule.trim().into(),
+            replaces: None,
+            hidden: false,
+            actor: crate::ledger::actor(),
+            updated: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.rule.trim().is_empty() || self.rule.chars().count() > 500 {
+            bail!("rule must be 1–500 characters");
+        }
+        if self.dimension.is_empty() || self.dimension.len() > 40 {
+            bail!("dimension must be 1–40 characters");
+        }
+        if let Some(why) = crate::ledger::suspicious(&self.rule) {
+            bail!("rule rejected: {why}");
+        }
+        Ok(())
+    }
+}
+
+/// What a change to one convention writes.
+#[derive(Debug, PartialEq)]
+pub enum Write {
+    Put(Manual),
+    Delete(String),
+}
+
+pub enum Change {
+    Edit(String),
+    Hide,
+    /// Undo an edit or hiding of a measured convention.
+    Restore,
+}
+
+/// The write for `change` to the convention `id`; `current` is the applied list.
+pub fn change(
+    current: &[Convention],
+    manual: &[Manual],
+    id: &str,
+    change: Change,
+) -> Result<Write> {
+    let own = manual.iter().find(|m| m.id == id);
+    if let Change::Restore = change {
+        return match own {
+            Some(m) if m.replaces.is_some() => Ok(Write::Delete(m.id.clone())),
+            _ => bail!("{id} is not an edited or hidden measured convention"),
+        };
+    }
+    let c = current
+        .iter()
+        .find(|c| c.id() == id)
+        .with_context(|| format!("no convention {id}"))?;
+    let base = || Manual {
+        id: id.to_string(),
+        repo: c.repo.clone(),
+        dimension: c.dimension.clone(),
+        rule: c.rule.clone(),
+        replaces: (c.origin != Origin::Manual).then(|| c.key.clone()),
+        hidden: false,
+        actor: crate::ledger::actor(),
+        updated: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+    };
+    Ok(match change {
+        Change::Edit(rule) => Write::Put(Manual {
+            rule: rule.trim().into(),
+            ..base()
+        }),
+        Change::Hide if c.origin == Origin::Manual => Write::Delete(id.to_string()),
+        Change::Hide => Write::Put(Manual {
+            hidden: true,
+            rule: own.map_or(c.rule.clone(), |m| m.rule.clone()),
+            ..base()
+        }),
+        Change::Restore => unreachable!(),
+    })
+}
+
+/// Measured conventions with people's changes applied: hidden ones dropped, edits replace the
+/// rule, new ones appended.
+pub fn apply(mut measured: Vec<Convention>, manual: &[Manual]) -> Vec<Convention> {
+    let over: HashMap<(&str, &str), &Manual> = manual
+        .iter()
+        .filter_map(|m| Some(((m.repo.as_str(), m.replaces.as_deref()?), m)))
+        .collect();
+    measured.retain_mut(|c| match over.get(&(c.repo.as_str(), c.key.as_str())) {
+        Some(m) if m.hidden => false,
+        Some(m) => {
+            c.rule = m.rule.clone();
+            c.generic = m.rule.clone();
+            c.origin = Origin::Edited;
+            true
+        }
+        None => true,
+    });
+    measured.extend(
+        manual
+            .iter()
+            .filter(|m| m.replaces.is_none())
+            .map(|m| Convention {
+                repo: m.repo.clone(),
+                dimension: m.dimension.clone(),
+                key: format!("{MANUAL}{}", m.id),
+                rule: m.rule.clone(),
+                generic: m.rule.clone(),
+                support: 0,
+                total: 0,
+                exemplars: Vec::new(),
+                counterexamples: Vec::new(),
+                origin: Origin::Manual,
+            }),
+    );
+    measured
+}
+
+/// People's changes, one JSON object each under `<index_root>/_conventions/`; indexing never
+/// touches them.
+pub struct Store {
+    store: Arc<dyn ObjectStore>,
+    root: ObjPath,
+}
+
+impl Store {
+    pub fn open(index_root: &str) -> Result<Store> {
+        let (store, root) = crate::ledger::sub_store(index_root, "_conventions")?;
+        Ok(Store { store, root })
+    }
+
+    pub async fn all(&self) -> Result<Vec<Manual>> {
+        let metas: Vec<_> = self.store.list(Some(&self.root)).try_collect().await?;
+        let mut out = Vec::new();
+        for m in metas
+            .iter()
+            .filter(|m| m.location.as_ref().ends_with(".json"))
+        {
+            let bytes = self.store.get(&m.location).await?.bytes().await?;
+            match serde_json::from_slice::<Manual>(&bytes) {
+                Ok(c) => out.push(c),
+                Err(e) => eprintln!("comind: skipping unreadable convention {}: {e}", m.location),
+            }
+        }
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
+    }
+
+    pub async fn write(&self, w: &Write) -> Result<()> {
+        match w {
+            Write::Put(m) => {
+                m.validate()?;
+                let key = self.root.clone().join(format!("{}.json", m.id));
+                let body = PutPayload::from(serde_json::to_vec_pretty(m)?);
+                self.store
+                    .put(&key, body)
+                    .await
+                    .context("write convention")?;
+            }
+            Write::Delete(id) => {
+                let key = self.root.clone().join(format!("{id}.json"));
+                self.store.delete(&key).await.context("delete convention")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn manual_blocking(index_root: &str) -> Result<Vec<Manual>> {
+    crate::ledger::runtime()?.block_on(Store::open(index_root)?.all())
+}
+
+pub fn write_blocking(index_root: &str, w: &Write) -> Result<()> {
+    crate::ledger::runtime()?.block_on(Store::open(index_root)?.write(w))
 }
 
 /// External libraries commonly wrapped by internal modules.
@@ -109,6 +343,7 @@ fn org_baseline(per_repo: &[Convention]) -> Vec<Convention> {
         .map(|(key, cs)| {
             let names: Vec<&str> = cs.iter().map(|c| c.repo.as_str()).collect();
             Convention {
+                origin: Origin::Measured,
                 repo: ORG.into(),
                 dimension: cs[0].dimension.clone(),
                 key: key.to_string(),
@@ -277,6 +512,7 @@ impl<'a> Cx<'a> {
                 .collect();
             let generic = format!("{} are {case}", capitalize(label));
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "naming".into(),
                 key: format!("naming:{label}:{case}"),
@@ -322,6 +558,7 @@ impl<'a> Cx<'a> {
                 )
             };
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: key.into(),
@@ -344,6 +581,7 @@ impl<'a> Cx<'a> {
         if with_params.len() >= 10 && typed.len() * 10 >= with_params.len() * 7 {
             let generic = "Parameters carry type annotations";
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: "signatures:params:typed".into(),
@@ -371,6 +609,7 @@ impl<'a> Cx<'a> {
         if asyncs.len() * 2 >= callables.len() {
             let generic = "Code is predominantly async";
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: "signatures:async".into(),
@@ -452,6 +691,7 @@ impl<'a> Cx<'a> {
         for (base, classes) in models.into_iter().take(4) {
             let generic = format!("Classes extend {base}");
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "models".into(),
                 key: format!("models:base:{base}"),
@@ -473,6 +713,7 @@ impl<'a> Cx<'a> {
                     .collect();
                 let generic = format!("Custom errors derive from {root}");
                 out.push(Convention {
+                    origin: Origin::Measured,
                     repo: repo.into(),
                     dimension: "errors".into(),
                     key: format!("errors:root:{root}"),
@@ -530,6 +771,7 @@ impl<'a> Cx<'a> {
             let mut tail: Vec<&str> = dir.rsplit('/').take(2).collect();
             tail.reverse();
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "layout".into(),
                 key: format!("layout:{}", label.to_lowercase().replace(' ', "-")),
@@ -636,6 +878,7 @@ impl<'a> Cx<'a> {
             )
         };
         vec![Convention {
+            origin: Origin::Measured,
             repo: repo.into(),
             dimension: "config".into(),
             key: key.into(),
@@ -697,6 +940,7 @@ impl<'a> Cx<'a> {
             }
             let generic = format!("`{ext}` is used through `{wrapper}`");
             out.push(Convention {
+                origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "libraries".into(),
                 key: format!("libraries:{ext}:via:{wrapper}"),
@@ -761,6 +1005,7 @@ impl<'a> Cx<'a> {
         let mut ex = files.clone();
         ex.sort_by_key(|p| p.len());
         vec![Convention {
+            origin: Origin::Measured,
             repo: repo.into(),
             dimension: "testing".into(),
             key: format!("testing:{lib}"),
@@ -798,6 +1043,7 @@ fn dominant(
         .collect();
     let g = generic(name);
     vec![Convention {
+        origin: Origin::Measured,
         repo: repo.into(),
         dimension: dimension.into(),
         key: format!("{key}:{name}"),
@@ -967,6 +1213,7 @@ mod tests {
     #[test]
     fn org_baseline_uses_generic_rules() {
         let c = |repo: &str| Convention {
+            origin: Origin::Measured,
             repo: repo.into(),
             dimension: "naming".into(),
             key: "naming:functions:snake_case".into(),
@@ -982,5 +1229,64 @@ mod tests {
         assert!(org[0]
             .rule
             .starts_with("Functions are snake_case — in 2 of 2 repos"));
+    }
+
+    #[test]
+    fn manual_changes_apply_and_undo() {
+        let measured = vec![Convention {
+            origin: Origin::Measured,
+            repo: "svc".into(),
+            dimension: "errors".into(),
+            key: "errors:root:Base".into(),
+            rule: "Errors derive from Base — 9 of 10".into(),
+            generic: "Errors derive from Base".into(),
+            support: 9,
+            total: 10,
+            exemplars: vec!["e.py:1".into()],
+            counterexamples: Vec::new(),
+        }];
+        let id = measured[0].id();
+        let added = Manual::new("svc", "Libraries", "Use the shared HTTP client");
+        let mut manual = vec![added.clone()];
+
+        let edit = change(
+            &apply(measured.clone(), &manual),
+            &manual,
+            &id,
+            Change::Edit("Errors derive from Base".into()),
+        )
+        .unwrap();
+        let Write::Put(edit) = edit else { panic!() };
+        assert_eq!(edit.replaces.as_deref(), Some("errors:root:Base"));
+        manual.push(edit);
+        let shown = apply(measured.clone(), &manual);
+        assert_eq!(shown.len(), 2);
+        assert_eq!(
+            (shown[0].origin, shown[0].rule.as_str(), shown[0].support),
+            (Origin::Edited, "Errors derive from Base", 9)
+        );
+        assert_eq!(
+            (shown[1].origin, shown[1].dimension.as_str(), shown[1].id()),
+            (Origin::Manual, "libraries", added.id.clone())
+        );
+
+        let Write::Put(hide) = change(&shown, &manual, &id, Change::Hide).unwrap() else {
+            panic!()
+        };
+        assert!(hide.hidden);
+        manual.retain(|m| m.id != id);
+        manual.push(hide);
+        assert_eq!(apply(measured.clone(), &manual).len(), 1);
+
+        let all = apply(measured.clone(), &manual);
+        assert_eq!(
+            change(&all, &manual, &id, Change::Restore).unwrap(),
+            Write::Delete(id.clone())
+        );
+        assert_eq!(
+            change(&all, &manual, &added.id, Change::Hide).unwrap(),
+            Write::Delete(added.id.clone())
+        );
+        assert!(change(&all, &manual, &added.id, Change::Restore).is_err());
     }
 }

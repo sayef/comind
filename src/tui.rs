@@ -31,7 +31,9 @@ pub struct Data {
     pub edges: Vec<Edge>,
     pub contracts: Vec<ContractView>,
     pub entries: Vec<Entry>,
+    /// Measured conventions; `manual` holds the team's changes to them.
     pub conventions: Vec<Convention>,
+    pub manual: Vec<crate::conventions::Manual>,
     pub deps: Vec<InternalDep>,
     /// Index root for writing ledger reviews; `None` makes the UI read-only.
     pub root: Option<String>,
@@ -53,7 +55,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(data: Data) -> App {
+    pub fn new(mut data: Data) -> App {
+        let measured = std::mem::take(&mut data.conventions);
+        data.conventions = crate::conventions::apply(measured, &data.manual);
         let mut lists: [ListState; 6] = Default::default();
         for l in &mut lists {
             l.select(Some(0));
@@ -447,9 +451,7 @@ impl App {
         let selected = self.lists[2].selected().unwrap_or(0);
         let text = match self.entries().get(selected) {
             Some(e) => crate::ledger::markdown("record", &[e]),
-            None => {
-                "no ledger records — add some with `comind remember` or through MCP".into()
-            }
+            None => "no ledger records — add some with `comind remember` or through MCP".into(),
         };
         f.render_widget(
             detail_box(
@@ -726,6 +728,7 @@ mod tests {
             contracts: graph.contracts(None, false),
             conventions: crate::conventions::mine(&symbols, &r.edges, &facts),
             entries: Vec::new(),
+            manual: Vec::new(),
             deps: Vec::new(),
             root: None,
             graph,

@@ -61,6 +61,7 @@ export interface Entry {
 }
 
 export interface Convention {
+  id: string;
   repo: string;
   dimension: string;
   key: string;
@@ -69,7 +70,21 @@ export interface Convention {
   total: number;
   exemplars: string[];
   counterexamples: string[];
+  origin: "measured" | "edited" | "manual";
 }
+
+/** A measured convention a person hid. */
+export interface HiddenConvention {
+  id: string;
+  repo: string;
+  dimension: string;
+  rule: string;
+}
+
+export type ConventionChange =
+  | { action: "add"; repo: string; dimension: string; rule: string }
+  | { action: "edit"; id: string; rule: string }
+  | { action: "hide" | "restore"; id: string };
 
 export interface Zoom {
   focus: Node | null;
@@ -102,7 +117,17 @@ export const api = {
   versions: () => get<string[]>("/api/versions"),
   contracts: () => get<ContractView[]>("/api/contracts"),
   ledger: () => get<Entry[]>("/api/ledger"),
-  conventions: () => get<Convention[]>("/api/conventions"),
+  conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[] }>("/api/conventions"),
+  changeConvention: async (c: ConventionChange) => {
+    const r = await fetch("/api/conventions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(c),
+    });
+    const out = (await r.json()) as { ok: boolean; message: string };
+    if (!out.ok) throw new Error(out.message);
+    return out;
+  },
   find: (q: string) => get<Node[]>(`/api/find?q=${encodeURIComponent(q)}`),
   node: (focus: string) => get<NodeDetail>(`/api/node?focus=${encodeURIComponent(focus)}`),
   review: async (id: string, action: "confirm" | "retract", reason = "") => {
@@ -115,7 +140,7 @@ export const api = {
   },
 };
 
-/** When a record's fact happened: the harvested commit date, else when it was recorded. */
+/** When a record's fact happened (older harvested records carry `at`), else when it was recorded. */
 export const when = (e: Entry) => (e.record.fields.at as string | undefined) ?? e.record.created;
 
 export const isChallenged = (e: Entry) =>

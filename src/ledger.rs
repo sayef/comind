@@ -344,6 +344,25 @@ pub fn actor() -> String {
     format!("actor-{}", &h[..10])
 }
 
+/// An object store rooted at `<index_root>/<sub>` (local directory or S3 prefix).
+pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
+    let root = index_root.trim_end_matches('/');
+    if let Some(rest) = root.strip_prefix("s3://") {
+        let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
+        let store = object_store::aws::AmazonS3Builder::from_env()
+            .with_bucket_name(bucket)
+            .build()
+            .context("open S3 store")?;
+        let path = ObjPath::from(format!("{prefix}/{sub}").trim_start_matches('/'));
+        return Ok((Arc::new(store), path));
+    }
+    let dir = std::path::Path::new(root).join(sub);
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let store = object_store::local::LocalFileSystem::new_with_prefix(&dir)
+        .with_context(|| format!("open {}", dir.display()))?;
+    Ok((Arc::new(store), ObjPath::from("")))
+}
+
 /// The ledger under an index root (local directory or `s3://bucket/prefix`).
 pub struct Ledger {
     store: Arc<dyn ObjectStore>,
@@ -356,27 +375,11 @@ const SNAPSHOT: &str = "ledger_records";
 
 impl Ledger {
     pub fn open(index_root: &str) -> Result<Ledger> {
-        let root = index_root.trim_end_matches('/');
-        if let Some(rest) = root.strip_prefix("s3://") {
-            let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
-            let store = object_store::aws::AmazonS3Builder::from_env()
-                .with_bucket_name(bucket)
-                .build()
-                .context("open S3 store")?;
-            return Ok(Ledger {
-                store: Arc::new(store),
-                root: ObjPath::from(format!("{prefix}/_ledger").trim_start_matches('/')),
-                tables: format!("{root}/_ledger/tables"),
-            });
-        }
-        let dir = std::path::Path::new(root).join("_ledger");
-        std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-        let store = object_store::local::LocalFileSystem::new_with_prefix(&dir)
-            .context("open local ledger")?;
+        let (store, root) = sub_store(index_root, "_ledger")?;
         Ok(Ledger {
-            store: Arc::new(store),
-            root: ObjPath::from(""),
-            tables: dir.join("tables").to_string_lossy().to_string(),
+            store,
+            root,
+            tables: format!("{}/_ledger/tables", index_root.trim_end_matches('/')),
         })
     }
 
@@ -619,7 +622,7 @@ pub fn all_blocking(index_root: &str) -> Result<Vec<Record>> {
     runtime()?.block_on(ledger.all())
 }
 
-fn runtime() -> Result<tokio::runtime::Runtime> {
+pub(crate) fn runtime() -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

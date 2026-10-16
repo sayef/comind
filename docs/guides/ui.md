@@ -13,7 +13,8 @@ nothing else is needed.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
   records) with confirm and retract, and the full timeline.
 - **Explorer**: one symbol with its neighbourhood graph, blast radius, contracts and recorded reasoning.
-- **Conventions**: measured conventions per repository.
+- **Conventions**: measured conventions per repository and org-wide; add your own, edit or hide
+  measured ones (hidden ones can be restored).
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search symbols, files and contracts. The theme follows
 the system and can be toggled. Against a read-only index, confirm and retract are hidden.

@@ -16,7 +16,8 @@ All notable changes to this project are documented here. The format follows
   SQS/SNS/S3 (also through wrappers and constructors), SQL tables, Terraform queues/topics/buckets and
   subscriptions, values from YAML config; `comind contracts` and the MCP `contracts` tool.
 - Package versions and version skew across repos (`comind packages`).
-- Conventions and co-change recipes (`comind conventions`, MCP `guide`).
+- Conventions and co-change recipes (`comind conventions`, MCP `guide`); the team can add, edit and hide
+  conventions from the CLI or the web UI.
 - Reasoning ledger: typed records anchored to symbols, stored in your own store, with derived staleness,
   trust levels, review (`remember`, `why`, `review`, `ledger`), self-enforcing constraint checks, SSH
   signing, compaction and erasure. Records come from people and from agents through MCP and hooks.

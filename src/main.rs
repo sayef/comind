@@ -315,13 +315,15 @@ enum Cmd {
         /// (plain markdown on stdout; the edited file is found in the payload or `COMIND_HOOK_FILE`)
         agent: String,
     },
-    /// Measured coding conventions per repo and org-wide, with exemplars and deviations
+    /// Coding conventions per repo and org-wide: measured from the code, plus the team's own
     Conventions {
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
-        #[arg(long = "index-dir")]
+        #[command(subcommand)]
+        what: Option<ConventionsWhat>,
+        /// Index directory — root; default: configured index dir (local path or s3://…)
+        #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
-        /// Only this repo (and the org baseline)
-        #[arg(long)]
+        /// Only this repo (and the org baseline); with `add`, the repo it applies to (default: org-wide)
+        #[arg(long, global = true)]
         repo: Option<String>,
     },
     /// Internal packages: who publishes each, who depends on it, and at which version
@@ -355,6 +357,23 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+}
+
+#[derive(Subcommand)]
+enum ConventionsWhat {
+    /// Add a convention
+    Add {
+        rule: String,
+        /// e.g. naming, errors, testing, libraries
+        #[arg(long, default_value = "team")]
+        dimension: String,
+    },
+    /// Rewrite a convention's rule (id from the listing)
+    Edit { id: String, rule: String },
+    /// Remove a convention; a measured one is hidden and can be restored
+    Rm { id: String },
+    /// Bring back a hidden or edited measured convention as measured
+    Restore { id: String },
 }
 
 #[derive(Subcommand)]
@@ -528,9 +547,16 @@ fn main() -> ExitCode {
             dangling,
         } => cmd_contracts(index_dir.as_deref(), kind.as_deref(), dangling),
         Cmd::Packages { index_dir, skew } => cmd_packages(index_dir.as_deref(), skew),
-        Cmd::Conventions { index_dir, repo } => {
-            cmd_conventions(index_dir.as_deref(), repo.as_deref())
-        }
+        Cmd::Conventions {
+            what: None,
+            index_dir,
+            repo,
+        } => cmd_conventions(index_dir.as_deref(), repo.as_deref()),
+        Cmd::Conventions {
+            what: Some(what),
+            index_dir,
+            repo,
+        } => cmd_conventions_change(index_dir.as_deref(), repo.as_deref(), what),
         Cmd::Remember {
             kind,
             on,
@@ -1414,6 +1440,7 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
         _ => Vec::new(),
     };
     conventions.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
+    let manual = comind::conventions::manual_blocking(&cfg.index_dir(from)).unwrap_or_default();
     let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
     let mut entries = comind::ledger::derive(&records, &symbols);
     let packages = comind::index::read_packages_blocking(&dir).unwrap_or_default();
@@ -1428,6 +1455,7 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
         edges,
         entries,
         conventions,
+        manual,
         deps,
         root: Some(cfg.index_dir(from)),
     };
@@ -1785,42 +1813,100 @@ fn cmd_init_hooks(agent: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
-    let dir = comind::config::Config::load().graph_dir(from);
-    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
-        Ok(x) => x,
-        Err(e) => {
-            comind::ui::err(&format!("no index at {dir}: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let Ok(Some(facts)) = comind::index::read_facts_blocking(&dir) else {
-        comind::ui::err("index has no stored facts; re-run `comind index`/`link`");
-        return ExitCode::FAILURE;
+/// Measured conventions with the team's changes applied, plus those changes.
+fn load_conventions(
+    from: Option<&str>,
+) -> anyhow::Result<(
+    Vec<comind::conventions::Convention>,
+    Vec<comind::conventions::Manual>,
+)> {
+    let cfg = comind::config::Config::load();
+    let dir = cfg.graph_dir(from);
+    let (symbols, edges) = comind::index::read_graph_blocking(&dir)
+        .map_err(|e| anyhow::anyhow!("no index at {dir}: {e:#}"))?;
+    let Some(facts) = comind::index::read_facts_blocking(&dir)? else {
+        anyhow::bail!("index has no stored facts; re-run `comind index`/`link`");
     };
     let mut all = comind::conventions::mine(&symbols, &edges, &facts);
     all.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
+    let manual = comind::conventions::manual_blocking(&cfg.index_dir(from))?;
+    Ok((comind::conventions::apply(all, &manual), manual))
+}
+
+fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
+    use comind::conventions::{Origin, ORG};
+    let (all, manual) = match load_conventions(from) {
+        Ok(x) => x,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+    };
     let mut by_repo: BTreeMap<&str, Vec<&comind::conventions::Convention>> = BTreeMap::new();
     for c in &all {
-        if repo.is_none_or(|r| c.repo == r || c.repo == comind::conventions::ORG) {
+        if repo.is_none_or(|r| c.repo == r || c.repo == ORG) {
             by_repo.entry(c.repo.as_str()).or_default().push(c);
         }
     }
     for (r, cs) in by_repo {
-        let title = if r == comind::conventions::ORG {
-            "Org baseline".to_string()
-        } else {
-            r.to_string()
-        };
-        comind::ui::header(&title);
+        comind::ui::header(if r == ORG { "Org baseline" } else { r });
         for c in cs {
-            comind::ui::field(&c.dimension, &c.rule);
+            let tag = match c.origin {
+                Origin::Measured => "",
+                Origin::Edited => ", edited",
+                Origin::Manual => ", team",
+            };
+            comind::ui::field(&c.dimension, &format!("{}  [{}{tag}]", c.rule, c.id()));
             if !c.exemplars.is_empty() {
                 comind::ui::note(&format!("e.g. {}", c.exemplars.join(", ")));
             }
             if !c.counterexamples.is_empty() {
                 comind::ui::note(&format!("except {}", c.counterexamples.join(", ")));
             }
+        }
+    }
+    let hidden: Vec<_> = manual
+        .iter()
+        .filter(|m| m.hidden && repo.is_none_or(|r| m.repo == r || m.repo == ORG))
+        .collect();
+    if !hidden.is_empty() {
+        comind::ui::header("Hidden (comind conventions restore <id>)");
+        for m in hidden {
+            comind::ui::field(&m.dimension, &format!("{}  [{}, {}]", m.rule, m.id, m.repo));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_conventions_change(
+    from: Option<&str>,
+    repo: Option<&str>,
+    what: ConventionsWhat,
+) -> ExitCode {
+    use comind::conventions::{change, Change, Manual, Write, ORG};
+    let root = comind::config::Config::load().index_dir(from);
+    let restore = matches!(what, ConventionsWhat::Restore { .. });
+    let write = match what {
+        ConventionsWhat::Add { rule, dimension } => Ok(Write::Put(Manual::new(
+            repo.unwrap_or(ORG),
+            &dimension,
+            &rule,
+        ))),
+        ConventionsWhat::Edit { id, rule } => load_conventions(from)
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Edit(rule))),
+        ConventionsWhat::Rm { id } => load_conventions(from)
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Hide)),
+        ConventionsWhat::Restore { id } => load_conventions(from)
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Restore)),
+    };
+    match write.and_then(|w| comind::conventions::write_blocking(&root, &w).map(|_| w)) {
+        Ok(Write::Put(m)) if m.hidden => comind::ui::ok(&format!("hid {}", m.id)),
+        Ok(Write::Put(m)) => comind::ui::ok(&format!("saved {}: {}", m.id, m.rule)),
+        Ok(Write::Delete(id)) if restore => comind::ui::ok(&format!("restored {id}")),
+        Ok(Write::Delete(id)) => comind::ui::ok(&format!("removed {id}")),
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
         }
     }
     ExitCode::SUCCESS

@@ -96,6 +96,7 @@ pub fn mine(repo: &str, history: &[CommitFiles]) -> Vec<Convention> {
             parts.join(", ")
         );
         out.push(Convention {
+            origin: crate::conventions::Origin::Measured,
             repo: repo.into(),
             dimension: "recipes".into(),
             key: format!("recipes:{repo}:{anchor}"),

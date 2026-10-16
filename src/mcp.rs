@@ -365,6 +365,9 @@ struct ConventionDto {
     rule: String,
     exemplars: Vec<String>,
     counterexamples: Vec<String>,
+    /// Written or edited by a person rather than measured.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    team: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -913,6 +916,7 @@ impl ComindServer {
                     rule: c.rule.clone(),
                     exemplars: c.exemplars.iter().take(2).cloned().collect(),
                     counterexamples: c.counterexamples.iter().take(2).cloned().collect(),
+                    team: c.origin != crate::conventions::Origin::Measured,
                 });
             }
         }
@@ -1354,7 +1358,8 @@ fn md_guide(d: &GuideDto) -> String {
             o.push_str("\n**Org baseline**\n");
             org_header = true;
         }
-        let _ = writeln!(o, "- _{}_: {}", c.dimension, c.rule);
+        let team = if c.team { " _(set by the team)_" } else { "" };
+        let _ = writeln!(o, "- _{}_: {}{team}", c.dimension, c.rule);
         if !c.exemplars.is_empty() {
             let _ = writeln!(o, "  - e.g. `{}`", c.exemplars.join("`, `"));
         }
@@ -1378,6 +1383,13 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         _ => Vec::new(),
     };
     conventions.extend(crate::index::read_recipes(uri).await.unwrap_or_default());
+    let root = uri.trim_end_matches('/');
+    let root = root.strip_suffix("/_graph").unwrap_or(root);
+    let manual = match crate::conventions::Store::open(root) {
+        Ok(s) => s.all().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let conventions = crate::conventions::apply(conventions, &manual);
     let graph = Arc::new(CodeGraph::build(&symbols, &edges));
     let by_id: HashMap<String, Symbol> =
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();

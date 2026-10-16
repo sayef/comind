@@ -15,7 +15,8 @@
 | `comind serve [--index-dir <dir>] [--format md\|json]` | MCP server over stdio |
 | `comind contracts [--type http\|sqs\|sns\|s3\|table] [--dangling]` | Service contracts with providers and consumers (FastAPI, Next.js, Express, Spring MVC, Feign, RestTemplate, WebClient, Go net/http/gin/echo/chi, axum, actix, reqwest, httpx/requests/fetch/axios, boto3, SQL; Terraform queues/topics/buckets and subscriptions) |
 | `comind packages [--skew]` | Internal packages: publisher, consumers, version skew |
-| `comind conventions [--repo <name>]` | Measured conventions, org baseline, recipes from history |
+| `comind conventions [--repo <name>]` | Measured conventions, org baseline, recipes from history, and the team's own (each with an id) |
+| `comind conventions add "<rule>" [--repo <name>] [--dimension <d>] \| edit <id> "<rule>" \| rm <id> \| restore <id>` | Add a team convention, rewrite or hide one (measured ones can be restored); stored under `<index>/_conventions/`, untouched by re-indexing |
 | `comind preflight [repo] [--base <rev>] [--strict]` | Before committing or in MR CI: constraints, dead ends, failing checks, contracts, blast radius, missing companions ([MR job](../guides/ci.md#merge-request-preflight)) |
 | `comind remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
 | `comind why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
