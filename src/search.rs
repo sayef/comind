@@ -27,9 +27,9 @@ pub struct SearchHit {
     pub summary: Option<String>,
 }
 
-/// Retrieve candidates for `query` from the index at `uri` and rank them. `limit` caps results.
+/// Retrieve candidates for `query` through the open `tables` and rank them. `limit` caps results.
 pub async fn hybrid(
-    uri: &str,
+    tables: &crate::index::Tables,
     by_id: &HashMap<String, Symbol>,
     graph: &CodeGraph,
     enrichment: &Enrichment,
@@ -38,7 +38,7 @@ pub async fn hybrid(
     limit: usize,
 ) -> anyhow::Result<Vec<SearchHit>> {
     let qvec = embedder.embed_query(query);
-    let candidates = crate::index::hybrid_search(uri, query, qvec, 80).await?;
+    let candidates = tables.hybrid_search(query, qvec, 80).await?;
     let mut hits = rank_candidates(candidates, by_id, graph, enrichment, query);
     hits.truncate(limit);
     Ok(hits)

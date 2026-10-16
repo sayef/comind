@@ -51,8 +51,8 @@ this first".
 - **Session start**: up to eight trusted records about the repository you are working in.
 - **Before an edit** (`Edit`, `MultiEdit`, `Write`): up to four trusted records about that file.
 
-A record is shown once per session. Hooks, like the MCP server, read a local copy of a remote
-index, refreshed every five minutes (`cache_ttl_secs`), so they add about 60 ms. `comind init-hooks cursor`, `gemini`,
+A record is shown once per session. Hooks read a local mirror of a remote index, refreshed every
+five minutes (`cache_ttl_secs`), so they add about 60 ms. `comind init-hooks cursor`, `gemini`,
 `codex` and `generic` print the same as plain-text hooks for other agents.
 
 ## The ledger, from an agent's side

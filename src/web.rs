@@ -29,6 +29,10 @@ struct AppState {
     /// Loaded on first use: LLM summaries and flows, and the search model.
     extras: OnceCell<Extras>,
     search: OnceCell<Option<Search>>,
+    /// The index's tables, held open so LanceDB caches their metadata and indexes.
+    tables: Option<crate::index::Tables>,
+    /// Org maps of earlier index versions, by position in `/api/versions`.
+    past: tokio::sync::Mutex<HashMap<usize, Value>>,
 }
 
 #[derive(Default)]
@@ -90,14 +94,25 @@ impl AppState {
 type Shared = Arc<AppState>;
 
 pub fn serve(mut data: Data, port: u16) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
     let entries = std::mem::take(&mut data.entries);
     let manual = std::mem::take(&mut data.manual);
+    let tables = data.root.as_ref().and_then(|r| {
+        let uri = format!("{}/_graph", r.trim_end_matches('/'));
+        rt.block_on(crate::index::Tables::connect(
+            &uri,
+            crate::config::Config::load().fresh(),
+        ))
+        .ok()
+    });
     let state = Arc::new(AppState {
         data,
         entries: RwLock::new(entries),
         manual: RwLock::new(manual),
         extras: OnceCell::new(),
         search: OnceCell::new(),
+        tables,
+        past: Default::default(),
     });
     let app = Router::new()
         .route("/api/overview", get(overview))
@@ -117,7 +132,6 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .fallback(get(asset))
         .layer(axum::middleware::from_fn(local_only))
         .with_state(state);
-    let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let addr = format!("127.0.0.1:{port}");
         let listener = tokio::net::TcpListener::bind(&addr)
@@ -239,12 +253,15 @@ struct AtQ {
 }
 
 fn graph_uri(s: &AppState) -> Option<String> {
-    s.data.graph_dir.clone()
+    s.data
+        .root
+        .as_ref()
+        .map(|r| format!("{}/_graph", r.trim_end_matches('/')))
 }
 
 async fn versions(State(s): State<Shared>) -> Json<Value> {
-    let list = match graph_uri(&s) {
-        Some(u) => crate::index::graph_versions(&u).await.unwrap_or_default(),
+    let list = match &s.tables {
+        Some(t) => t.versions().await.unwrap_or_default(),
         None => Vec::new(),
     };
     Json(json!(list
@@ -262,13 +279,21 @@ async fn orgmap(State(s): State<Shared>, Query(q): Query<AtQ>) -> impl IntoRespo
         );
     };
     let past = async {
-        let uri = graph_uri(&s).context("read-only UI has no index root")?;
-        let list = crate::index::graph_versions(&uri).await?;
+        if let Some(v) = s.past.lock().await.get(&i) {
+            return anyhow::Ok(v.clone());
+        }
+        let tables = s
+            .tables
+            .as_ref()
+            .context("read-only UI has no index root")?;
+        let list = tables.versions().await?;
         let (sv, ev, _) = *list.get(i).context("no such version")?;
-        let (symbols, edges) = crate::index::read_graph_at(&uri, Some((sv, ev))).await?;
+        let (symbols, edges) = tables.graph_at((sv, ev)).await?;
         let graph = crate::graph::CodeGraph::build(&symbols, &edges);
         let contracts = graph.contracts(None, false);
-        anyhow::Ok(org(&graph, &symbols, &edges, &contracts))
+        let v = org(&graph, &symbols, &edges, &contracts);
+        s.past.lock().await.insert(i, v.clone());
+        anyhow::Ok(v)
     };
     match past.await {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -499,7 +524,7 @@ struct SearchQ {
 /// Hybrid code search (BM25, vectors, centrality), as `comind search` and the MCP tool.
 async fn search(State(s): State<Shared>, Query(q): Query<SearchQ>) -> impl IntoResponse {
     let run = async {
-        let uri = graph_uri(&s).context("no index root")?;
+        let tables = s.tables.as_ref().context("no index root")?;
         let engine = s
             .search()
             .await
@@ -507,7 +532,7 @@ async fn search(State(s): State<Shared>, Query(q): Query<SearchQ>) -> impl IntoR
         let extras = s.extras().await;
         let limit = if q.repo.is_some() { 60 } else { 20 };
         let mut hits = crate::search::hybrid(
-            &uri,
+            tables,
             &engine.by_id,
             &s.data.graph,
             &extras.enrichment,

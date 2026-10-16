@@ -141,7 +141,7 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind review <id> <confirm\|archive\|invalidate\|supersede\|dispute> [--reason "…"]` | Act on a ledger record; `comind erase <id>` deletes one |
 | `comind ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comind erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
-| `comind doctor` | Check this machine's setup: index and ledger reachable, local copy, hooks, LLM key, signing, SCIP indexers |
+| `comind doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
@@ -236,7 +236,7 @@ guide       = true    # evidence-based style guide (cost + sends code)
 # max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
 # max_flows   = 50    # cap --flows narrations (omit = no cap)
 # scip        = "auto"   # auto | require | off
-# cache_ttl_secs = 300   # freshness checks of the local copy of a remote index (serve, ui, hooks)
+# cache_ttl_secs = 300   # how often serve/ui check for a new index version; hooks' local mirror
 # signing_key = "~/.ssh/id_ed25519.pub"   # sign ledger records (default: git user.signingkey)
 # allowed_signers = "~/.config/git/allowed_signers"   # verify them (default: git config)
 ```

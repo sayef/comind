@@ -37,8 +37,6 @@ pub struct Data {
     pub deps: Vec<InternalDep>,
     /// Index root for writing ledger reviews; `None` makes the UI read-only.
     pub root: Option<String>,
-    /// Where the graph is read from (a local mirror for a remote index).
-    pub graph_dir: Option<String>,
 }
 
 pub struct App {
@@ -727,7 +725,6 @@ mod tests {
             manual: Vec::new(),
             deps: Vec::new(),
             root: None,
-            graph_dir: None,
             graph,
             symbols,
             edges: r.edges,

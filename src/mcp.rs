@@ -49,8 +49,8 @@ pub struct ComindServer {
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
     embedder: Arc<Option<Embedder>>,
     uri: Arc<String>,
-    /// Index root for the ledger and conventions (the graph may be a local mirror).
-    root: Arc<String>,
+    /// The index's tables, held open so LanceDB caches their metadata and indexes.
+    tables: Arc<crate::index::Tables>,
     /// Ledger records with when they were read; re-read at most once a minute.
     records: Arc<tokio::sync::Mutex<Option<Cached>>>,
     /// Manifest/lockfile rows for internal-dependency answers.
@@ -64,9 +64,13 @@ pub struct ComindServer {
 }
 
 impl ComindServer {
-    /// The index root holding `_ledger` and `_conventions`.
+    /// The index root holding `_graph` and `_ledger`.
     fn ledger_root(&self) -> String {
-        self.root.to_string()
+        self.uri
+            .trim_end_matches('/')
+            .strip_suffix("/_graph")
+            .unwrap_or(&self.uri)
+            .to_string()
     }
 
     async fn records(&self) -> Vec<crate::ledger::Record> {
@@ -573,7 +577,7 @@ impl ComindServer {
             );
         };
         let hits = crate::search::hybrid(
-            &self.uri,
+            &self.tables,
             &self.symbols,
             &self.graph,
             &self.enrichment,
@@ -1402,14 +1406,15 @@ fn md_guide(d: &GuideDto) -> String {
 /// Load the graph (and any LLM enrichment) from `uri` and serve MCP over stdio until the
 /// client disconnects. `markdown` controls whether tool results are handed back as markdown
 /// text (default) or raw JSON.
-/// Serve the graph at `uri` (a local mirror for a remote index); the ledger lives under `root`.
-pub async fn serve_stdio(uri: &str, root: &str, markdown: bool) -> Result<()> {
+pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let mut conventions = match crate::index::read_facts(uri).await {
         Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
         _ => Vec::new(),
     };
     conventions.extend(crate::index::read_recipes(uri).await.unwrap_or_default());
+    let root = uri.trim_end_matches('/');
+    let root = root.strip_suffix("/_graph").unwrap_or(root);
     let manual = match crate::conventions::Store::open(root) {
         Ok(s) => s.all().await.unwrap_or_default(),
         Err(_) => Vec::new(),
@@ -1466,7 +1471,9 @@ pub async fn serve_stdio(uri: &str, root: &str, markdown: bool) -> Result<()> {
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
-        root: Arc::new(root.to_string()),
+        tables: Arc::new(
+            crate::index::Tables::connect(uri, crate::config::Config::load().fresh()).await?,
+        ),
         records: Arc::new(tokio::sync::Mutex::new(None)),
         packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
         conventions: Arc::new(conventions),

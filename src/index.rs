@@ -292,15 +292,19 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 /// The graph at given `(symbols, edges)` table versions, or the latest.
 pub async fn read_graph_at(uri: &str, at: Option<(u64, u64)>) -> Result<(Vec<Symbol>, Vec<Edge>)> {
     let db = lancedb::connect(uri).execute().await?;
-    let open = |name: &'static str, v: Option<u64>| {
-        let db = &db;
-        async move {
-            let t = db.open_table(name).execute().await?;
-            if let Some(v) = v {
-                t.checkout(v).await?;
-            }
-            anyhow::Ok(t)
+    read_graph_in(&db, at).await
+}
+
+async fn read_graph_in(
+    db: &lancedb::Connection,
+    at: Option<(u64, u64)>,
+) -> Result<(Vec<Symbol>, Vec<Edge>)> {
+    let open = |name: &'static str, v: Option<u64>| async move {
+        let t = db.open_table(name).execute().await?;
+        if let Some(v) = v {
+            t.checkout(v).await?;
         }
+        anyhow::Ok(t)
     };
 
     // symbols
@@ -437,18 +441,13 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
 /// write commits both tables, so the n-th versions of each belong together.
 pub async fn graph_versions(uri: &str) -> Result<Vec<(u64, u64, String)>> {
     let db = lancedb::connect(uri).execute().await?;
-    let s = db
-        .open_table("symbols")
-        .execute()
-        .await?
-        .list_versions()
-        .await?;
-    let e = db
-        .open_table("edges")
-        .execute()
-        .await?
-        .list_versions()
-        .await?;
+    let s = db.open_table("symbols").execute().await?;
+    let e = db.open_table("edges").execute().await?;
+    versions_of(&s, &e).await
+}
+
+async fn versions_of(s: &lancedb::Table, e: &lancedb::Table) -> Result<Vec<(u64, u64, String)>> {
+    let (s, e) = (s.list_versions().await?, e.list_versions().await?);
     Ok(s.iter()
         .zip(e.iter())
         .map(|(a, b)| (a.version, b.version, a.timestamp.to_rfc3339()))
@@ -604,6 +603,7 @@ pub fn read_repo_meta_blocking(uri: &str) -> Result<Option<String>> {
 
 use lance_index::scalar::FullTextSearchQuery;
 use lancedb::index::scalar::FtsIndexBuilder;
+use lancedb::index::vector::IvfHnswFlatIndexBuilder;
 use lancedb::index::Index;
 use lancedb::query::{QueryBase, QueryExecutionOptions, Select};
 
@@ -654,12 +654,16 @@ pub async fn write_search_table(uri: &str, rows: &[SearchRow]) -> Result<u64> {
         .await
         .context("create FTS index")?;
 
-    // For large corpora, add an approximate vector index (IVF/PQ auto). Below this, LanceDB's
-    // exact flat scan is both faster and simpler, so we skip it (IVF also needs enough rows).
-    if rows.len() >= 10_000 {
-        if let Err(e) = tbl.create_index(&["vector"], Index::Auto).execute().await {
-            eprintln!("comind: vector ANN index skipped (non-fatal): {e}");
-        }
+    // An ANN index LanceDB keeps in its cache, so a query on object storage reads only the rows
+    // it returns instead of every vector.
+    let parts = (rows.len() / 20_000).max(1) as u32;
+    let ann = IvfHnswFlatIndexBuilder::default().num_partitions(parts);
+    if let Err(e) = tbl
+        .create_index(&["vector"], Index::IvfHnswFlat(ann))
+        .execute()
+        .await
+    {
+        eprintln!("comind: vector ANN index skipped (non-fatal): {e}");
     }
     Ok(version)
 }
@@ -701,8 +705,18 @@ pub async fn hybrid_search(
 ) -> Result<Vec<(String, f32)>> {
     let db = lancedb::connect(uri).execute().await?;
     let tbl = db.open_table("search").execute().await?;
+    hybrid_in(&tbl, query_text, query_vector, k).await
+}
+
+async fn hybrid_in(
+    tbl: &lancedb::Table,
+    query_text: &str,
+    query_vector: Vec<f32>,
+    k: usize,
+) -> Result<Vec<(String, f32)>> {
     let mut st = tbl
         .query()
+        .select(lancedb::query::Select::columns(&["symbol_id"]))
         .full_text_search(FullTextSearchQuery::new(query_text.to_owned()))
         .nearest_to(query_vector)?
         .limit(k)
@@ -727,6 +741,56 @@ pub async fn hybrid_search(
         }
     }
     Ok(out)
+}
+
+/// Open tables of one index for a long-running reader: LanceDB keeps their metadata and indexes in
+/// its session cache and re-checks for a newer version at most every `fresh`.
+pub struct Tables {
+    db: lancedb::Connection,
+    open: tokio::sync::Mutex<std::collections::HashMap<&'static str, lancedb::Table>>,
+}
+
+impl Tables {
+    pub async fn connect(uri: &str, fresh: std::time::Duration) -> Result<Tables> {
+        let db = lancedb::connect(uri)
+            .read_consistency_interval(fresh)
+            .execute()
+            .await
+            .with_context(|| format!("connect lancedb at {uri}"))?;
+        Ok(Tables {
+            db,
+            open: Default::default(),
+        })
+    }
+
+    async fn table(&self, name: &'static str) -> Result<lancedb::Table> {
+        let mut open = self.open.lock().await;
+        if let Some(t) = open.get(name) {
+            return Ok(t.clone());
+        }
+        let t = self.db.open_table(name).execute().await?;
+        open.insert(name, t.clone());
+        Ok(t)
+    }
+
+    pub async fn hybrid_search(
+        &self,
+        query_text: &str,
+        query_vector: Vec<f32>,
+        k: usize,
+    ) -> Result<Vec<(String, f32)>> {
+        hybrid_in(&self.table("search").await?, query_text, query_vector, k).await
+    }
+
+    pub async fn versions(&self) -> Result<Vec<(u64, u64, String)>> {
+        versions_of(&self.table("symbols").await?, &self.table("edges").await?).await
+    }
+
+    /// The graph at `(symbols, edges)` versions; fresh handles, so the shared ones keep tracking
+    /// the latest version.
+    pub async fn graph_at(&self, at: (u64, u64)) -> Result<(Vec<Symbol>, Vec<Edge>)> {
+        read_graph_in(&self.db, Some(at)).await
+    }
 }
 
 /// Blocking wrappers.

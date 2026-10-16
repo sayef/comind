@@ -82,6 +82,12 @@ impl Config {
         format!("{}/_graph", self.index_dir(flag).trim_end_matches('/'))
     }
 
+    /// How often long-running readers (`serve`, `ui`, the hooks' local mirror) check for a new
+    /// index version.
+    pub fn fresh(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL))
+    }
+
     /// Resolve the LLM model: `COMIND_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
     pub fn llm_model(&self) -> String {
         non_empty_env("COMIND_LLM_MODEL")

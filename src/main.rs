@@ -1164,9 +1164,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
 /// `comind serve --from <lancedb-uri>` — run the MCP server over stdio. Only the MCP
 /// protocol goes to stdout; diagnostics go to stderr so the stream stays clean.
 fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
-    let cfg = comind::config::Config::load();
-    let root = cfg.index_dir(from);
-    let uri = comind::cache::graph_dir(&root, ttl(&cfg), true);
+    let uri = comind::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     comind::ui::step(&format!("loading graph from {uri}"));
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -1179,7 +1177,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match rt.block_on(comind::mcp::serve_stdio(uri, &root, markdown)) {
+    match rt.block_on(comind::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             comind::ui::err(&friendly_load_err(uri, &e));
@@ -1420,7 +1418,7 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
 
 fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
     let cfg = comind::config::Config::load();
-    let dir = comind::cache::graph_dir(&cfg.index_dir(from), ttl(&cfg), true);
+    let dir = cfg.graph_dir(from);
     let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
         Ok(x) => x,
         Err(e) => {
@@ -1451,7 +1449,6 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
         manual,
         deps,
         root: Some(cfg.index_dir(from)),
-        graph_dir: Some(dir.clone()),
     };
     let run = match web {
         Some(port) => comind::web::serve(data, port),
@@ -1530,11 +1527,6 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
 /// Never blocks or approves anything; any failure prints nothing and exits 0.
 /// Graph symbols and ledger records for a hook: a remote (S3) index is read from its local
 /// mirror, refreshed in the background when stale, so the agent never waits on the network.
-/// How long a local mirror of a remote index counts as fresh.
-fn ttl(cfg: &comind::config::Config) -> std::time::Duration {
-    std::time::Duration::from_secs(cfg.cache_ttl_secs.unwrap_or(comind::cache::DEFAULT_TTL))
-}
-
 fn hook_data(
     cfg: &comind::config::Config,
     from: Option<&str>,
@@ -1542,7 +1534,10 @@ fn hook_data(
     let root = cfg.index_dir(from);
     if comind::cache::is_remote(&root) {
         let dir = comind::cache::dir(&root)?;
-        if comind::cache::stale(&dir, ttl(cfg)) {
+        let ttl = std::time::Duration::from_secs(
+            cfg.cache_ttl_secs.unwrap_or(comind::cache::DEFAULT_TTL),
+        );
+        if comind::cache::stale(&dir, ttl) {
             comind::cache::refresh_in_background(&root);
         }
         if let Some((symbols, _, records)) = comind::cache::read(&dir) {
