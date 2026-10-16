@@ -46,7 +46,7 @@ model2vec-rs = "0.2.1"
 lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
-rig-core = "0.36"
+rig-core = "0.44"
 rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
 blake3 = "1"
 tree-sitter-go = "0.25"
