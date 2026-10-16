@@ -88,6 +88,7 @@ nav:
   - Getting started: getting-started.md
   - Concepts: concepts.md
   - Guides:
+      - Using comind with agents: guides/agents.md
       - Team setup: guides/team-setup.md
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md

@@ -169,8 +169,9 @@ export function SetupPage() {
           </Step>
           <Step n={3} title="Optional: hooks for Claude Code">
             <p>
-              Hooks add what the team recorded about a file just before the agent edits it, and a short overview at session start. Print
-              the settings and merge them into <code className="font-mono">~/.claude/settings.json</code>:
+              Hooks put what the team recorded in front of the agent without it asking: records about this repository when a session
+              starts, and about a file just before the agent edits it (each record once per session). Print the settings and merge them
+              into <code className="font-mono">~/.claude/settings.json</code>:
             </p>
             <Code>{"comind init-hooks claude"}</Code>
             <p>

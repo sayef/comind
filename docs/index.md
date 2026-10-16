@@ -36,6 +36,11 @@ hide:
     Decisions, failed attempts and constraints anchored to symbols. They follow the code, go stale when it
     changes, and reach agents only when trusted.
 
+-   **For people too**
+
+    A local web UI with the org map, dependency graphs, contracts, internal packages, conventions and
+    ledger review, and a guide to connecting your agent.
+
 -   **Your storage, one binary**
 
     A local directory or your own bucket holds everything. No server to run; CI builds a new version, every

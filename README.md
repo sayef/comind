@@ -100,18 +100,14 @@ comind flow    run_migrations --index-dir ./comind-index/org  # flow walkthrough
 comind serve --index-dir ./comind-index/org
 ```
 
-Add to your MCP client (e.g. Claude Code):
+Register it with your agent. Claude Code:
 
-```json
-{
-  "mcpServers": {
-    "comind": {
-      "command": "/path/to/comind",
-      "args": ["serve", "--index-dir", "./comind-index/org"]
-    }
-  }
-}
+```sh
+claude mcp add --scope user comind -- comind serve --index-dir ./comind-index/org
 ```
+
+Cursor, Codex, VS Code and other MCP clients: see [Getting started](https://comind.pages.dev/getting-started/),
+or open `comind ui --web` → **Connect**, which fills in your index path and checks your setup.
 
 **MCP tools (15):**
 - **Navigate:** `search`, `find`, `zoom`, `thread`, `flow`, `repos`, `suggest`.
