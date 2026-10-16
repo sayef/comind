@@ -273,6 +273,14 @@ enum Cmd {
         web: bool,
         #[arg(long, default_value_t = 7878)]
         port: u16,
+        /// With `--web`: open it in the browser
+        #[arg(long)]
+        open: bool,
+    },
+    /// The web UI in its own window (macOS)
+    App {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
     },
     /// Before committing: recorded constraints/dead ends, contracts, blast radius and missing
     /// companions for your uncommitted changes
@@ -629,7 +637,9 @@ fn main() -> ExitCode {
             index_dir,
             web,
             port,
-        } => cmd_ui(index_dir.as_deref(), web.then_some(port)),
+            open,
+        } => cmd_ui(index_dir.as_deref(), web.then_some(port), open),
+        Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Erase {
             ids,
             actor,
@@ -1416,44 +1426,24 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
     }
 }
 
-fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
-    let cfg = comind::config::Config::load();
-    let dir = cfg.graph_dir(from);
-    let (symbols, edges) = match comind::index::read_graph_blocking(&dir) {
-        Ok(x) => x,
-        Err(e) => {
-            comind::ui::err(&format!("no index at {dir}: {e:#}"));
-            return ExitCode::FAILURE;
+fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
+    use anyhow::Context as _;
+    let root = comind::config::Config::load().index_dir(from);
+    let run = comind::tui::Data::load(&root).and_then(|data| match web {
+        Some(port) => {
+            let addr = format!("127.0.0.1:{port}");
+            let listener =
+                std::net::TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
+            let token = comind::config::ui_token()?;
+            let url = format!("http://{addr}/?token={token}");
+            comind::ui::ok(&format!("comind web UI on {url} (Ctrl-C to stop)"));
+            if open {
+                open_in_browser(&url);
+            }
+            comind::web::serve(data, listener, token)
         }
-    };
-    let mut conventions = match comind::index::read_facts_blocking(&dir) {
-        Ok(Some(facts)) => comind::conventions::mine(&symbols, &edges, &facts),
-        _ => Vec::new(),
-    };
-    conventions.extend(comind::index::read_recipes_blocking(&dir).unwrap_or_default());
-    let manual = comind::conventions::manual_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let records = comind::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let mut entries = comind::ledger::derive(&records, &symbols);
-    let packages = comind::index::read_packages_blocking(&dir).unwrap_or_default();
-    let findings = comind::checks::run(&entries, &symbols, &edges, &packages);
-    comind::checks::promote(&mut entries, &findings);
-    let deps = comind::manifests::internal(&packages);
-    let graph = comind::graph::CodeGraph::build(&symbols, &edges);
-    let data = comind::tui::Data {
-        contracts: graph.contracts(None, false),
-        graph,
-        symbols,
-        edges,
-        entries,
-        conventions,
-        manual,
-        deps,
-        root: Some(cfg.index_dir(from)),
-    };
-    let run = match web {
-        Some(port) => comind::web::serve(data, port),
         None => comind::tui::App::new(data).run(),
-    };
+    });
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -1461,6 +1451,35 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn cmd_app(from: Option<&str>) -> ExitCode {
+    #[cfg(target_os = "macos")]
+    {
+        let root = comind::config::Config::load().index_dir(from);
+        match comind::app::run(root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                comind::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = from;
+        comind::ui::err("the desktop app is macOS only for now; use `comind ui --web --open`");
+        ExitCode::FAILURE
+    }
+}
+
+fn open_in_browser(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(opener).arg(url).spawn();
 }
 
 fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {

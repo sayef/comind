@@ -1,0 +1,181 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { RepoDot } from "@/components/symbol";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { api, type Node } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+const KINDS = [
+  ["constraint", "Constraint", "A rule the code must keep"],
+  ["decision", "Decision", "A choice between alternatives, and why"],
+  ["attempt", "Failed attempt", "Something tried that did not work (needs evidence)"],
+  ["gotcha", "Gotcha", "A trap that is easy to fall into"],
+  ["intent", "Intent", "Why this code exists"],
+  ["question", "Question", "Something nobody could answer yet"],
+] as const;
+type Kind = (typeof KINDS)[number][0];
+
+const area = "min-h-20 w-full rounded-md border bg-card px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const label = "flex flex-col gap-1 text-xs font-medium";
+
+/** Pick the symbols a record is about, by name. */
+function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]) => void }) {
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 200);
+    return () => clearTimeout(t);
+  }, [q]);
+  const found = useQuery({ queryKey: ["find", debounced], queryFn: () => api.find(debounced), enabled: debounced.length > 1 });
+  const chosen = new Set(value.map((n) => n.id));
+  return (
+    <div className="flex flex-col gap-1.5">
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map((n) => (
+            <span key={n.id} className="flex items-center gap-1 rounded-md border bg-muted px-2 py-0.5 text-xs">
+              <RepoDot repo={n.repo} /> {n.name}
+              <button aria-label="Remove" onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a function, class or file…" />
+      {debounced.length > 1 && (found.data?.length ?? 0) > 0 && (
+        <div className="max-h-40 overflow-y-auto rounded-md border">
+          {found.data!
+            .filter((n) => !chosen.has(n.id))
+            .slice(0, 8)
+            .map((n) => (
+              <button
+                key={n.id}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"
+                onClick={() => (onChange([...value, n]), setQ(""))}
+              >
+                <RepoDot repo={n.repo} />
+                <span className="font-medium">{n.name}</span>
+                <span className="truncate font-mono text-muted-foreground">{n.location}</span>
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Write a ledger record as the person using the UI. */
+export function RememberDialog({ open, onOpenChange, about = [] }: { open: boolean; onOpenChange: (o: boolean) => void; about?: Node[] }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<Kind>("constraint");
+  const [on, setOn] = useState<Node[]>(about);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [trigger, setTrigger] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [extra, setExtra] = useState("");
+  useEffect(() => {
+    if (open) setOn(about);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useMutation({
+    mutationFn: () =>
+      api.remember({
+        kind,
+        on: on.map((n) => n.id),
+        title,
+        body,
+        trigger,
+        evidence: evidence.split(/[\n,]/).map((e) => e.trim()),
+        fields: kind === "decision" ? { alternatives: extra } : kind === "attempt" ? { outcome: extra } : {},
+      }),
+    onSuccess: () => {
+      for (const k of ["ledger", "overview", "node"]) qc.invalidateQueries({ queryKey: [k] });
+      setTitle("");
+      setBody("");
+      setTrigger("");
+      setEvidence("");
+      setExtra("");
+      onOpenChange(false);
+    },
+  });
+  const needsEvidence = kind === "attempt";
+  const ready = title.trim() && on.length > 0 && (!needsEvidence || evidence.trim());
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
+        <DialogTitle className="text-base font-semibold">Add to the ledger</DialogTitle>
+        <p className="mt-1 text-sm text-muted-foreground">
+          A short fact a future engineer or agent should know before changing this code. It is signed with your name and shown to agents.
+        </p>
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {KINDS.map(([k, name, hint]) => (
+              <button
+                key={k}
+                title={hint}
+                onClick={() => setKind(k)}
+                className={cn(
+                  "rounded-md border px-2.5 py-2 text-left text-xs transition-colors",
+                  kind === k ? "border-brand bg-accent text-accent-foreground" : "hover:bg-muted",
+                )}
+              >
+                <div className="font-medium">{name}</div>
+                <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{hint}</div>
+              </button>
+            ))}
+          </div>
+          <div className={label}>
+            About
+            <SymbolPicker value={on} onChange={setOn} />
+          </div>
+          <label className={label}>
+            Title
+            <Input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line" />
+          </label>
+          <label className={label}>
+            Details <span className="font-normal text-muted-foreground">optional</span>
+            <textarea className={area} value={body} onChange={(e) => setBody(e.target.value)} />
+          </label>
+          {kind === "decision" && (
+            <label className={label}>
+              Alternatives considered
+              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="What was rejected, and why" />
+            </label>
+          )}
+          {kind === "attempt" && (
+            <label className={label}>
+              Outcome
+              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="reverted, failed in staging, too slow…" />
+            </label>
+          )}
+          <label className={label}>
+            Relevant when <span className="font-normal text-muted-foreground">optional</span>
+            <Input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="e.g. adding caching to auth paths" />
+          </label>
+          <label className={label}>
+            Evidence {!needsEvidence && <span className="font-normal text-muted-foreground">optional</span>}
+            <Input
+              value={evidence}
+              onChange={(e) => setEvidence(e.target.value)}
+              placeholder="commit:abc123, mr:!412, test:tests/test_x.py::test_y"
+            />
+          </label>
+          {save.error && <p className="text-xs text-danger">{save.error.message}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button variant="brand" disabled={!ready || save.isPending} onClick={() => save.mutate()}>
+              <Plus /> Add
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

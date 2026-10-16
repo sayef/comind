@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowUpRight, Check, ClipboardCopy, Layers, Network, Radar, Route } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, ClipboardCopy, Layers, Network, Plus, Radar, Route } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { EntryCard } from "@/components/entry-card";
 import { GraphView } from "@/components/graph-view";
+import { RememberDialog } from "@/components/remember-dialog";
 import { RepoDot, SymbolLink } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,6 @@ function CopyContext({ focus }: { focus: string }) {
     <Button
       size="sm"
       variant="outline"
-      className="mt-3"
       title="What to read before changing this, plus what the team recorded, as markdown"
       onClick={async () => {
         await navigator.clipboard?.writeText(await api.context(focus));
@@ -56,6 +56,7 @@ export function ExplorerPage() {
   const focus = params.get("focus");
   const detail = useQuery({ queryKey: ["node", focus], queryFn: () => api.node(focus!), enabled: !!focus });
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const [adding, setAdding] = useState(false);
   const graph = useMemo(
     () =>
       detail.data
@@ -87,7 +88,17 @@ export function ExplorerPage() {
           </h1>
           {f.signature && <pre className="mt-2 max-w-3xl overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs">{f.signature}</pre>}
           {detail.data.summary && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{detail.data.summary}</p>}
-          {f.repo !== "_contracts" && <CopyContext focus={f.id} />}
+          {f.repo !== "_contracts" && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <CopyContext focus={f.id} />
+              {overview.data?.writable && (
+                <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+                  <Plus /> Add to the ledger
+                </Button>
+              )}
+            </div>
+          )}
+          <RememberDialog open={adding} onOpenChange={setAdding} about={[f]} />
         </div>
         <Card className="flex items-center gap-4 px-4 py-3">
           <Radar className="size-5 text-warning" />

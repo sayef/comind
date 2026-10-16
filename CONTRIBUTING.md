@@ -29,7 +29,7 @@ a build, `comind ui --web` serves a placeholder page. With Node 24:
 
 ```sh
 cd ui && npm ci && npm run build && cd ..            # embedded on the next cargo build
-comind ui --web &                                    # API on 127.0.0.1:7878
+comind ui --web &                                    # API on 127.0.0.1:7878; open its printed link once
 cd ui && npm run dev                                 # hot reload on 127.0.0.1:5173, /api proxied
 ```
 

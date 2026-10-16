@@ -24,5 +24,6 @@ All notable changes to this project are documented here. The format follows
   who wrote and reviewed them, and can be confirmed, archived, invalidated or deleted.
 - `comind preflight` for uncommitted changes and MR pipelines; Claude Code and generic agent hooks with a
   local mirror for remote indexes; `comind doctor`.
-- Terminal UI (`comind ui`) and local web UI (`comind ui --web`): a React app embedded in the binary,
+- A desktop app on macOS (`comind app`: the web UI in a native WebKit window), the local web UI
+  (`comind ui --web [--open]`, guarded by an access token) and the terminal UI (`comind ui`): a React app embedded in the binary,
   with dependency graphs for the org and each symbol (React Flow), a version slider, contracts, ledger review and a command palette.

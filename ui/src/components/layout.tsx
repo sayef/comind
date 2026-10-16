@@ -40,6 +40,22 @@ export function Layout() {
         .reduce((n, [, v]) => n + v, 0)
     : 0;
 
+  if (overview.error?.message.includes("access token")) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <img src="/logo.svg" alt="" className="mx-auto size-10 dark:hidden" />
+          <img src="/logo-dark.svg" alt="" className="mx-auto hidden size-10 dark:block" />
+          <h1 className="mt-4 text-lg font-semibold">Open comind from its link</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The UI only answers browsers that hold its access token. Run <code className="font-mono">comind ui --web --open</code>, or open
+            the link it prints once; after that, this address works as a bookmark.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full">
       <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">

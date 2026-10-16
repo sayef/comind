@@ -93,7 +93,9 @@ impl AppState {
 
 type Shared = Arc<AppState>;
 
-pub fn serve(mut data: Data, port: u16) -> Result<()> {
+/// Serve the UI on `listener` (bound to 127.0.0.1) until the process ends. API calls must carry
+/// `token` as a cookie; opening any page with `?token=` sets it.
+pub fn serve(mut data: Data, listener: std::net::TcpListener, token: String) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let entries = std::mem::take(&mut data.entries);
     let manual = std::mem::take(&mut data.manual);
@@ -129,17 +131,65 @@ pub fn serve(mut data: Data, port: u16) -> Result<()> {
         .route("/api/setup", get(setup))
         .route("/api/review", post(review))
         .route("/api/erase", post(erase))
+        .route("/api/remember", post(remember))
         .fallback(get(asset))
+        .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
         .layer(axum::middleware::from_fn(local_only))
         .with_state(state);
+    listener.set_nonblocking(true)?;
     rt.block_on(async move {
-        let addr = format!("127.0.0.1:{port}");
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .with_context(|| format!("bind {addr}"))?;
-        crate::ui::ok(&format!("comind web UI on http://{addr} (Ctrl-C to stop)"));
+        let listener = tokio::net::TcpListener::from_std(listener)?;
         axum::serve(listener, app).await.context("serve")
     })
+}
+
+/// A random token for one UI session.
+pub fn new_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// `?token=` on a page sets the session cookie and redirects to the clean URL; `/api/` requires it.
+async fn guard(
+    State(token): State<Arc<String>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let query = req.uri().query().unwrap_or("");
+    if query.split('&').any(|kv| kv == format!("token={token}")) {
+        let rest: Vec<&str> = query
+            .split('&')
+            .filter(|kv| !kv.starts_with("token="))
+            .collect();
+        let path = req.uri().path();
+        let to = if rest.is_empty() {
+            path.to_string()
+        } else {
+            format!("{path}?{}", rest.join("&"))
+        };
+        let cookie =
+            format!("comind_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
+        return (
+            StatusCode::SEE_OTHER,
+            [(header::LOCATION, to), (header::SET_COOKIE, cookie)],
+        )
+            .into_response();
+    }
+    if req.uri().path().starts_with("/api/") {
+        let want = format!("comind_token={token}");
+        let ok = req
+            .headers()
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(';'))
+            .any(|c| c.trim() == want);
+        if !ok {
+            let msg =
+                "open comind with the link `comind ui --web` printed (it carries the access token)";
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": msg }))).into_response();
+        }
+    }
+    next.run(req).await
 }
 
 /// Reject requests whose `Host` is not loopback, so a DNS-rebinding page cannot read the API.
@@ -747,6 +797,63 @@ async fn apply_review(s: &AppState, b: &ReviewBody) -> Result<String> {
         .map_or(Status::Active, |e| e.status);
     *s.entries.write().await = fresh;
     Ok(format!("{} → {:?}", target.title, status))
+}
+
+#[derive(Deserialize)]
+struct RememberBody {
+    kind: String,
+    /// Symbols the record is about: ids, names or `Class.method`.
+    on: Vec<String>,
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    trigger: Option<String>,
+    #[serde(default)]
+    evidence: Vec<String>,
+    #[serde(default)]
+    fields: BTreeMap<String, String>,
+}
+
+/// A record written by the person using the UI.
+async fn remember(State(s): State<Shared>, Json(b): Json<RememberBody>) -> impl IntoResponse {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
+        let g = &s.data.graph;
+        let mut anchors = Vec::new();
+        for focus in &b.on {
+            let id = g
+                .lookup(focus)
+                .map(|i| g.node(i).id)
+                .with_context(|| format!("no symbol matches `{focus}`"))?;
+            let sym = s.data.symbols.iter().find(|x| x.id.render() == id);
+            anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?));
+        }
+        let mut rec = Record::new(kind, &b.title, anchors, Provenance::human("comind-web"));
+        rec.body = b.body.trim().to_string();
+        rec.trigger = b.trigger.filter(|t| !t.trim().is_empty());
+        rec.evidence = b
+            .evidence
+            .into_iter()
+            .filter(|e| !e.trim().is_empty())
+            .collect();
+        for (k, v) in b.fields.into_iter().filter(|(_, v)| !v.trim().is_empty()) {
+            rec.fields.insert(k, Value::String(v));
+        }
+        let ledger = crate::ledger::Ledger::open(root)?;
+        ledger.put(&rec).await?;
+        let records = ledger.all().await?;
+        *s.entries.write().await = crate::ledger::derive(&records, &s.data.symbols);
+        anyhow::Ok(rec.id)
+    };
+    match run.await {
+        Ok(id) => (StatusCode::OK, Json(json!({"ok": true, "id": id}))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "message": format!("{e:#}")})),
+        ),
+    }
 }
 
 #[derive(Deserialize)]

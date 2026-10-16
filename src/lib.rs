@@ -7,6 +7,8 @@
 
 pub mod model;
 
+#[cfg(target_os = "macos")]
+pub mod app;
 pub mod cache;
 pub mod checks;
 pub mod config;

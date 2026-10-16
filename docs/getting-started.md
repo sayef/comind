@@ -49,7 +49,8 @@ everyone read it; see [Team setup](guides/team-setup.md).
 comind search "where do we retry HTTP calls" --index-dir ~/comind-index
 comind explore OrderService.place_order --index-dir ~/comind-index   # neighbourhood and blast radius
 comind contracts --index-dir ~/comind-index                         # who serves and who calls what
-comind ui --web --index-dir ~/comind-index                          # http://127.0.0.1:7878
+comind app --index-dir ~/comind-index                               # macOS: its own window
+comind ui --web --open --index-dir ~/comind-index                   # any OS: in the browser
 ```
 
 The web UI shows the org map, contracts, the ledger, conventions and internal packages; press

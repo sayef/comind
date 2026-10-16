@@ -186,6 +186,24 @@ export const api = {
     return r.text();
   },
   node: (focus: string) => get<NodeDetail>(`/api/node?focus=${encodeURIComponent(focus)}`),
+  remember: async (r: {
+    kind: string;
+    on: string[];
+    title: string;
+    body: string;
+    trigger: string;
+    evidence: string[];
+    fields: Record<string, string>;
+  }) => {
+    const res = await fetch("/api/remember", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(r),
+    });
+    const out = (await res.json()) as { ok: boolean; id?: string; message?: string };
+    if (!out.ok) throw new Error(out.message ?? "not recorded");
+    return out;
+  },
   erase: async (id: string) => {
     const r = await fetch("/api/erase", {
       method: "POST",

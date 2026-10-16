@@ -153,6 +153,25 @@ pub fn config_path() -> PathBuf {
     config_home().join("comind").join("config.toml")
 }
 
+/// The web UI's access token for browsers: created once, so bookmarks keep working.
+pub fn ui_token() -> Result<String> {
+    let path = config_home().join("comind").join("ui-token");
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        if !t.trim().is_empty() {
+            return Ok(t.trim().to_string());
+        }
+    }
+    std::fs::create_dir_all(path.parent().context("config dir")?)?;
+    let token = crate::web::new_token();
+    std::fs::write(&path, &token).with_context(|| format!("write {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(token)
+}
+
 /// `$XDG_DATA_HOME/comind`, else `~/.local/share/comind`.
 pub fn default_index_dir() -> String {
     data_home().join("comind").to_string_lossy().into_owned()

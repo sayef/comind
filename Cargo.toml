@@ -58,7 +58,7 @@ scip = "0.10"
 protobuf = "=3.7.2"
 sqlparser = "0.63"
 object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
-uuid = { version = "1.24", features = ["v7", "serde", "v5"] }
+uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 crossterm = "0.29"
@@ -80,6 +80,12 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# `comind app`: a native window around the web UI (macOS, like Ollama's desktop app).
+[target.'cfg(target_os = "macos")'.dependencies]
+wry = "0.57"
+tao = "0.37"
+muda = "0.21"
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }

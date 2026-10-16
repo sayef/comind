@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Inbox, ListTree, Search } from "lucide-react";
+import { Inbox, ListTree, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { EntryCard } from "@/components/entry-card";
+import { RememberDialog } from "@/components/remember-dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,6 +15,7 @@ export function LedgerPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const [view, setView] = useState<"review" | "timeline">("review");
   const [q, setQ] = useState("");
+  const [adding, setAdding] = useState(false);
   const rows = useMemo(() => {
     const needle = q.toLowerCase();
     const all = (ledger.data ?? []).filter((e) => !needle || JSON.stringify(e.record).toLowerCase().includes(needle));
@@ -25,12 +28,20 @@ export function LedgerPage() {
   let month = "";
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Ledger</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          What the code does not say: failed attempts, decisions and constraints, anchored to the symbols they are about.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Ledger</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            What the code does not say: failed attempts, decisions and constraints, anchored to the symbols they are about.
+          </p>
+        </div>
+        {overview.data?.writable && (
+          <Button variant="brand" onClick={() => setAdding(true)}>
+            <Plus /> Add record
+          </Button>
+        )}
       </div>
+      <RememberDialog open={adding} onOpenChange={setAdding} />
       <div className="flex flex-wrap items-center gap-3">
         <Tabs value={view} onValueChange={(v) => setView(v as "review" | "timeline")}>
           <TabsList>
