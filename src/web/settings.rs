@@ -111,8 +111,13 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             message = format!("saved; now showing {dir}");
         }
         crate::config::update(&changes)?;
-        if c.aws_profile.is_some() {
-            message.push_str(" (the AWS profile applies when comind starts next)");
+        if let Some(p) = c
+            .aws_profile
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            crate::s3::use_profile(p);
         }
         anyhow::Ok(message)
     };

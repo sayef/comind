@@ -3,7 +3,7 @@
 //! endpoint come from the same places (`AWS_REGION`, `AWS_ENDPOINT_URL`, a profile's `region` and
 //! `endpoint_url`), so MinIO or R2 need nothing comind-specific.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
@@ -20,9 +20,32 @@ pub struct Aws {
 }
 
 /// The chain's view, loaded once (on its own thread, so any caller context works).
-pub fn aws() -> &'static Aws {
-    static AWS: OnceLock<Aws> = OnceLock::new();
-    AWS.get_or_init(|| {
+fn cache() -> &'static RwLock<Option<Arc<Aws>>> {
+    static AWS: OnceLock<RwLock<Option<Arc<Aws>>>> = OnceLock::new();
+    AWS.get_or_init(|| RwLock::new(None))
+}
+
+pub fn aws() -> Arc<Aws> {
+    if let Some(a) = cache().read().ok().and_then(|g| g.clone()) {
+        return a;
+    }
+    let a = Arc::new(load());
+    if let Ok(mut g) = cache().write() {
+        *g = Some(a.clone());
+    }
+    a
+}
+
+/// Use AWS profile `name` from now on in this process (e.g. after joining a team in the app).
+pub fn use_profile(name: &str) {
+    std::env::set_var("AWS_PROFILE", name);
+    if let Ok(mut g) = cache().write() {
+        *g = None;
+    }
+}
+
+fn load() -> Aws {
+    {
         std::thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -43,7 +66,7 @@ pub fn aws() -> &'static Aws {
             endpoint: None,
             credentials: None,
         })
-    })
+    }
 }
 
 /// LanceDB storage options for `uri`: region and endpoint from the chain (credentials it finds itself).

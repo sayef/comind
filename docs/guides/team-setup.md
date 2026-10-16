@@ -62,9 +62,10 @@ second save is refused and asks to reload).
 A colleague needs only the index location, their own cloud access and the team password:
 
 ```sh
-comind join s3://bucket/comind     # remembers the location, asks for the team password once
+aws sso login --profile team-dev                        # their own access to the bucket
+comind join s3://bucket/comind --profile team-dev      # remembers both, asks for the team password once
 ```
 
-or, in the app, **Join a team** on the first screen. Each machine keeps the passwords of its teams in
+or, in the app, **Join a team** on the first screen (index location, AWS profile, team password). Each machine keeps the passwords of its teams in
 `~/.config/comind/credentials` (team name and password, readable only by you); CI takes the password from
 `COMIND_TEAM_PASSWORD`. A team needs a name before its key is set, since that is how the entry is found.

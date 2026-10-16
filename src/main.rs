@@ -292,6 +292,9 @@ enum Cmd {
     Join {
         /// The team's index (s3://bucket/prefix or a folder)
         index: String,
+        /// AWS profile for an S3 index (from ~/.aws)
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// The web UI in its own window (macOS)
     App {
@@ -733,7 +736,7 @@ fn main() -> ExitCode {
         } => cmd_ui(index_dir.as_deref(), web.then_some(port), open),
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
-        Cmd::Join { index } => cmd_join(&index),
+        Cmd::Join { index, profile } => cmd_join(&index, profile.as_deref()),
         Cmd::Erase {
             ids,
             actor,
@@ -1805,15 +1808,22 @@ fn print_new_password(pw: &str) {
     );
 }
 
-fn cmd_join(index: &str) -> ExitCode {
+fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
     let root = comind::config::expand_tilde(index.trim());
+    if let Some(p) = profile {
+        comind::s3::use_profile(p);
+    }
     let run = || -> anyhow::Result<()> {
         let rt = comind::ledger::runtime()?;
         let graph = format!("{}/_graph", root.trim_end_matches('/'));
         let versions = rt.block_on(comind::index::graph_versions(&graph))?;
         anyhow::ensure!(!versions.is_empty(), "no index at {root}");
         let stored = rt.block_on(comind::team::load(&root))?;
-        comind::config::update(&[("index_dir", comind::config::Setting::Text(root.clone()))])?;
+        let mut personal = vec![("index_dir", comind::config::Setting::Text(root.clone()))];
+        if let Some(p) = profile {
+            personal.push(("aws_profile", comind::config::Setting::Text(p.to_string())));
+        }
+        comind::config::update(&personal)?;
         let name = stored.settings.name.clone().unwrap_or_else(|| root.clone());
         comind::ui::ok(&format!("joined {name}"));
         if let Some(sealed) = &stored.settings.sealed {

@@ -203,12 +203,19 @@ pub(super) struct Join {
     index: String,
     #[serde(default)]
     password: Option<String>,
+    /// AWS profile for an S3 index (credentials stay in ~/.aws).
+    #[serde(default)]
+    aws_profile: Option<String>,
 }
 
 /// Use a team's index: check it, unlock its key when a password is given, remember and load it.
 pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl IntoResponse {
     let run = async {
         let root = crate::config::expand_tilde(b.index.trim());
+        let profile = b.aws_profile.filter(|p| !p.trim().is_empty());
+        if let Some(p) = &profile {
+            crate::s3::use_profile(p.trim());
+        }
         let graph = format!("{}/_graph", root.trim_end_matches('/'));
         let versions = crate::index::graph_versions(&graph).await?;
         anyhow::ensure!(!versions.is_empty(), "no index at {root}");
@@ -224,7 +231,14 @@ pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl
             })
             .await??;
         }
-        crate::config::update(&[("index_dir", crate::config::Setting::Text(root.clone()))])?;
+        let mut personal = vec![("index_dir", crate::config::Setting::Text(root.clone()))];
+        if let Some(p) = profile {
+            personal.push((
+                "aws_profile",
+                crate::config::Setting::Text(p.trim().to_string()),
+            ));
+        }
+        crate::config::update(&personal)?;
         let s = stored.settings.clone();
         tokio::task::spawn_blocking(move || activate(&s)).await?;
         app.reload(&root).await?;

@@ -54,15 +54,29 @@ function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
   const [password, setPassword] = useState("");
-  const join = useMutation({ mutationFn: () => api.join(index, password), onSuccess: () => qc.invalidateQueries() });
+  const [profile, setProfile] = useState("");
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const s3 = index.trim().startsWith("s3://");
+  const join = useMutation({ mutationFn: () => api.join(index, password, s3 ? profile : ""), onSuccess: () => qc.invalidateQueries() });
   return (
     <Card className="w-full p-4 text-left">
       <div className="text-sm font-medium">Join a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        The team's index location, and the team password if the team keeps an LLM key. An S3 index uses your AWS profile (Settings).
+        The team's index location, the AWS profile for an S3 index (sign in with `aws sso login` first), and the team password if
+        the team keeps an LLM key.
       </p>
       <div className="mt-3 flex flex-col gap-2">
         <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comind or a folder" className="font-mono text-xs" />
+        {s3 && (
+          <select className="h-9 rounded-md border bg-card px-2 text-sm" value={profile} onChange={(e) => setProfile(e.target.value)}>
+            <option value="">AWS profile: default</option>
+            {settings.data?.aws_profiles.map((p) => (
+              <option key={p} value={p}>
+                AWS profile: {p}
+              </option>
+            ))}
+          </select>
+        )}
         <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Team password (optional)" />
         <div>
           <Button variant="brand" disabled={!index.trim() || join.isPending} onClick={() => join.mutate()}>
