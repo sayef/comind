@@ -39,3 +39,16 @@ jobs:
         run: |
           curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
           "$COMINDLY_BIN_DIR/comindly" --version | grep -F "${COMINDLY_VERSION#v}"
+
+  cargo-install:
+    name: cargo install (Rust 1.95)
+    runs-on: ubuntu-latest
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      - uses: dtolnay/rust-toolchain@1.95
+      - name: Install from crates.io and run
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          cargo install comindly --locked --version "${TAG#v}"
+          comindly --version | grep -F "${TAG#v}"
