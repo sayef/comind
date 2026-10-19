@@ -36,7 +36,7 @@ function Rule({ c, writable }: { c: Convention; writable: boolean }) {
     return (
       <div className="flex flex-col gap-2">
         <textarea className={textarea} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
-        {change.error && <p className="text-xs text-danger">{change.error.message}</p>}
+        {change.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{change.error.message}</p>}
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -154,7 +154,7 @@ function AddDialog({ open, onOpenChange, scopes, scope, dimensions }: { open: bo
             Rule
             <textarea className={textarea} value={rule} onChange={(e) => setRule(e.target.value)} placeholder="One sentence an agent can follow." />
           </label>
-          {change.error && <p className="text-xs text-danger">{change.error.message}</p>}
+          {change.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{change.error.message}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel

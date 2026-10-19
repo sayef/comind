@@ -71,7 +71,7 @@ pub(super) async fn start(State(app): State<Shared>) -> impl IntoResponse {
         ),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": format!("{e:#}")})),
+            Json(json!({"ok": false, "message": super::error_text(&e)})),
         ),
     }
 }

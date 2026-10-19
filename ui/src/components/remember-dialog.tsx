@@ -165,7 +165,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
               placeholder="commit:abc123, mr:!412, test:tests/test_x.py::test_y"
             />
           </label>
-          {save.error && <p className="text-xs text-danger">{save.error.message}</p>}
+          {save.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{save.error.message}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel

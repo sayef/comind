@@ -30,7 +30,7 @@ export function AwsBanner({ remote }: { remote: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm md:px-6">
       <AlertTriangle className="size-4 shrink-0 text-warning" />
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
         {waiting
           ? `Waiting for you to approve the AWS sign-in in your browser${a.profile ? ` (profile ${a.profile})` : ""}…`
           : a.signin

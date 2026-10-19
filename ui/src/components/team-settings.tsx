@@ -1,27 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, KeyRound, Users } from "lucide-react";
+import { KeyRound, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Outcome } from "@/components/notice";
 import { api, type KeySource, type TeamSettings } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
-
-function Note({ error, message }: { error?: Error | null; message?: string }) {
-  if (error)
-    return (
-      <p className="flex items-start gap-1.5 text-xs text-warning">
-        <AlertTriangle className="mt-px size-3.5 shrink-0" /> {error.message}
-      </p>
-    );
-  return message ? (
-    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-      <CheckCircle2 className="mt-px size-3.5 shrink-0 text-brand" /> {message}
-    </p>
-  ) : null;
-}
 
 const sources: Record<KeySource, string> = {
   team: "from your credentials file, for this team",
@@ -57,7 +44,7 @@ export function ApiKey() {
           Save key
         </Button>
       </div>
-      <Note error={save.error} message={save.data?.message} />
+      <Outcome error={save.error} message={save.data?.message} />
     </div>
   );
 }
@@ -134,7 +121,7 @@ export function TeamSection() {
             Save for the team
           </Button>
         </div>
-        <Note error={save.error} message={save.data?.message} />
+        <Outcome error={save.error} message={save.data?.message} />
 
       </CardContent>
     </Card>

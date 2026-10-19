@@ -365,6 +365,11 @@ struct AtQ {
     at: Option<usize>,
 }
 
+/// An error for the UI: short, with S3 replies explained and credentials removed.
+pub(crate) fn error_text(e: &anyhow::Error) -> String {
+    crate::s3::explain(&format!("{e:#}"))
+}
+
 fn graph_uri(s: &Session) -> Option<String> {
     s.data
         .root
@@ -412,7 +417,7 @@ async fn orgmap(Cur(s): Cur, Query(q): Query<AtQ>) -> impl IntoResponse {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("{e:#}")})),
+            Json(json!({"error": error_text(&e)})),
         ),
     }
 }
@@ -526,7 +531,7 @@ async fn change_convention(Cur(s): Cur, Json(b): Json<ConventionBody>) -> impl I
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": format!("{e:#}")})),
+            Json(json!({"ok": false, "message": error_text(&e)})),
         ),
     }
 }
@@ -675,7 +680,7 @@ async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
         Ok(v) => (StatusCode::OK, Json(json!(v))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("{e:#}")})),
+            Json(json!({"error": error_text(&e)})),
         ),
     }
 }
@@ -822,7 +827,7 @@ async fn review(Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": format!("{e:#}")})),
+            Json(json!({"ok": false, "message": error_text(&e)})),
         ),
     }
 }
@@ -911,7 +916,7 @@ async fn remember(Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse
         Ok(id) => (StatusCode::OK, Json(json!({"ok": true, "id": id}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": format!("{e:#}")})),
+            Json(json!({"ok": false, "message": error_text(&e)})),
         ),
     }
 }
@@ -936,7 +941,7 @@ async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": format!("{e:#}")})),
+            Json(json!({"ok": false, "message": error_text(&e)})),
         ),
     }
 }

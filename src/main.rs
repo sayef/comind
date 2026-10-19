@@ -563,7 +563,7 @@ fn main() -> ExitCode {
                 match configured_checkouts(&cfg) {
                     Ok(r) => r,
                     Err(e) => {
-                        comind::ui::err(&format!("{e:#}"));
+                        comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
                         return ExitCode::FAILURE;
                     }
                 }
@@ -715,7 +715,7 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    comind::ui::err(&format!("{e:#}"));
+                    comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
                     ExitCode::FAILURE
                 }
             }
@@ -1229,7 +1229,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
     let head = match comind::git::head_commit(path) {
         Ok(h) => h,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -1260,7 +1260,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1354,7 +1354,7 @@ fn cmd_remember(
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1399,7 +1399,7 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1416,7 +1416,7 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                comind::ui::err(&format!("{e:#}"));
+                comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
                 ExitCode::FAILURE
             }
         };
@@ -1426,7 +1426,7 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
     let records = match comind::ledger::all_blocking(&cfg.index_dir(from)) {
         Ok(r) => r,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -1515,7 +1515,7 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1546,7 +1546,7 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1625,7 +1625,7 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
     };
     if changed {
         if let Err(e) = comind::config::set_repos(&list) {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
         comind::ui::ok(&format!(
@@ -1660,7 +1660,7 @@ fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
     match team_run(what, &root) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1787,7 +1787,7 @@ fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1800,7 +1800,7 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
         match comind::app::run(root) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                comind::ui::err(&format!("{e:#}"));
+                comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
                 ExitCode::FAILURE
             }
         }
@@ -1831,7 +1831,7 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
     let raw = match comind::git::working_changes(root, base) {
         Ok(c) => c,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -2110,7 +2110,7 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
     let (all, manual) = match load_conventions(from) {
         Ok(x) => x,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -2177,7 +2177,7 @@ fn cmd_conventions_change(
         Ok(Write::Delete(id)) if restore => comind::ui::ok(&format!("restored {id}")),
         Ok(Write::Delete(id)) => comind::ui::ok(&format!("removed {id}")),
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     }
@@ -2396,7 +2396,7 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    comind::ui::err(&format!("{e:#}"));
+                    comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
                     ExitCode::FAILURE
                 }
             }
@@ -3332,7 +3332,7 @@ fn cmd_index(
     let mut out = match comind::parse::parse_repo(root, &repo_name) {
         Ok(o) => o,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -3454,14 +3454,14 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let head = match comind::git::head_commit(root) {
         Ok(h) => h,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
     let cs = match comind::git::changed_files(root, base) {
         Ok(c) => c,
         Err(e) => {
-            comind::ui::err(&format!("{e:#}"));
+            comind::ui::err(&comind::s3::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };

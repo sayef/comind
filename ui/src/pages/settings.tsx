@@ -1,24 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Notice } from "@/components/notice";
 import { ApiKey, TeamSection } from "@/components/team-settings";
 import { api, type SettingsChange } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
 const select = "h-9 rounded-md border bg-card px-2 text-sm";
-
-function Status({ ok, message }: { ok: boolean; message: string }) {
-  return (
-    <p className={`flex items-start gap-1.5 text-xs ${ok ? "text-muted-foreground" : "text-warning"}`}>
-      {ok ? <CheckCircle2 className="mt-px size-3.5 shrink-0 text-brand" /> : <AlertTriangle className="mt-px size-3.5 shrink-0" />}
-      {message}
-    </p>
-  );
-}
 
 function useSave() {
   const qc = useQueryClient();
@@ -74,7 +65,7 @@ export function SettingsPage() {
 
   if (settings.isLoading || !s) return <Skeleton className="h-96 rounded-xl" />;
   const result = (m: typeof saveIndex) =>
-    m.error ? <Status ok={false} message={m.error.message} /> : m.data ? <Status ok message={m.data.message} /> : null;
+    m.error ? <Notice ok={false} message={m.error.message} /> : m.data ? <Notice ok message={m.data.message} /> : null;
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
@@ -98,8 +89,8 @@ export function SettingsPage() {
             Use this index
           </Button>
         </div>
-        {test.error && <Status ok={false} message={test.error.message} />}
-        {test.data && <Status ok message={test.data.message} />}
+        {test.error && <Notice ok={false} message={test.error.message} />}
+        {test.data && <Notice ok message={test.data.message} />}
         {result(saveIndex)}
       </Section>
 
@@ -125,7 +116,7 @@ export function SettingsPage() {
             AWS_PROFILE=<span className="font-mono">{s.aws_profile_env}</span> is set in this process's environment and takes precedence.
           </p>
         )}
-        {s.aws_status && <Status ok={s.aws_status.ok} message={s.aws_status.message} />}
+        {s.aws_status && <Notice ok={s.aws_status.ok} message={s.aws_status.message} />}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={ssoAuto} onChange={(e) => setSsoAuto(e.target.checked)} />
           When the SSO session expires, start the sign-in automatically (you still approve it in the browser)
