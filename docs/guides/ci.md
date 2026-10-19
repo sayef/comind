@@ -102,7 +102,7 @@ a repo yields no SCIP; `--scip off` skips it. Tree-sitter resolution covers ever
 ## LLM provider (for `--enrich` / `--flows`)
 
 Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENAI_API_KEY`, model
-`gpt-4o-mini`). Set `COMIND_LLM_MODEL` and `COMIND_LLM_BASE_URL` to target any OpenAI-compatible
+`gpt-6-luna`). Set `COMIND_LLM_MODEL` and `COMIND_LLM_BASE_URL` to target any OpenAI-compatible
 endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 
 ## Per-repo incremental (optimization)

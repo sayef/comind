@@ -16,7 +16,7 @@ use rig::completion::CompletionRequest;
 use rig::providers::openai;
 
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
-pub const DEFAULT_MODEL: &str = "gpt-4o-mini";
+pub const DEFAULT_MODEL: &str = "gpt-6-luna";
 
 /// Where requests go without an endpoint setting: OpenAI.
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";

@@ -6,7 +6,7 @@ built-in default.
 
 ```toml
 index_dir   = "~/.local/share/comind"   # local path or s3://…
-llm_model   = "gpt-4o-mini"             # any OpenAI-compatible model id
+llm_model   = "gpt-6-luna"             # any OpenAI-compatible model id
 embed_model = "minishlab/potion-base-8M"
 format      = "md"                      # search: md|table, serve: md|json
 embed       = true                      # build steps; --x / --no-x override, --no-llm disables all LLM steps
