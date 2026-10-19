@@ -31,7 +31,12 @@ new one.
   measured ones (hidden ones can be restored). `/conventions?repo=<name>` opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
-- **Repositories**: what comind indexes. Add a folder, scan a folder and tick the repositories you
+- **Repositories**: what is in the index, and where each repository lives on this machine. The index
+  records each repository's remote URL, so one indexed elsewhere shows **no folder here** with
+  **Locate** (point at your copy) and **Clone** (URL filled in); **Scan a folder** ticks the ones it
+  finds. comind indexes all repositories together so cross-repo links stay complete, so **Index now**
+  waits until every indexed repository has a folder here, unless you choose to drop the missing ones.
+  Add a folder, scan a folder and tick the repositories you
   want (untick to drop one), or clone one by HTTPS or SSH URL with your own git access: your SSH key,
   your git credential helper, or `GITLAB_TOKEN` / `GITHUB_TOKEN`. When none of these gives access to an
   HTTPS repository, the app asks for an access token and hands it to git for that clone only; your

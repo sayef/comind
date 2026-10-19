@@ -251,6 +251,14 @@ export interface RepoRow {
   indexed_commit: string | null;
 }
 
+/** A repository in the index with no folder in your list. */
+export interface UnlistedRepo {
+  name: string;
+  symbols: number | null;
+  commit: string | null;
+  remote: string | null;
+}
+
 export interface ScanHit {
   path: string;
   name: string;
@@ -321,12 +329,12 @@ export const api = {
   packages: () => get<Package[]>("/api/packages"),
   setup: () => get<Setup>("/api/setup"),
   settings: () => get<Settings>("/api/settings"),
-  repos: () => get<{ repos: RepoRow[]; unlisted: string[]; root: string | null }>("/api/repos"),
+  repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; root: string | null }>("/api/repos"),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }),
   cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),
   indexJob: () => get<IndexJob>("/api/index"),
-  startIndex: (llm: boolean) => post("/api/index", { llm }),
+  startIndex: (llm: boolean, drop_unlisted = false) => post("/api/index", { llm, drop_unlisted }),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),
   aws: () => get<AwsStatus>("/api/aws"),
   team: () => get<Team>("/api/team"),

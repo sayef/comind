@@ -545,22 +545,26 @@ pub fn write_repo_meta_blocking(uri: &str, repo: &str, commit: &str) -> Result<(
 
 /// Record the indexed commit for *several* repos (multi-row `repo_meta`) — used by the org
 /// `link` so an incremental rebuild knows which repos changed.
-pub async fn write_repo_commits(uri: &str, commits: &[(String, String)]) -> Result<()> {
-    if commits.is_empty() {
+pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> {
+    if repos.is_empty() {
         return Ok(());
     }
     let schema = Arc::new(Schema::new(vec![
         Field::new("repo", DataType::Utf8, false),
         Field::new("commit", DataType::Utf8, false),
+        Field::new("remote", DataType::Utf8, true),
     ]));
     let batch = RecordBatch::try_new(
         schema,
         vec![
             Arc::new(StringArray::from_iter_values(
-                commits.iter().map(|(r, _)| r.clone()),
+                repos.iter().map(|r| r.name.clone()),
             )) as ArrayRef,
             Arc::new(StringArray::from_iter_values(
-                commits.iter().map(|(_, c)| c.clone()),
+                repos.iter().map(|r| r.commit.clone()),
+            )) as ArrayRef,
+            Arc::new(StringArray::from_iter(
+                repos.iter().map(|r| r.remote.clone()),
             )) as ArrayRef,
         ],
     )
@@ -570,27 +574,52 @@ pub async fn write_repo_commits(uri: &str, commits: &[(String, String)]) -> Resu
     Ok(())
 }
 
-/// Read all recorded `repo -> commit` pairs (empty map if none).
-pub async fn read_repo_commits(uri: &str) -> Result<std::collections::HashMap<String, String>> {
+/// A repository in the index: its name, the commit indexed and where it is cloned from.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct IndexedRepo {
+    pub name: String,
+    pub commit: String,
+    pub remote: Option<String>,
+}
+
+/// The repositories recorded in the index (indexes made before remotes were stored have none).
+pub async fn read_indexed_repos(uri: &str) -> Result<Vec<IndexedRepo>> {
     let db = crate::s3::connect(uri).execute().await?;
-    let mut map = std::collections::HashMap::new();
     let Ok(tbl) = db.open_table("repo_meta").execute().await else {
-        return Ok(map);
+        return Ok(Vec::new());
     };
+    let mut out = Vec::new();
     let mut st = tbl.query().execute().await?;
     while let Some(b) = st.try_next().await? {
         let repo = str_col(&b, "repo")?;
         let commit = str_col(&b, "commit")?;
+        let remote = str_col(&b, "remote").ok();
         for i in 0..b.num_rows() {
-            map.insert(repo.value(i).to_string(), commit.value(i).to_string());
+            out.push(IndexedRepo {
+                name: repo.value(i).to_string(),
+                commit: commit.value(i).to_string(),
+                remote: remote
+                    .filter(|r| r.is_valid(i))
+                    .map(|r| r.value(i).to_string()),
+            });
         }
     }
-    Ok(map)
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// The indexed commit of each repository, by name.
+pub async fn read_repo_commits(uri: &str) -> Result<std::collections::HashMap<String, String>> {
+    Ok(read_indexed_repos(uri)
+        .await?
+        .into_iter()
+        .map(|r| (r.name, r.commit))
+        .collect())
 }
 
 /// Blocking wrapper for [`write_repo_commits`].
-pub fn write_repo_commits_blocking(uri: &str, commits: &[(String, String)]) -> Result<()> {
-    runtime()?.block_on(write_repo_commits(uri, commits))
+pub fn write_repo_commits_blocking(uri: &str, repos: &[IndexedRepo]) -> Result<()> {
+    runtime()?.block_on(write_repo_commits(uri, repos))
 }
 
 /// Blocking wrapper for [`read_repo_commits`].
@@ -1152,4 +1181,40 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
         .enable_all()
         .build()
         .context("build tokio runtime")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn repo_meta_gains_remotes_and_old_tables_still_read() {
+        let dir = std::env::temp_dir().join(format!("comind-meta-{}", std::process::id()));
+        let uri = dir.to_str().unwrap();
+        let old = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("repo", DataType::Utf8, false),
+                Field::new("commit", DataType::Utf8, false),
+            ])),
+            vec![
+                Arc::new(StringArray::from(vec!["orders"])) as ArrayRef,
+                Arc::new(StringArray::from(vec!["abc"])) as ArrayRef,
+            ],
+        )
+        .unwrap();
+        let db = crate::s3::connect(uri).execute().await.unwrap();
+        write_versioned(&db, "repo_meta", old).await.unwrap();
+        let read = read_indexed_repos(uri).await.unwrap();
+        assert_eq!(read[0].remote, None);
+        let next = IndexedRepo {
+            name: "orders".into(),
+            commit: "def".into(),
+            remote: Some("https://example.com/orders.git".into()),
+        };
+        write_repo_commits(uri, std::slice::from_ref(&next))
+            .await
+            .unwrap();
+        assert_eq!(read_indexed_repos(uri).await.unwrap(), vec![next]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

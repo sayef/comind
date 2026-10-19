@@ -69,7 +69,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   );
 }
 
-function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChange: (o: boolean) => void; indexed: string[] }) {
   const qc = useQueryClient();
   const [dir, setDir] = useState("");
   const [found, setFound] = useState<ScanHit[] | null>(null);
@@ -77,7 +77,7 @@ function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
   const [filter, setFilter] = useState("");
   const scan = useMutation({
     mutationFn: () => api.scanRepos(dir),
-    onSuccess: (r) => (setFound(r.found), setChecked(new Set(r.found.filter((f) => f.listed).map((f) => f.path)))),
+    onSuccess: (r) => (setFound(r.found), setChecked(new Set(r.found.filter((f) => f.listed || indexed.includes(f.name)).map((f) => f.path)))),
   });
   const apply = useMutation({
     mutationFn: () =>
@@ -156,9 +156,12 @@ function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
   );
 }
 
-function CloneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function CloneDialog({ open, onOpenChange, initialUrl }: { open: boolean; onOpenChange: (o: boolean) => void; initialUrl?: string }) {
   const qc = useQueryClient();
   const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (open && initialUrl) setUrl(initialUrl);
+  }, [open, initialUrl]);
   const [dir, setDir] = useState("");
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
@@ -225,12 +228,13 @@ function CloneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: 
   );
 }
 
-function IndexPanel() {
+function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const qc = useQueryClient();
   const [llm, setLlm] = useState(false);
+  const [drop, setDrop] = useState(false);
   const [full, setFull] = useState(false);
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
-  const start = useMutation({ mutationFn: () => api.startIndex(llm), onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
+  const start = useMutation({ mutationFn: () => api.startIndex(llm, drop), onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
   const j = job.data;
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => {
@@ -259,13 +263,19 @@ function IndexPanel() {
           </CardDescription>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <Button variant="brand" disabled={j?.running || start.isPending} onClick={() => start.mutate()}>
+          <Button variant="brand" disabled={j?.running || start.isPending || (unlisted.length > 0 && !drop)} onClick={() => start.mutate()}>
             {j?.running ? <Loader2 className="animate-spin" /> : <Play />} {j?.running ? "Indexing…" : "Index now"}
           </Button>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
             LLM summaries (sends code to the LLM)
           </label>
+          {unlisted.length > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-warning">
+              <input type="checkbox" checked={drop} onChange={(e) => setDrop(e.target.checked)} />
+              Drop {unlisted.length === 1 ? unlisted[0] : `${unlisted.length} repositories`} with no folder here
+            </label>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
@@ -310,9 +320,10 @@ export function RepositoriesPage() {
   const qc = useQueryClient();
   const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos });
   const [dialog, setDialog] = useState<"add" | "scan" | "clone" | null>(null);
+  const [cloneUrl, setCloneUrl] = useState<string>();
   const remove = useMutation({ mutationFn: (path: string) => api.changeRepos({ remove: [path] }), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
   const remote = useMemo(() => repos.data?.root?.includes("://"), [repos.data]);
-  const dropped = repos.data?.unlisted ?? [];
+  const unlisted = repos.data?.unlisted ?? [];
   const close = (o: boolean) => !o && setDialog(null);
 
   return (
@@ -338,23 +349,22 @@ export function RepositoriesPage() {
         </div>
       </div>
 
-      {dropped.length > 0 ? (
+      {unlisted.length > 0 ? (
         <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <span className="min-w-0 [overflow-wrap:anywhere]">
-            Also in this index but not in your list: {dropped.join(", ")}. They were indexed elsewhere (another machine or CI);
-            indexing from here would drop them. Add them here first, or change the list where they are indexed.
+            {unlisted.length === 1 ? "One repository" : `${unlisted.length} repositories`} in this index {unlisted.length === 1 ? "has" : "have"} no
+            folder on this machine yet. Locate your copy or clone it to index from here; comind indexes all repositories together so
+            their links stay complete.
           </span>
         </p>
       ) : (
-        remote && (
-          <p className="text-xs text-muted-foreground">Shared in S3: indexing from here publishes a new version for everyone using it.</p>
-        )
+        remote && <p className="text-xs text-muted-foreground">Shared in S3: indexing from here publishes a new version for everyone using it.</p>
       )}
 
       <Card className="overflow-hidden">
         {repos.isLoading && <Skeleton className="h-32" />}
-        {repos.data && repos.data.repos.length === 0 && (
+        {repos.data && repos.data.repos.length === 0 && unlisted.length === 0 && (
           <p className="p-6 text-center text-sm text-muted-foreground">No repositories yet. Add a folder, scan one, or clone a repository.</p>
         )}
         {repos.data?.repos.map((r) => (
@@ -380,13 +390,37 @@ export function RepositoriesPage() {
             </Button>
           </div>
         ))}
+        {unlisted.map((r) => (
+          <div key={r.name} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b bg-muted/30 px-4 py-3 last:border-0">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <RepoDot repo={r.name} />
+                <span className="font-medium">{r.name}</span>
+                <Badge variant="warning">no folder here</Badge>
+                {r.symbols != null && <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
+              </div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                {r.remote ?? "remote unknown (indexed before comind recorded remotes)"}
+              </div>
+            </div>
+            {r.commit && <span className="font-mono text-xs text-muted-foreground">indexed @ {r.commit.slice(0, 7)}</span>}
+            <div className="flex gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => setDialog("add")}>
+                <FolderOpen /> Locate
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => (setCloneUrl(r.remote ?? undefined), setDialog("clone"))}>
+                <GitFork /> Clone
+              </Button>
+            </div>
+          </div>
+        ))}
       </Card>
 
-      <IndexPanel />
+      <IndexPanel unlisted={unlisted.map((r) => r.name)} />
 
       <AddDialog open={dialog === "add"} onOpenChange={close} />
-      <ScanDialog open={dialog === "scan"} onOpenChange={close} />
-      <CloneDialog open={dialog === "clone"} onOpenChange={close} />
+      <ScanDialog open={dialog === "scan"} onOpenChange={close} indexed={unlisted.map((r) => r.name)} />
+      <CloneDialog open={dialog === "clone"} onOpenChange={(o) => (close(o), !o && setCloneUrl(undefined))} initialUrl={cloneUrl} />
     </div>
   );
 }

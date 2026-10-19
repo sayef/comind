@@ -2653,12 +2653,16 @@ fn cmd_link(
 
         // Incremental: figure out which symbols are stale (their repo's changed files, per git),
         // so we recompute embeddings/enrichment only for those and reuse the rest.
-        let current_heads: Vec<(String, String)> = repos
+        let current_heads: Vec<comind::index::IndexedRepo> = repos
             .iter()
             .filter_map(|p| {
-                comind::git::head_commit(Path::new(p))
-                    .ok()
-                    .map(|h| (repo_name(p), h))
+                comind::git::head_commit(Path::new(p)).ok().map(|commit| {
+                    comind::index::IndexedRepo {
+                        name: repo_name(p),
+                        commit,
+                        remote: comind::worktree::remote_url(Path::new(p)),
+                    }
+                })
             })
             .collect();
         let stale_ids: HashSet<String> = if incremental {
