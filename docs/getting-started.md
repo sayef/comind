@@ -16,7 +16,13 @@ curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install
 comindly --version
 ```
 
-From source, with Rust 1.95 or newer plus `protoc` and `cmake`:
+From [crates.io](https://crates.io/crates/comindly), with Rust 1.95 or newer plus `protoc` and `cmake`:
+
+```sh
+cargo install comindly
+```
+
+Or from source:
 
 ```sh
 git clone https://github.com/sayef/comindly && cd comindly && cargo build --release

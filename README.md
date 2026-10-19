@@ -20,10 +20,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sayef/comindly/actions/workflows/ci.yml"><img src="https://github.com/sayef/comindly/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A34A" alt="MIT license"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.95%2B-16A34A" alt="Rust 1.95+"></a>
-  <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comindly"><img src="https://img.shields.io/crates/v/comindly.svg" alt="crates.io"></a> -->
+  <a href="https://github.com/sayef/comindly/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sayef/comindly/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://crates.io/crates/comindly"><img alt="crates.io" src="https://img.shields.io/crates/v/comindly.svg"></a>
+  <a href="https://docs.rs/comindly"><img alt="docs.rs" src="https://img.shields.io/docsrs/comindly"></a>
+  <img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-16A34A">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-16A34A"></a>
 </p>
 
 <p align="center">
@@ -69,7 +70,13 @@ Prebuilt binaries (macOS arm64/x64, Linux x64/arm64) are published to
 curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
 ```
 
-Or from source (needs Rust 1.95 or newer, plus `protoc` and `cmake`):
+Or from [crates.io](https://crates.io/crates/comindly) (needs Rust 1.95 or newer, plus `protoc` and `cmake`):
+
+```bash
+cargo install comindly
+```
+
+Or from source:
 
 ```bash
 git clone https://github.com/sayef/comindly && cd comindly
