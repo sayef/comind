@@ -61,6 +61,7 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+  - pymdownx.blocks.caption
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true

@@ -26,6 +26,12 @@
   <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comind"><img src="https://img.shields.io/crates/v/comind.svg" alt="crates.io"></a> -->
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/explorer-dark.webp">
+    <img alt="comind showing create_order in an example shop: callers across repositories, blast radius and a flow walkthrough" src="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/explorer.webp" width="860">
+  </picture>
+</p>
 
 Comind indexes a whole team's repositories into one versioned knowledge graph, then serves it to
 coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
@@ -116,6 +122,32 @@ or open `comind ui --web` → **Connect**, which fills in your index path and ch
 - **Reasoning ledger:** `why` (recorded decisions, failed attempts and constraints about a symbol), `remember`, `review`.
 
 Results are handed to the agent as **markdown by default** (structured JSON is also attached; use `serve --format json` for raw JSON). Hooks, the ledger, self-enforcing constraints, signing and privacy are described in the **[docs](https://comind.pages.dev/)** ([guides](docs/guides/)).
+
+## In the app
+
+`comind app` (macOS) or `comind ui --web` shows the same graph to people: the org map, contracts, the
+ledger, packages and search. Shown here on the example shop in [`examples/acme`](examples/acme).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/overview-dark.webp">
+    <img alt="Org map of five repositories and the service contracts between them" src="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/overview.webp" width="420">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/contracts-dark.webp">
+    <img alt="Contracts: routes, topics, queues, buckets and tables with providers and consumers" src="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/contracts.webp" width="420">
+  </picture>
+</p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/ledger-dark.webp">
+    <img alt="Ledger: constraints, failed attempts and decisions anchored to symbols" src="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/ledger.webp" width="420">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/palette-dark.webp">
+    <img alt="Search by describing what you are looking for" src="https://raw.githubusercontent.com/sayef/comind/main/docs/assets/screenshots/palette.webp" width="420">
+  </picture>
+</p>
 
 ## Commands
 
@@ -276,8 +308,3 @@ with `pre-commit install`, or the Rust-native `prek install` (both read the same
 ## License
 
 MIT.
-
-## Brand
-
-The logo, wordmark, banners, icon and social preview live in [`assets/`](assets/); see
-[`assets/README.md`](assets/README.md).

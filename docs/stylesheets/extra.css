@@ -54,7 +54,7 @@
 /* Landing page. */
 .cm-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
   gap: 3rem;
   align-items: center;
   margin: 1.5rem 0 2.5rem;
@@ -122,26 +122,25 @@
   color: var(--md-default-fg-color--lighter);
 }
 
-/* The mark, large, with a soft glow of its own colours. */
-.cm-hero__mark {
-  position: relative;
-  display: grid;
-  place-items: center;
-}
-
-.cm-hero__mark::before {
-  content: "";
-  position: absolute;
-  inset: 12%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(45, 212, 191, 0.22), rgba(163, 230, 53, 0.08) 60%, transparent 72%);
-  filter: blur(18px);
-}
-
-.cm-hero__mark img {
-  position: relative;
-  width: min(100%, 300px);
+.cm-hero__shot img,
+.cm-shot img {
+  display: block;
+  width: 100%;
   height: auto;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(14, 21, 18, 0.22);
+}
+
+.cm-shot {
+  margin: 0 0 2.5rem;
+}
+
+.cm-shot figcaption {
+  max-width: none;
+  margin-top: 0.8rem;
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
 }
 
 .cm-stats {
@@ -174,14 +173,6 @@
   .cm-hero {
     grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;
-  }
-
-  .cm-hero__mark {
-    order: -1;
-  }
-
-  .cm-hero__mark img {
-    width: 160px;
   }
 
   .md-typeset .cm-title {
