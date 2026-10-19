@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/sayef/comindly/releases/tag/v0.4.0) - 2026-10-19
+
 ### Changed
 
 - Renamed from comind to **comindly**: the crate, the binary, the MCP server, `~/.config/comindly`,
