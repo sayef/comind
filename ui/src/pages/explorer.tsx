@@ -50,6 +50,19 @@ function CopyContext({ focus }: { focus: string }) {
   );
 }
 
+/** LLM text with `code` spans shown as code. */
+function withCode(text: string) {
+  return text.split(/`([^`]+)`/).map((part, i) =>
+    i % 2 ? (
+      <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function ExplorerPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -87,7 +100,7 @@ export function ExplorerPage() {
             <Badge variant="outline">{f.kind}</Badge>
           </h1>
           {f.signature && <pre className="mt-2 max-w-3xl overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs">{f.signature}</pre>}
-          {detail.data.summary && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{detail.data.summary}</p>}
+          {detail.data.summary && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{withCode(detail.data.summary)}</p>}
           {f.repo !== "_contracts" && (
             <div className="mt-3 flex flex-wrap gap-2">
               <CopyContext focus={f.id} />
@@ -136,7 +149,7 @@ export function ExplorerPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            <p className="leading-relaxed">{detail.data.flow.narration}</p>
+            <p className="leading-relaxed">{withCode(detail.data.flow.narration)}</p>
             {detail.data.flow.questions.length > 0 && (
               <p className="text-xs text-muted-foreground">Answers: {detail.data.flow.questions.join(" · ")}</p>
             )}
