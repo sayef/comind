@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, pickFolder, type ScanHit } from "@/lib/api";
+import { ApiError, api, type NeedsToken, pickFolder, type ScanHit } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
 
@@ -165,31 +165,63 @@ function CloneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: 
   const qc = useQueryClient();
   const [url, setUrl] = useState("");
   const [dir, setDir] = useState("");
+  const [username, setUsername] = useState("");
+  const [token, setToken] = useState("");
+  const [asked, setAsked] = useState<NeedsToken | null>(null);
   const clone = useMutation({
-    mutationFn: () => api.cloneRepo(url, dir),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), setUrl(""), onOpenChange(false)),
+    mutationFn: () => api.cloneRepo(url, dir, asked && token.trim() ? { username, token } : undefined),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), setUrl(""), setToken(""), setAsked(null), onOpenChange(false)),
+    onError: (e) => {
+      const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
+      if (need) (setAsked(need), setUsername((u) => u || need.username));
+    },
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="p-5">
         <DialogTitle className="text-base font-semibold">Clone a repository</DialogTitle>
-        <p className="mt-1 text-sm text-muted-foreground">Uses the git access this machine already has (SSH key or credential helper).</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          HTTPS or SSH. comind uses the git access this machine already has: your SSH key, your git credential helper, or
+          GITLAB_TOKEN / GITHUB_TOKEN. If none works it asks for a token.
+        </p>
         <div className="mt-4 flex flex-col gap-3">
           <label className={field}>
             Clone URL
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="git@gitlab.com:group/service.git" className="font-mono text-xs" />
+            <Input
+              value={url}
+              onChange={(e) => (setUrl(e.target.value), setAsked(null))}
+              placeholder="https://gitlab.com/group/service.git"
+              className="font-mono text-xs"
+            />
           </label>
           <label className={field}>
             Into folder
             <FolderInput value={dir} onChange={setDir} placeholder="~/dev" />
           </label>
-          <Message error={clone.error} />
+          {asked && (
+            <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+              <p className="text-xs text-muted-foreground">
+                {asked.host} needs an access token with read access to the repository. Your git credential helper (on macOS the
+                keychain) keeps it after a successful clone.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="text-xs" />
+                <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Access token" autoFocus />
+              </div>
+            </div>
+          )}
+          {!asked && <Message error={clone.error} />}
+          {asked && clone.error && token && <Message error={clone.error} />}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button variant="brand" disabled={!url.trim() || !dir.trim() || clone.isPending} onClick={() => clone.mutate()}>
-              {clone.isPending && <Loader2 className="animate-spin" />} Clone and add
+            <Button
+              variant="brand"
+              disabled={!url.trim() || !dir.trim() || (!!asked && !token.trim()) || clone.isPending}
+              onClick={() => clone.mutate()}
+            >
+              {clone.isPending && <Loader2 className="animate-spin" />} {asked ? "Clone with token" : "Clone and add"}
             </Button>
           </div>
         </div>

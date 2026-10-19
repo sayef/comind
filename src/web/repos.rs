@@ -165,27 +165,48 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
 pub(super) struct CloneQ {
     url: String,
     dir: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
 }
 
 /// Clone a repository with your git credentials and add it.
 pub(super) async fn clone(Json(q): Json<CloneQ>) -> impl IntoResponse {
     let run = tokio::task::spawn_blocking(move || {
-        let dest = worktree::clone(q.url.trim(), Path::new(&absolute(&q.dir)))?;
+        let auth = q.token.filter(|t| !t.trim().is_empty()).map(|t| worktree::Auth {
+            username: q.username.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| "oauth2".into()),
+            token: t.trim().to_string(),
+        });
+        let given = auth.is_some();
+        let dest = worktree::clone(q.url.trim(), Path::new(&absolute(&q.dir)), auth)?;
         let mut list = Config::load().repos;
         list.push(RepoEntry {
             path: dest.to_string_lossy().into_owned(),
             branch: None,
         });
         crate::config::set_repos(&list)?;
-        anyhow::Ok(dest)
+        let note = if given && !worktree::has_credential_helper() {
+            "; no git credential helper is set up, so the token was not saved and fetching later will need it again"
+        } else if given {
+            "; the token was saved by your git credential helper"
+        } else {
+            ""
+        };
+        anyhow::Ok(format!("cloned into {}{note}", dest.display()))
     })
     .await;
     match run.map_err(anyhow::Error::from).and_then(|r| r) {
-        Ok(d) => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": format!("cloned into {}", d.display())})),
-        ),
-        Err(e) => fail(e),
+        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
+        Err(e) => match e.downcast_ref::<worktree::NeedsToken>() {
+            Some(n) => (
+                StatusCode::UNAUTHORIZED,
+                Json(
+                    json!({"ok": false, "message": e.to_string(), "needs_token": {"host": n.host, "username": n.username}}),
+                ),
+            ),
+            None => fail(e),
+        },
     }
 }
 

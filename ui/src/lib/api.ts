@@ -217,11 +217,27 @@ export type SettingsChange = Partial<{
 }>;
 
 /** POST JSON; throws the server's message when it reports failure. */
+/** A failed request, with the server's reply for errors that carry more than a message. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
 async function post<T = { ok: boolean; message: string }>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const out = await r.json();
-  if (out && out.ok === false) throw new Error(out.message ?? `${path}: ${r.status}`);
+  if (out && out.ok === false) throw new ApiError(out.message ?? `${path}: ${r.status}`, out);
   return out as T;
+}
+
+/** Sent back when an HTTPS clone needs an access token. */
+export interface NeedsToken {
+  host: string;
+  username: string;
 }
 
 export interface RepoRow {
@@ -308,7 +324,7 @@ export const api = {
   repos: () => get<{ repos: RepoRow[]; unlisted: string[]; root: string | null }>("/api/repos"),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }),
-  cloneRepo: (url: string, dir: string) => post("/api/repos/clone", { url, dir }),
+  cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),
   indexJob: () => get<IndexJob>("/api/index"),
   startIndex: (llm: boolean) => post("/api/index", { llm }),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),

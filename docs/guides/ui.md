@@ -32,7 +32,10 @@ new one.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
 - **Repositories**: what comind indexes. Add a folder, scan a folder and tick the repositories you
-  want (untick to drop one), or clone one with your own git access. **Index now** fetches each
+  want (untick to drop one), or clone one by HTTPS or SSH URL with your own git access: your SSH key,
+  your git credential helper, or `GITLAB_TOKEN` / `GITHUB_TOKEN`. When none of these gives access to an
+  HTTPS repository, the app asks for an access token and hands it to git for that clone only; your
+  credential helper (on macOS the keychain) keeps it for later fetches. **Index now** fetches each
   repository's default branch into comind's own worktree (`~/.cache/comind/worktrees`), so your
   folders and branches are never touched, rebuilds the index and shows its progress; every page
   then shows the new index. LLM summaries are opt-in per run. With **Re-index automatically** on

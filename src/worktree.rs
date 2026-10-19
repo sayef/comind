@@ -17,8 +17,93 @@ pub struct Checkout {
     pub stale: Option<String>,
 }
 
+/// An HTTPS username and access token, handed to git for one command only.
+#[derive(Clone)]
+pub struct Auth {
+    pub username: String,
+    pub token: String,
+}
+
+/// Returned when an HTTPS remote needs a token that neither git's credential helper nor the environment has.
+#[derive(Debug)]
+pub struct NeedsToken {
+    pub host: String,
+    pub username: String,
+}
+
+impl std::fmt::Display for NeedsToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} needs an access token", self.host)
+    }
+}
+
+impl std::error::Error for NeedsToken {}
+
+fn https_host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let authority = rest.split('/').next()?;
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    (!host.is_empty()).then(|| host.to_lowercase())
+}
+
+/// The username a host expects with an access token.
+fn token_user(host: &str) -> &'static str {
+    if host == "github.com" {
+        "x-access-token"
+    } else {
+        "oauth2"
+    }
+}
+
+/// A token for `url`'s host from the environment: `GH_TOKEN`/`GITHUB_TOKEN` for GitHub, `GITLAB_TOKEN` for GitLab.
+pub fn env_auth(url: &str) -> Option<Auth> {
+    let host = https_host(url)?;
+    let vars: &[&str] = if host == "github.com" {
+        &["GH_TOKEN", "GITHUB_TOKEN"]
+    } else if host.contains("gitlab") {
+        &["GITLAB_TOKEN"]
+    } else {
+        &[]
+    };
+    let token = vars
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|t| !t.is_empty()))?;
+    Some(Auth {
+        username: token_user(&host).into(),
+        token,
+    })
+}
+
+fn auth_failed(stderr: &str) -> bool {
+    [
+        "could not read Username",
+        "could not read Password",
+        "Authentication failed",
+        "Access denied",
+        "HTTP Basic",
+        "returned error: 401",
+        "returned error: 403",
+    ]
+    .iter()
+    .any(|m| stderr.contains(m))
+}
+
 fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new("git")
+    git_auth(dir, args, None)
+}
+
+/// Run git; with `auth`, a credential helper that answers with it is tried after your own helpers.
+fn git_auth(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Result<String> {
+    let mut cmd = Command::new("git");
+    if let Some(a) = auth {
+        cmd.arg("-c")
+            .arg(r#"credential.helper=!f() { test "$1" = get && printf 'username=%s\npassword=%s\n' "$COMIND_GIT_USER" "$COMIND_GIT_TOKEN"; }; f"#)
+            .env("COMIND_GIT_USER", &a.username)
+            .env("COMIND_GIT_TOKEN", &a.token);
+    }
+    let out = cmd
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -121,7 +206,14 @@ pub fn prepare(repo: &Path, branch: Option<&str>) -> Result<Checkout> {
     let mut stale = None;
     let target = if has_origin(repo) {
         let target = format!("origin/{branch}");
-        if let Err(e) = git(repo, &["fetch", "--quiet", "origin", &branch]) {
+        let auth = git(repo, &["remote", "get-url", "origin"])
+            .ok()
+            .and_then(|u| env_auth(&u));
+        if let Err(e) = git_auth(
+            repo,
+            &["fetch", "--quiet", "origin", &branch],
+            auth.as_ref(),
+        ) {
             let why = format!("{e:#}");
             git(repo, &["rev-parse", "--verify", "--quiet", &target])
                 .map_err(|_| e.context("and no earlier fetch to fall back to"))?;
@@ -193,7 +285,9 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<PathBuf> {
 }
 
 /// Clone `url` into `parent/<name>` with your git credentials; returns the new folder.
-pub fn clone(url: &str, parent: &Path) -> Result<PathBuf> {
+/// Clone `url` into `parent`. HTTPS uses your credential helper, then `auth` or a token from the
+/// environment; without access it fails with [`NeedsToken`].
+pub fn clone(url: &str, parent: &Path, auth: Option<Auth>) -> Result<PathBuf> {
     let name = url
         .trim_end_matches('/')
         .rsplit(['/', ':'])
@@ -206,13 +300,45 @@ pub fn clone(url: &str, parent: &Path) -> Result<PathBuf> {
         bail!("{} already exists", dest.display());
     }
     std::fs::create_dir_all(parent)?;
-    git(parent, &["clone", "--quiet", url, name])?;
+    let auth = auth.or_else(|| env_auth(url));
+    if let Err(e) = git_auth(parent, &["clone", "--quiet", url, name], auth.as_ref()) {
+        let _ = std::fs::remove_dir_all(&dest);
+        if let Some(host) = https_host(url).filter(|_| auth_failed(&format!("{e:#}"))) {
+            let username = token_user(&host).into();
+            return Err(NeedsToken { host, username }.into());
+        }
+        return Err(e);
+    }
     Ok(dest)
+}
+
+/// Whether git has a credential helper to keep tokens it was given.
+pub fn has_credential_helper() -> bool {
+    git(
+        Path::new("."),
+        &["config", "--get-all", "credential.helper"],
+    )
+    .is_ok_and(|h| !h.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hosts_and_token_users() {
+        assert_eq!(
+            https_host("https://user@gitlab.example.com:8443/g/r.git").as_deref(),
+            Some("gitlab.example.com")
+        );
+        assert_eq!(https_host("git@github.com:o/r.git"), None);
+        assert_eq!(token_user("github.com"), "x-access-token");
+        assert_eq!(token_user("gitlab.com"), "oauth2");
+        assert!(auth_failed(
+            "fatal: could not read Username for 'https://gitlab.com': terminal prompts disabled"
+        ));
+        assert!(!auth_failed("fatal: repository 'x' does not exist"));
+    }
 
     #[test]
     fn worktree_follows_main_and_leaves_the_folder_alone() {
