@@ -312,6 +312,7 @@ export function RepositoriesPage() {
   const [dialog, setDialog] = useState<"add" | "scan" | "clone" | null>(null);
   const remove = useMutation({ mutationFn: (path: string) => api.changeRepos({ remove: [path] }), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
   const remote = useMemo(() => repos.data?.root?.includes("://"), [repos.data]);
+  const dropped = repos.data?.unlisted ?? [];
   const close = (o: boolean) => !o && setDialog(null);
 
   return (
@@ -337,12 +338,18 @@ export function RepositoriesPage() {
         </div>
       </div>
 
-      {remote && (
+      {dropped.length > 0 ? (
         <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-          This index is shared in S3. If a CI job builds it, change the repository list there: indexing from here replaces the shared
-          index with the repositories listed below.
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            Also in this index but not in your list: {dropped.join(", ")}. They were indexed elsewhere (another machine or CI);
+            indexing from here would drop them. Add them here first, or change the list where they are indexed.
+          </span>
         </p>
+      ) : (
+        remote && (
+          <p className="text-xs text-muted-foreground">Shared in S3: indexing from here publishes a new version for everyone using it.</p>
+        )
       )}
 
       <Card className="overflow-hidden">
@@ -374,12 +381,6 @@ export function RepositoriesPage() {
           </div>
         ))}
       </Card>
-      {repos.data && repos.data.unlisted.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Also in this index but not in your list (indexed elsewhere, e.g. by CI): {repos.data.unlisted.join(", ")}. Indexing from here
-          would drop them.
-        </p>
-      )}
 
       <IndexPanel />
 
