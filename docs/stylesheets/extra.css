@@ -1,30 +1,243 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap");
+
 /* Ink and paper, with the mark's green as the one accent. */
 :root {
-  --comind-ink: #16202e;
-  --comind-green: #30a336;
+  --comind-ink: #0e1512;
+  --comind-paper: #f3f6f2;
+  --comind-green: #16a34a;
+  --comind-teal: #0d9488;
 }
 
 [data-md-color-scheme="default"] {
   --md-primary-fg-color: var(--comind-ink);
-  --md-primary-fg-color--light: #243247;
-  --md-primary-fg-color--dark: #0d141d;
-  --md-accent-fg-color: #1f7a2a;
-  --md-accent-fg-color--transparent: rgba(31, 122, 42, 0.1);
-  --md-typeset-a-color: #1f7a2a;
+  --md-primary-fg-color--light: #1f2a25;
+  --md-primary-fg-color--dark: #000000;
+  --md-accent-fg-color: #15803d;
+  --md-accent-fg-color--transparent: rgba(21, 128, 61, 0.1);
+  --md-typeset-a-color: #15803d;
+  --md-default-bg-color: #fbfcfa;
 }
 
 [data-md-color-scheme="slate"] {
   --md-primary-fg-color: var(--comind-ink);
-  --md-primary-fg-color--light: #243247;
-  --md-primary-fg-color--dark: #0d141d;
-  --md-accent-fg-color: #5cc46a;
-  --md-accent-fg-color--transparent: rgba(92, 196, 106, 0.1);
-  --md-typeset-a-color: #5cc46a;
-  --md-default-bg-color: #11161e;
+  --md-primary-fg-color--light: #1f2a25;
+  --md-primary-fg-color--dark: #000000;
+  --md-accent-fg-color: #4ade80;
+  --md-accent-fg-color--transparent: rgba(74, 222, 128, 0.1);
+  --md-typeset-a-color: #4ade80;
+  --md-default-bg-color: #111714;
+  --md-code-bg-color: #18201c;
 }
 
-.cm-hero { text-align: center; padding: 2rem 0 1rem; }
-.cm-hero h1 { font-weight: 700; margin: 0.6rem 0; color: var(--md-default-fg-color); }
-.cm-lede { max-width: 42rem; margin: 0 auto 1.2rem; font-size: 1.05rem; }
-.cm-actions { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
-.cm-install { display: inline-block; margin-top: 1.2rem; padding: 0.4rem 0.8rem; font-size: 0.75rem; overflow-x: auto; max-width: 100%; }
+.md-header,
+.md-tabs {
+  background: var(--comind-ink);
+}
+
+/* The wordmark stands in for the site name. */
+.md-header__button.md-logo img {
+  height: 1.5rem;
+}
+
+.md-header__title .md-header__topic:first-child {
+  visibility: hidden;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: "Space Grotesk", var(--md-text-font-family), sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Landing page. */
+.cm-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 3rem;
+  align-items: center;
+  margin: 1.5rem 0 2.5rem;
+}
+
+.cm-eyebrow {
+  margin: 0 0 0.8rem;
+  font-family: var(--md-code-font-family);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .cm-title {
+  margin: 0 0 1rem;
+  font-size: 2.6rem;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  color: var(--md-default-fg-color);
+}
+
+.cm-dot {
+  color: var(--comind-green);
+}
+
+.md-typeset .cm-lede {
+  margin: 0 0 1.4rem;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--md-default-fg-color--light);
+}
+
+.cm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.md-typeset .cm-actions .md-button {
+  margin: 0;
+  border-radius: 0.4rem;
+  padding: 0.55em 1.4em;
+}
+
+.md-typeset .cm-actions .md-button--primary:hover {
+  background-color: var(--comind-green);
+  border-color: var(--comind-green);
+  color: #ffffff;
+}
+
+.md-typeset .cm-install {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.45em 0.9em;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.md-typeset .cm-install::before {
+  content: "$ ";
+  color: var(--md-default-fg-color--lighter);
+}
+
+/* The mark, large, with a soft glow of its own colours. */
+.cm-hero__mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.cm-hero__mark::before {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.22), rgba(163, 230, 53, 0.08) 60%, transparent 72%);
+  filter: blur(18px);
+}
+
+.cm-hero__mark img {
+  position: relative;
+  width: min(100%, 300px);
+  height: auto;
+}
+
+.cm-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  margin: 0 0 2.5rem;
+}
+
+.cm-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 1.1rem 1rem 1.1rem 0;
+}
+
+.cm-stats strong {
+  font-family: "Space Grotesk", var(--md-text-font-family), sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.cm-stats span {
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+@media screen and (max-width: 60em) {
+  .cm-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  .cm-hero__mark {
+    order: -1;
+  }
+
+  .cm-hero__mark img {
+    width: 160px;
+  }
+
+  .md-typeset .cm-title {
+    font-size: 2rem;
+  }
+
+  .cm-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Flat cards: hairline borders, the accent only on hover. */
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.6rem;
+  box-shadow: none;
+  transition: border-color 0.15s;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: none;
+}
+
+.md-typeset .grid.cards > ul > li > hr {
+  display: none;
+}
+
+.md-typeset pre > code,
+.md-typeset .highlight {
+  border-radius: 0.5rem;
+}
+
+/* The hero headline cycles through a few claims; one stays put for reduced motion. */
+.cm-rotate {
+  display: grid;
+}
+
+.cm-rotate > span {
+  grid-area: 1 / 1;
+  opacity: 0;
+  animation: cm-rotate 17.5s infinite;
+}
+
+.cm-rotate > span:nth-child(2) { animation-delay: 3.5s; }
+.cm-rotate > span:nth-child(3) { animation-delay: 7s; }
+.cm-rotate > span:nth-child(4) { animation-delay: 10.5s; }
+.cm-rotate > span:nth-child(5) { animation-delay: 14s; }
+
+@keyframes cm-rotate {
+  0% { opacity: 0; transform: translateY(0.25em); }
+  3%, 17% { opacity: 1; transform: none; }
+  20%, 100% { opacity: 0; transform: translateY(-0.25em); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-rotate > span { animation: none; }
+  .cm-rotate > span:first-child { opacity: 1; }
+}

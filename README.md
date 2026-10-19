@@ -1,13 +1,14 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="comind" width="104">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comind/main/assets/banner-dark.svg">
+    <img alt="comind: cross-repo code intelligence for coding agents" src="https://raw.githubusercontent.com/sayef/comind/main/assets/banner-light.svg" width="620">
   </picture>
 </p>
 
-<h1 align="center">comind</h1>
-
-<p align="center"><b>Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary.</b></p>
+<p align="center">
+  One versioned graph of all your team's repositories, in your own storage, served to coding agents over MCP.<br>
+  Who breaks if this changes, which services call this route, and what the team already learned about this code.
+</p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
@@ -278,9 +279,5 @@ MIT.
 
 ## Brand
 
-Logo/icon assets live in [`assets/`](assets/) — mark (`logo.svg` / `logo-dark.svg`), self-contained
-icon (`icon.svg`), wordmark + slogan lockups, and a social card (`og.svg`). They're generated from
-[`scripts/gen_brand.py`](scripts/gen_brand.py) (edit palette/geometry there); PNGs in
-[`assets/png/`](assets/png/) come from [`scripts/render_pngs.py`](scripts/render_pngs.py)
-(pure Python — `pip install pillow`, no browser). The graph glyph is adapted from the
-[Phosphor Icons](https://phosphoricons.com) `graph` glyph (MIT).
+The logo, wordmark, banners, icon and social preview live in [`assets/`](assets/); see
+[`assets/README.md`](assets/README.md).
