@@ -485,7 +485,20 @@ async fn ledger(Cur(s): Cur) -> Json<Value> {
     let entries = s.entries.read().await;
     let mut v: Vec<&Entry> = entries.iter().collect();
     v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
-    Json(json!(v))
+    Json(named(&s, &v))
+}
+
+/// Entries as JSON with each anchor named as the graph shows it (`Class.method`).
+fn named(s: &Session, entries: &[&Entry]) -> Value {
+    let mut v = json!(entries);
+    for e in v.as_array_mut().into_iter().flatten() {
+        for a in e["record"]["anchors"].as_array_mut().into_iter().flatten() {
+            if let Some(i) = a["symbol"].as_str().and_then(|id| s.data.graph.lookup(id)) {
+                a["name"] = json!(s.data.graph.node(i).name);
+            }
+        }
+    }
+    v
 }
 
 #[derive(Deserialize)]
@@ -623,7 +636,7 @@ async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
             "zoom": z,
             "graph": neighbourhood(&z),
             "ripple": {"total": ripple.len(), "repos": repos},
-            "ledger": about,
+            "ledger": named(&s, &about),
             "summary": summary,
             "flow": flow,
         })),
