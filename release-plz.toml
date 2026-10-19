@@ -8,6 +8,8 @@ semver_check = false
 changelog_update = true
 changelog_path = "CHANGELOG.md"
 publish = true
+# The built web UI (ui/dist) ships in the crate but is not committed.
+publish_allow_dirty = true
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true
