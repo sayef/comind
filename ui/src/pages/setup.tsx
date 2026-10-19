@@ -134,7 +134,7 @@ export function SetupPage() {
               ) : (
                 <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
               )}
-              <span className={c.ok ? "" : "text-muted-foreground"}>{c.message}</span>
+              <span className={`min-w-0 [overflow-wrap:anywhere] ${c.ok ? "" : "text-muted-foreground"}`}>{c.message}</span>
               {!c.ok && c.optional && <Badge variant="outline">optional</Badge>}
             </div>
           ))}

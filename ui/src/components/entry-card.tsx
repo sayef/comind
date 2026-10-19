@@ -164,7 +164,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
               </Button>
             </>
           )}
-          {review.data && !review.data.ok && <span className="text-xs text-danger">{review.data.message}</span>}
+          {review.data && !review.data.ok && <span className="text-xs text-danger [overflow-wrap:anywhere]">{review.data.message}</span>}
         </div>
       )}
       <Dialog open={deleting} onOpenChange={setDeleting}>
@@ -173,7 +173,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           <p className="mt-2 text-sm text-muted-foreground">
             “{r.title}” and its review history are removed from the ledger for everyone. To keep it as history, archive or invalidate it instead.
           </p>
-          {erase.data && !erase.data.ok && <p className="mt-2 text-xs text-danger">{erase.data.message}</p>}
+          {erase.data && !erase.data.ok && <p className="mt-2 text-xs text-danger [overflow-wrap:anywhere]">{erase.data.message}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setDeleting(false)}>
               Cancel

@@ -28,7 +28,7 @@ pub(super) struct Job {
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     (
         StatusCode::BAD_REQUEST,
-        Json(json!({"ok": false, "message": format!("{e:#}")})),
+        Json(json!({"ok": false, "message": super::error_text(&e)})),
     )
 }
 

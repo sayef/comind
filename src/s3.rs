@@ -152,8 +152,81 @@ impl CredentialProvider for Chain {
     }
 }
 
+/// When keys in the environment carry an expiry that has passed, the hint to drop them.
+fn expired_env_keys() -> Option<String> {
+    std::env::var_os("AWS_ACCESS_KEY_ID")?;
+    let at = std::env::var("AWS_CREDENTIAL_EXPIRATION").ok()?;
+    let t = chrono::DateTime::parse_from_rfc3339(&at).ok()?;
+    (t < chrono::Utc::now()).then(|| {
+        format!(
+            "the AWS keys in comind's environment (AWS_ACCESS_KEY_ID) expired at {at} and win over your \
+             profile; start comind from a shell without them"
+        )
+    })
+}
+
+/// A short, secret-free explanation of an error, with S3 error replies turned into what to do.
+pub fn explain(raw: &str) -> String {
+    let code = raw
+        .split("<Code>")
+        .nth(1)
+        .and_then(|r| r.split("</Code>").next())
+        .map(str::to_string);
+    let hint = match code.as_deref() {
+        Some("ExpiredToken") | Some("TokenRefreshRequired") => {
+            Some(expired_env_keys().unwrap_or_else(|| {
+                "your AWS credentials have expired; sign in again (`aws sso login`)".into()
+            }))
+        }
+        Some("AccessDenied") => Some(
+            "AWS denied access; check the AWS profile and its permissions on the bucket".into(),
+        ),
+        Some("NoSuchBucket") => {
+            Some("the S3 bucket does not exist (check the name and region)".into())
+        }
+        Some("InvalidAccessKeyId") | Some("SignatureDoesNotMatch") | Some("InvalidToken") => {
+            Some(expired_env_keys().unwrap_or_else(|| {
+                "AWS rejected the credentials; check the AWS profile or sign in again".into()
+            }))
+        }
+        _ => None,
+    };
+    match (hint, code) {
+        (Some(h), Some(c)) => format!("{h} (S3: {c})"),
+        _ => redact(raw),
+    }
+}
+
+/// Removes session tokens and other long credential-like strings.
+fn redact(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut word = String::new();
+    let flush = |w: &mut String, out: &mut String| {
+        let has = |f: fn(&char) -> bool| w.chars().any(|c| f(&c));
+        let secretish = w.len() >= 60
+            && has(char::is_ascii_uppercase)
+            && has(char::is_ascii_lowercase)
+            && has(char::is_ascii_digit);
+        out.push_str(if secretish { "[redacted]" } else { w.as_str() });
+        w.clear();
+    };
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || "+/=_-%".contains(c) {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
 /// Whether the chain can produce credentials now, with a hint when it cannot.
 pub fn check() -> Result<String, String> {
+    if let Some(hint) = expired_env_keys() {
+        return Err(hint);
+    }
     let Some(p) = aws().credentials.clone() else {
         return Err("no AWS credentials found (environment, ~/.aws profiles, SSO)".into());
     };
@@ -218,4 +291,29 @@ pub fn profiles() -> Vec<String> {
         }
     }
     names.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explains_s3_replies_without_secrets() {
+        let token = &"ExampleSessionToken0123456789".repeat(3);
+        let raw = format!(
+            "ListRequest: <Error><Code>ExpiredToken</Code><Token-0>{token}</Token-0></Error>"
+        );
+        let e = explain(&raw);
+        assert!(
+            e.contains("(S3: ExpiredToken)") && !e.contains(token),
+            "{e}"
+        );
+        let other = explain(&format!("connect failed: token={token} at s3://bucket/x"));
+        assert!(
+            !other.contains(token) && other.contains("s3://bucket/x"),
+            "{other}"
+        );
+        let path = format!("/home/{}", "long-folder-name-".repeat(6));
+        assert_eq!(explain(&path), path);
+    }
 }

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { Outcome } from "@/components/notice";
 import { api, attention, type OrgMap } from "@/lib/api";
 
 function Stat({ icon: Icon, label, value, hint }: { icon: typeof Boxes; label: string; value: string; hint?: string }) {
@@ -81,7 +82,7 @@ function JoinTeam() {
             Join
           </Button>
         </div>
-        {join.error && <p className="text-xs text-warning">{join.error.message}</p>}
+        <Outcome error={join.error} />
       </div>
     </Card>
   );

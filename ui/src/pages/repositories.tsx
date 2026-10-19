@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Outcome } from "@/components/notice";
 import { ApiError, api, type NeedsToken, pickFolder, type ScanHit } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
@@ -33,13 +34,7 @@ function FolderInput({ value, onChange, placeholder }: { value: string; onChange
 }
 
 function Message({ error, data }: { error: Error | null; data?: { message: string } }) {
-  if (error)
-    return (
-      <p className="flex items-start gap-1.5 text-xs text-warning">
-        <AlertTriangle className="mt-px size-3.5 shrink-0" /> {error.message}
-      </p>
-    );
-  return data ? <p className="text-xs text-muted-foreground">{data.message}</p> : null;
+  return <Outcome error={error} message={data?.message} />;
 }
 
 function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
