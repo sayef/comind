@@ -42,13 +42,18 @@ fn absolute(p: &str) -> String {
 pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
     let indexed: std::collections::HashMap<String, usize> =
         s.data.graph.repos().into_iter().collect();
-    let commits = match super::graph_uri(&s) {
-        Some(u) => crate::index::read_repo_commits(&u)
+    let meta = match super::graph_uri(&s) {
+        Some(u) => crate::index::read_indexed_repos(&u)
             .await
             .unwrap_or_default(),
-        None => Default::default(),
+        None => Vec::new(),
     };
+    let commits: std::collections::HashMap<String, String> = meta
+        .iter()
+        .map(|r| (r.name.clone(), r.commit.clone()))
+        .collect();
     let repos = Config::load().repos;
+    let symbols = indexed.clone();
     let rows = tokio::task::spawn_blocking(move || {
         repos
             .iter()
@@ -62,7 +67,7 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
                     "branch": r.branch.clone().or_else(|| worktree::default_branch(p).ok()),
                     "your_branch": worktree::current_branch(p),
                     "remote": worktree::remote_url(p),
-                    "symbols": indexed.get(&name),
+                    "symbols": symbols.get(&name),
                     "indexed_commit": commits.get(&name),
                 })
             })
@@ -70,15 +75,38 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
     })
     .await
     .unwrap_or_default();
-    let others: Vec<String> = s
-        .data
-        .graph
-        .repos()
-        .into_iter()
-        .map(|(r, _)| r)
-        .filter(|r| !rows.iter().any(|x| x["name"] == *r))
+    let listed: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r["name"].as_str().map(str::to_string))
         .collect();
-    Json(json!({ "repos": rows, "unlisted": others, "root": s.data.root }))
+    Json(json!({
+        "repos": rows,
+        "unlisted": unlisted(&indexed, &meta, &listed),
+        "root": s.data.root,
+    }))
+}
+
+/// Repositories in the index with no folder in your list: name, symbols, commit and remote URL.
+fn unlisted(
+    indexed: &std::collections::HashMap<String, usize>,
+    meta: &[crate::index::IndexedRepo],
+    listed: &[String],
+) -> Vec<Value> {
+    let mut names: Vec<&String> = indexed.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .filter(|n| !listed.contains(n))
+        .map(|n| {
+            let m = meta.iter().find(|r| &r.name == n);
+            json!({
+                "name": n,
+                "symbols": indexed.get(n),
+                "commit": m.map(|r| &r.commit),
+                "remote": m.and_then(|r| r.remote.as_ref()),
+            })
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -226,10 +254,13 @@ pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
 pub(super) struct IndexQ {
     #[serde(default)]
     llm: bool,
+    /// Index without the repositories that have no folder here, dropping them from the index.
+    #[serde(default)]
+    drop_unlisted: bool,
 }
 
 pub(super) async fn start(State(app): State<Shared>, Json(q): Json<IndexQ>) -> impl IntoResponse {
-    match begin(&app, q.llm, None).await {
+    match begin(&app, q.llm, q.drop_unlisted, None).await {
         Ok(()) => (
             StatusCode::OK,
             Json(json!({"ok": true, "message": "indexing started"})),
@@ -240,15 +271,31 @@ pub(super) async fn start(State(app): State<Shared>, Json(q): Json<IndexQ>) -> i
 
 /// Start `comind link` over the listed repositories into the loaded index; the page follows
 /// `/api/index` and the UI switches to the new index when it succeeds. `why` opens the log.
-pub(super) async fn begin(app: &Shared, llm: bool, why: Option<String>) -> anyhow::Result<()> {
-    let root = app
-        .current
-        .read()
-        .await
-        .data
-        .root
-        .clone()
-        .context("read-only UI")?;
+pub(super) async fn begin(
+    app: &Shared,
+    llm: bool,
+    drop_unlisted: bool,
+    why: Option<String>,
+) -> anyhow::Result<()> {
+    let session = app.current.read().await.clone();
+    let root = session.data.root.clone().context("read-only UI")?;
+    if !drop_unlisted {
+        let indexed = session.data.graph.repos().into_iter().collect();
+        let listed: Vec<String> = Config::load()
+            .repos
+            .iter()
+            .map(|r| worktree::name(Path::new(&r.path)))
+            .collect();
+        let missing: Vec<String> = unlisted(&indexed, &[], &listed)
+            .iter()
+            .filter_map(|r| r["name"].as_str().map(str::to_string))
+            .collect();
+        anyhow::ensure!(
+            missing.is_empty(),
+            "no folder here for {}, which the index has; add them first, or drop them from the index",
+            missing.join(", ")
+        );
+    }
     {
         let mut j = app.job.lock().await;
         anyhow::ensure!(!j.running, "indexing is already running");
@@ -331,7 +378,7 @@ pub(super) async fn watch(app: Shared) {
             Ok(m) if m.is_empty() => "every default branch is indexed".to_string(),
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
-                match begin(&app, false, Some(why.clone())).await {
+                match begin(&app, false, false, Some(why.clone())).await {
                     Ok(()) => why,
                     Err(e) => format!("{why}, not started: {e:#}"),
                 }
