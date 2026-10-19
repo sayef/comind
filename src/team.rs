@@ -1,12 +1,10 @@
 //! Team settings, stored with the index (`<index>/_team`, a versioned LanceDB table) so everyone
-//! using it gets the same LLM, embedding model and key. Secrets are sealed with the team password:
-//! Argon2id derives the key (salted), XChaCha20-Poly1305 encrypts.
+//! using it runs the same LLM, embedding model and LLM steps. No secrets: each member's API key
+//! comes from their own credentials file or environment.
 
 use std::sync::{Arc, OnceLock, RwLock};
 
 use anyhow::{bail, Result};
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
 use futures::TryStreamExt;
 use lancedb::arrow::arrow_array::{ArrayRef, RecordBatch, StringArray};
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
@@ -32,28 +30,6 @@ pub struct TeamSettings {
     pub flows: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guide: Option<bool>,
-    /// Secrets, encrypted with the team password.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sealed: Option<Sealed>,
-}
-
-/// The secrets, in the clear only in memory.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Secrets {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm_api_key: Option<String>,
-}
-
-/// Encrypted secrets with what is needed to derive their key again from the password.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Sealed {
-    pub kdf: String,
-    pub m_kib: u32,
-    pub t: u32,
-    pub p: u32,
-    pub salt: String,
-    pub nonce: String,
-    pub data: String,
 }
 
 /// The stored settings with the table version they came from and who saved them.
@@ -63,78 +39,6 @@ pub struct Stored {
     pub version: Option<u64>,
     pub changed_by: Option<String>,
     pub changed_at: Option<String>,
-}
-
-fn random<const N: usize>() -> Result<[u8; N]> {
-    let mut b = [0u8; N];
-    getrandom::fill(&mut b).map_err(|e| anyhow::anyhow!("random bytes: {e}"))?;
-    Ok(b)
-}
-
-/// Seven random words from the BIP39 list: about 77 bits.
-pub fn passphrase() -> Result<String> {
-    let words = bip39::Language::English.word_list();
-    let bytes = random::<14>()?;
-    Ok(bytes
-        .chunks(2)
-        .map(|c| words[(u16::from_le_bytes([c[0], c[1]]) % 2048) as usize])
-        .collect::<Vec<_>>()
-        .join("-"))
-}
-
-fn derive(password: &str, salt: &[u8], m_kib: u32, t: u32, p: u32) -> Result<[u8; 32]> {
-    let params = argon2::Params::new(m_kib, t, p, Some(32))
-        .map_err(|e| anyhow::anyhow!("argon2 parameters: {e}"))?;
-    let a = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    let mut key = [0u8; 32];
-    a.hash_password_into(password.as_bytes(), salt, &mut key)
-        .map_err(|e| anyhow::anyhow!("argon2: {e}"))?;
-    Ok(key)
-}
-
-/// Encrypt `secrets` under `password` with a fresh salt and nonce.
-pub fn seal(secrets: &Secrets, password: &str) -> Result<Sealed> {
-    use chacha20poly1305::aead::{Aead, KeyInit};
-    let (m_kib, t, p) = (64 * 1024, 3, 1);
-    let salt = random::<16>()?;
-    let nonce = random::<24>()?;
-    let key = derive(password, &salt, m_kib, t, p)?;
-    let cipher = chacha20poly1305::XChaCha20Poly1305::new(&chacha20poly1305::Key::from(key));
-    let plain = serde_json::to_vec(secrets)?;
-    let data = cipher
-        .encrypt(&chacha20poly1305::XNonce::from(nonce), plain.as_ref())
-        .map_err(|_| anyhow::anyhow!("encryption failed"))?;
-    Ok(Sealed {
-        kdf: "argon2id".into(),
-        m_kib,
-        t,
-        p,
-        salt: B64.encode(salt),
-        nonce: B64.encode(nonce),
-        data: B64.encode(data),
-    })
-}
-
-/// Decrypt with `password`; a wrong password fails here.
-pub fn open(sealed: &Sealed, password: &str) -> Result<Secrets> {
-    use chacha20poly1305::aead::{Aead, KeyInit};
-    if sealed.kdf != "argon2id" {
-        bail!("unknown key derivation `{}`", sealed.kdf);
-    }
-    let salt = B64.decode(&sealed.salt)?;
-    let nonce: [u8; 24] = B64
-        .decode(&sealed.nonce)?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("bad nonce"))?;
-    let key = derive(password, &salt, sealed.m_kib, sealed.t, sealed.p)?;
-    let cipher = chacha20poly1305::XChaCha20Poly1305::new(&chacha20poly1305::Key::from(key));
-    let plain = cipher
-        .decrypt(
-            &chacha20poly1305::XNonce::from(nonce),
-            B64.decode(&sealed.data)?.as_ref(),
-        )
-        .map_err(|_| anyhow::anyhow!("wrong team password"))?;
-    Ok(serde_json::from_slice(&plain)?)
 }
 
 fn uri(root: &str) -> String {
@@ -192,99 +96,33 @@ pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) ->
     crate::index::write_versioned(&db, TABLE, batch).await
 }
 
-/// The team password: `COMIND_TEAM_PASSWORD`, else the one stored for this team's name.
-pub fn password(settings: &TeamSettings) -> Option<String> {
-    if let Ok(p) = std::env::var("COMIND_TEAM_PASSWORD") {
-        return Some(p).filter(|p| !p.is_empty());
-    }
-    crate::credentials::password(settings.name.as_deref()?)
-}
-
-/// Remember the team password on this machine, under the team's name.
-pub fn remember_password(settings: &TeamSettings, password: &str) -> Result<()> {
-    let name = settings
-        .name
-        .as_deref()
-        .filter(|n| !n.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("give the team a name first"))?;
-    crate::credentials::set_password(name, password)
-}
-
-/// The team settings in effect for this process, with their secrets when unlocked.
-#[derive(Debug, Clone, Default)]
-pub struct Active {
-    pub settings: TeamSettings,
-    pub secrets: Option<Secrets>,
-    /// Why the secrets are not available (no password, wrong password).
-    pub locked: Option<String>,
-}
-
-fn active() -> &'static RwLock<Option<Active>> {
-    static A: OnceLock<RwLock<Option<Active>>> = OnceLock::new();
+fn active() -> &'static RwLock<Option<TeamSettings>> {
+    static A: OnceLock<RwLock<Option<TeamSettings>>> = OnceLock::new();
     A.get_or_init(|| RwLock::new(None))
 }
 
-/// The settings `Config` should prefer, if a team index was loaded.
-pub fn current() -> Option<Active> {
+/// The team settings this process runs with, if its index has any.
+pub fn current() -> Option<TeamSettings> {
     active().read().ok().and_then(|a| a.clone())
 }
 
-/// Load the team settings of `root`, unlock their secrets if a password is known, and make them
-/// the ones this process uses.
-pub fn apply(root: &str) -> Result<Option<Active>> {
+/// Use the team settings of the index at `root` in this process.
+pub fn apply(root: &str) -> Result<()> {
     let stored = crate::ledger::runtime()?.block_on(load(root))?;
-    let a = unlock(&stored.settings, password(&stored.settings).as_deref());
-    if let Ok(mut g) = active().write() {
-        *g = Some(a.clone());
-    }
-    Ok(Some(a))
+    set_current(stored.settings);
+    Ok(())
 }
 
-/// The settings with their secrets opened by `password`, or why they stay locked.
-pub fn unlock(settings: &TeamSettings, password: Option<&str>) -> Active {
-    let (secrets, locked) = match (&settings.sealed, password) {
-        (None, _) => (None, None),
-        (Some(_), None) => (None, Some("enter the team password".to_string())),
-        (Some(s), Some(p)) => match open(s, p) {
-            Ok(x) => (Some(x), None),
-            Err(e) => (None, Some(format!("{e:#}"))),
-        },
-    };
-    Active {
-        settings: settings.clone(),
-        secrets,
-        locked,
-    }
-}
-
-/// Replace the process's active team settings (after a save from the UI).
-pub fn set_current(a: Active) {
+/// Replace the process's team settings (after a save or a switch from the UI).
+pub fn set_current(settings: TeamSettings) {
     if let Ok(mut g) = active().write() {
-        *g = Some(a);
+        *g = Some(settings);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn seal_open_and_reject_wrong_password() {
-        let s = Secrets {
-            llm_api_key: Some("sk-test".into()),
-        };
-        let pw = passphrase().unwrap();
-        assert_eq!(pw.split('-').count(), 7);
-        let sealed = seal(&s, &pw).unwrap();
-        assert!(!sealed.data.contains("sk-test"));
-        assert_eq!(
-            open(&sealed, &pw).unwrap().llm_api_key.as_deref(),
-            Some("sk-test")
-        );
-        assert!(open(&sealed, "wrong").is_err());
-        let again = seal(&s, &pw).unwrap();
-        assert_ne!(again.salt, sealed.salt, "every seal gets a fresh salt");
-    }
 
     #[tokio::test]
     async fn save_load_and_refuse_a_stale_write() {
@@ -295,8 +133,7 @@ mod tests {
             ..Default::default()
         };
         let v1 = save(root, &first, None).await.unwrap();
-        let loaded = load(root).await.unwrap();
-        assert_eq!(loaded.settings, first);
+        assert_eq!(load(root).await.unwrap().settings, first);
         let second = TeamSettings {
             llm_model: Some("m2".into()),
             ..Default::default()

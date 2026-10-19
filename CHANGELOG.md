@@ -27,9 +27,9 @@ All notable changes to this project are documented here. The format follows
 - Repositories and Settings in the app: scan a folder and pick repositories, clone, index with progress
   (each repository's default branch in comind's own worktree), and settings for the index location, AWS
   profile and name; `comind repos` and `comind link` with no folders.
-- Team settings stored with the index (LLM, embedding model, LLM steps and an API key encrypted with a
-  generated team password), which win over personal ones; `comind team`, `comind join` and a Join flow in
-  the app.
+- Team settings stored with the index (LLM, embedding model, LLM steps), which win over personal ones;
+  API keys stay per person in `~/.config/comind/credentials` or `OPENAI_API_KEY`; `comind team`,
+  `comind join` and a Join flow in the app.
 - S3 through the standard AWS chain (profiles, SSO, `credential_process`, custom endpoints such as MinIO).
 - A desktop app on macOS (`comind app`: the web UI in a native WebKit window), the local web UI
   (`comind ui --web [--open]`, guarded by an access token) and the terminal UI (`comind ui`): a React app embedded in the binary,

@@ -1,5 +1,5 @@
-//! `~/.config/comind/credentials`: the password of each team this machine belongs to, by team name.
-//! Created readable only by you; API keys never go here (they are in the team settings, encrypted).
+//! `~/.config/comind/credentials`: your LLM API keys, a default and optionally one per team name.
+//! Created readable only by you and never shared; `OPENAI_API_KEY` is the fallback.
 
 use std::path::PathBuf;
 
@@ -8,14 +8,16 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    llm_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     team: Vec<Entry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
     name: String,
-    password: String,
+    llm_api_key: String,
 }
 
 pub fn path() -> PathBuf {
@@ -32,29 +34,54 @@ fn read() -> File {
         .unwrap_or_default()
 }
 
-/// The password stored for team `name`.
-pub fn password(name: &str) -> Option<String> {
-    read()
-        .team
-        .into_iter()
-        .find(|e| e.name == name)
-        .map(|e| e.password)
+/// Where an API key comes from, for display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Team,
+    Default,
+    Environment,
+    None,
 }
 
-/// Store the password for team `name` (an empty one removes the entry).
-pub fn set_password(name: &str, password: &str) -> Result<()> {
+/// The API key for `team` (a team name): its entry, else the default, else `OPENAI_API_KEY`.
+pub fn llm_key(team: Option<&str>) -> (Option<String>, Source) {
+    let f = read();
+    if let Some(k) = team.and_then(|t| f.team.iter().find(|e| e.name == t)) {
+        return (Some(k.llm_api_key.clone()), Source::Team);
+    }
+    if let Some(k) = f.llm_api_key.filter(|k| !k.is_empty()) {
+        return (Some(k), Source::Default);
+    }
+    match std::env::var("OPENAI_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+    {
+        Some(k) => (Some(k), Source::Environment),
+        None => (None, Source::None),
+    }
+}
+
+/// Store `key` for `team`, or as the default without one; an empty key removes it.
+pub fn set_llm_key(team: Option<&str>, key: &str) -> Result<()> {
     let mut f = read();
-    f.team.retain(|e| e.name != name);
-    if !password.trim().is_empty() {
-        f.team.push(Entry {
-            name: name.to_string(),
-            password: password.trim().to_string(),
-        });
+    let key = key.trim();
+    match team {
+        Some(t) => {
+            f.team.retain(|e| e.name != t);
+            if !key.is_empty() {
+                f.team.push(Entry {
+                    name: t.to_string(),
+                    llm_api_key: key.to_string(),
+                });
+            }
+        }
+        None => f.llm_api_key = (!key.is_empty()).then(|| key.to_string()),
     }
     let p = path();
     std::fs::create_dir_all(p.parent().context("config dir")?)?;
     let text = format!(
-        "# comind team passwords, one entry per team. Keep this file private.\n\n{}",
+        "# comind API keys: a default, and one per team name if needed. Keep this file private.\n\n{}",
         toml::to_string(&f)?
     );
     let tmp = p.with_extension("tmp");

@@ -190,7 +190,6 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/index/watch", get(repos::watch_state))
         .route("/api/team", get(team::get).post(team::save))
         .route("/api/team/key", post(team::key))
-        .route("/api/team/unlock", post(team::unlock))
         .route("/api/join", post(team::join))
         .route("/api/aws", get(aws::status))
         .route("/api/aws/login", post(aws::start))

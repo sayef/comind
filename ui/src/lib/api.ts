@@ -158,7 +158,7 @@ export interface Settings {
   record_names: boolean;
   llm_base_url: string | null;
   llm_model: string;
-  llm_key: "environment" | "none";
+  llm_key: KeySource;
   cache_ttl_secs: number;
   auto_index: boolean;
   sso_auto_login: boolean;
@@ -175,11 +175,12 @@ export interface TeamSettings {
   guide?: boolean;
 }
 
+/** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
+export type KeySource = "team" | "default" | "environment" | "none";
+
 export interface Team {
   settings: TeamSettings;
-  has_key: boolean;
-  unlocked: boolean;
-  locked: string | null;
+  key_source: KeySource;
   version: number | null;
   changed_by: string | null;
   changed_at: string | null;
@@ -314,9 +315,8 @@ export const api = {
   aws: () => get<AwsStatus>("/api/aws"),
   team: () => get<Team>("/api/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/team", { settings, version }),
-  teamKey: (key: string) => post<{ ok: boolean; message: string; password: string | null }>("/api/team/key", { key }),
-  teamUnlock: (password: string) => post("/api/team/unlock", { password }),
-  join: (index: string, password: string, aws_profile: string) => post("/api/join", { index, password, aws_profile }),
+  saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/team/key", { key }),
+  join: (index: string, aws_profile: string) => post("/api/join", { index, aws_profile }),
   awsLogin: () => post("/api/aws/login", {}),
   saveSettings: (c: SettingsChange) => post("/api/settings", c),
   testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),

@@ -49,19 +49,12 @@ impl LlmClient {
     /// [`crate::config`] (env → `config.toml` → default); the key stays env-only
     /// (`OPENAI_API_KEY`).
     pub fn from_env() -> Result<Self> {
-        // The team's key wins; `OPENAI_API_KEY` from the environment only without a team key.
-        let team = crate::team::current();
-        if let Some(t) = &team {
-            if t.settings.sealed.is_some() && t.secrets.is_none() {
-                anyhow::bail!(
-                    "the team's LLM key is locked: {} (`comind team unlock`)",
-                    t.locked.as_deref().unwrap_or("enter the team password")
-                );
+        // Your key for this team (credentials file), else your default key, else OPENAI_API_KEY.
+        let team = crate::team::current().and_then(|t| t.name);
+        if let (Some(k), source) = crate::credentials::llm_key(team.as_deref()) {
+            if source != crate::credentials::Source::Environment {
+                std::env::set_var("OPENAI_API_KEY", k);
             }
-        }
-        let team_key = team.and_then(|t| t.secrets).and_then(|s| s.llm_api_key);
-        if let Some(k) = team_key {
-            std::env::set_var("OPENAI_API_KEY", k);
         }
         let cfg = crate::config::Config::load();
         let model = cfg.llm_model();

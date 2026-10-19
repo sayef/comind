@@ -40,12 +40,6 @@ aws-config = "1"
 aws-credential-types = "1"
 async-trait = "0.1"
 toml_edit = "0.25"
-# Team secrets: Argon2id from the team password, XChaCha20-Poly1305 for the data.
-argon2 = "0.6"
-chacha20poly1305 = "0.11"
-getrandom = "0.3"
-base64 = "0.22"
-bip39 = { version = "3", default-features = false }
 rpassword = "7"
 rayon = "1"
 ignore = "0.4"

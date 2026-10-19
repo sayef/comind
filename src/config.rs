@@ -228,7 +228,7 @@ pub fn update(changes: &[(&str, Setting)]) -> Result<()> {
 
 /// A team setting, which wins over personal ones so everyone on an index runs the same.
 fn team<T>(pick: impl Fn(&crate::team::TeamSettings) -> Option<T>) -> Option<T> {
-    crate::team::current().and_then(|a| pick(&a.settings))
+    crate::team::current().and_then(|t| pick(&t))
 }
 
 /// The web UI's access token for browsers: created once, so bookmarks keep working.

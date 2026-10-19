@@ -24,15 +24,12 @@ pub(super) async fn get(Cur(s): Cur) -> Json<Value> {
     let remote = root.starts_with("s3://");
     let (aws, key) = tokio::task::spawn_blocking(move || {
         let aws = remote.then(crate::s3::check);
-        let key = if std::env::var_os("OPENAI_API_KEY").is_some() {
-            "environment"
-        } else {
-            "none"
-        };
+        let team = crate::team::current().and_then(|t| t.name);
+        let key = crate::credentials::llm_key(team.as_deref()).1;
         (aws, key)
     })
     .await
-    .unwrap_or((None, "none"));
+    .unwrap_or((None, crate::credentials::Source::None));
     Json(json!({
         "config_path": crate::config::config_path(),
         "index_dir": cfg.index_dir,

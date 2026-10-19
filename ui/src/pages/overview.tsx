@@ -49,21 +49,20 @@ function linkDiff(then: OrgMap, now: OrgMap) {
   return { added: [...b].filter((k) => !a.has(k)), gone: [...a].filter((k) => !b.has(k)) };
 }
 
-/** First run: use the team's index (its location and, if it has a key, the team password). */
+/** First run: use the team's index. */
 function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
-  const [password, setPassword] = useState("");
   const [profile, setProfile] = useState("");
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const s3 = index.trim().startsWith("s3://");
-  const join = useMutation({ mutationFn: () => api.join(index, password, s3 ? profile : ""), onSuccess: () => qc.invalidateQueries() });
+  const join = useMutation({ mutationFn: () => api.join(index, s3 ? profile : ""), onSuccess: () => qc.invalidateQueries() });
   return (
     <Card className="w-full p-4 text-left">
       <div className="text-sm font-medium">Join a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        The team's index location, the AWS profile for an S3 index (sign in with `aws sso login` first), and the team password if
-        the team keeps an LLM key.
+        The team's index location and, for an S3 index, the AWS profile (sign in with `aws sso login` first). Your LLM key stays
+        on this machine, in Settings.
       </p>
       <div className="mt-3 flex flex-col gap-2">
         <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comind or a folder" className="font-mono text-xs" />
@@ -77,7 +76,6 @@ function JoinTeam() {
             ))}
           </select>
         )}
-        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Team password (optional)" />
         <div>
           <Button variant="brand" disabled={!index.trim() || join.isPending} onClick={() => join.mutate()}>
             Join

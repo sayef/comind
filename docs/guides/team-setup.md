@@ -36,36 +36,58 @@ comind init-hooks claude                                # Claude Code hooks to p
 ## Team settings
 
 Settings everyone on an index must share live with the index (`<index>/_team`, a versioned LanceDB
-table), so every member, CI job and agent runs the same: the LLM endpoint and model, the LLM API key,
-the embedding model (an index's vectors only work with the model that made them) and which LLM steps
-run while indexing. They win over personal settings. Your own `config.toml` keeps what is personal:
-the index location, AWS profile, your name and app preferences.
+table), so every member, CI job and agent runs the same: the LLM endpoint and model, the embedding model
+(an index's vectors only work with the model that made them) and which LLM steps run while indexing. They
+win over personal settings. Your own `config.toml` keeps what is personal: the index location, AWS
+profile, your name and app preferences.
+
+The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
+the trust boundary.
 
 Set them once, in the app (Settings → Team) or from the terminal:
 
 ```sh
-comind team set name="Platform" llm_model=gpt-6-sol enrich=true
-comind team set-key            # prompts for the API key; generates the team password (shown once)
-comind team                    # what is set, and whether this machine can unlock the key
+comind team set name="Platform" llm_model=gpt-6-luna enrich=true
+comind team                    # what is set, and where your API key comes from
 ```
-
-The API key is encrypted with the team password (Argon2id with a random salt, then
-XChaCha20-Poly1305). comind generates the password the first time and shows it once: copy it and share it
-with your team. The key itself is never shown again. If the key leaks, replace it at the provider and set
-the new one with `comind team set-key`.
 
 Saving needs write access to the index; two people saving at once cannot overwrite each other (the
 second save is refused and asks to reload).
 
+### API keys
+
+Everyone brings their own LLM API key. comind looks for it, in order:
+
+1. the entry for the team's name in `~/.config/comind/credentials`,
+2. the default key in that file,
+3. `OPENAI_API_KEY`.
+
+The file is created readable only by you. Set it from the app (Settings → Your API key) or the terminal:
+
+```sh
+comind team key              # prompts for the key; stored under the team's name
+comind team key --default    # your default key, for any team
+```
+
+```toml
+# ~/.config/comind/credentials
+llm_api_key = "sk-..."       # default
+
+[[team]]
+name = "Platform"
+llm_api_key = "sk-..."
+```
+
+CI sets `OPENAI_API_KEY` from its secret store.
+
 ### Joining
 
-A colleague needs only the index location, their own cloud access and the team password:
+A colleague needs only the index location and their own cloud access:
 
 ```sh
 aws sso login --profile team-dev                        # their own access to the bucket
-comind join s3://bucket/comind --profile team-dev      # remembers both, asks for the team password once
+comind join s3://bucket/comind --profile team-dev      # remembers both
 ```
 
-or, in the app, **Join a team** on the first screen (index location, AWS profile, team password). Each machine keeps the passwords of its teams in
-`~/.config/comind/credentials` (team name and password, readable only by you); CI takes the password from
-`COMIND_TEAM_PASSWORD`. A team needs a name before its key is set, since that is how the entry is found.
+or, in the app, **Join a team** on the first screen (index location, AWS profile). For LLM steps they add
+their own API key as above.

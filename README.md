@@ -146,8 +146,8 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comind repos [add <folders…> [--branch b] \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comind link` indexes when given no folders |
 | `comind app [--index-dir <dir>]` | The UI in its own window (macOS) |
-| `comind team [set k=v… \| set-key \| unlock]` | Team settings stored with the index: LLM, key (encrypted with the team password), embedding model |
-| `comind join <index> [--profile p]` | Use a team's index on this machine and unlock its key |
+| `comind team [set k=v… \| key]` | Team settings stored with the index (LLM, embedding model, LLM steps); `key` stores your own API key |
+| `comind join <index> [--profile p]` | Use a team's index on this machine |
 | `comind ui [--web [--port 7878] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comind config <path\|init>` | Show or scaffold the config file |
 

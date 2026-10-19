@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, KeyRound } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TeamSection } from "@/components/team-settings";
+import { ApiKey, TeamSection } from "@/components/team-settings";
 import { api, type SettingsChange } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
@@ -43,7 +43,7 @@ function Section({ title, description, children }: { title: string; description?
 export function SettingsPage() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
-  const teamLlm = !!(team.data?.has_key || team.data?.settings.llm_model || team.data?.settings.llm_base_url);
+  const teamLlm = !!(team.data?.settings.llm_model || team.data?.settings.llm_base_url);
   const s = settings.data;
   const saveIndex = useSave();
   const saveAws = useSave();
@@ -158,8 +158,9 @@ export function SettingsPage() {
       {teamLlm ? (
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
-            LLM: the team's settings apply (model {team.data?.settings.llm_model ?? "default"}
-            {team.data?.has_key ? ", the team's key" : ""}), so everyone gets the same results.
+            LLM: the team's settings apply (model {team.data?.settings.llm_model ?? s.defaults.llm_model}), so everyone gets the same
+            results with their own key.
+            <ApiKey />
           </CardContent>
         </Card>
       ) : (
@@ -183,11 +184,7 @@ export function SettingsPage() {
           </Button>
         </div>
         {result(saveLlm)}
-        <p className="flex items-center gap-1.5 border-t pt-3 text-xs text-muted-foreground">
-          <KeyRound className="size-3.5" />
-          API key: {s.llm_key === "environment" ? "from OPENAI_API_KEY in the environment" : "not set"}. A team keeps its key in the
-          Team settings above.
-        </p>
+        <ApiKey />
       </Section>
       )}
 

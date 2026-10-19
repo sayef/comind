@@ -281,14 +281,14 @@ enum Cmd {
         #[arg(long)]
         open: bool,
     },
-    /// Team settings shared by everyone using this index: LLM, embedding model, the team's key
+    /// Team settings shared by everyone using this index (LLM, embedding model), and your own API key
     Team {
         #[command(subcommand)]
         what: Option<TeamWhat>,
         #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
     },
-    /// Use a team's index on this machine: remember its location and unlock its key
+    /// Use a team's index on this machine: remember its location and AWS profile
     Join {
         /// The team's index (s3://bucket/prefix or a folder)
         index: String,
@@ -393,16 +393,14 @@ enum TeamWhat {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
     },
-    /// Store the team's LLM API key, encrypted with the team password (one is generated the first time)
-    SetKey {
+    /// Store your LLM API key for this team in ~/.config/comind/credentials (never shared)
+    Key {
         /// Read the key from stdin instead of prompting
         #[arg(long)]
         stdin: bool,
-    },
-    /// Enter the team password once; this machine remembers it (~/.config/comind/credentials)
-    Unlock {
+        /// Store it as your default key, for every index
         #[arg(long)]
-        stdin: bool,
+        default: bool,
     },
 }
 
@@ -1674,12 +1672,6 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
     let rt = comind::ledger::runtime()?;
     let stored = rt.block_on(team::load(root))?;
     let mut s = stored.settings.clone();
-    let password = || -> anyhow::Result<String> {
-        match team::password(&stored.settings) {
-            Some(p) => Ok(p),
-            None => read_secret("COMIND_TEAM_PASSWORD", false, "Team password: "),
-        }
-    };
     match what {
         None => {
             comind::ui::header(&format!("Team settings of {root}"));
@@ -1702,20 +1694,31 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
             for (k, v) in [("enrich", s.enrich), ("flows", s.flows), ("guide", s.guide)] {
                 show(k, v.map(|b| b.to_string()), "true");
             }
-            let key = match &s.sealed {
-                None => "not set".to_string(),
-                Some(_) => match team::unlock(&s, team::password(&s).as_deref()) {
-                    a if a.secrets.is_some() => "set, unlocked on this machine".into(),
-                    a => format!("set, locked ({})", a.locked.unwrap_or_default()),
-                },
+            let source = match comind::credentials::llm_key(s.name.as_deref()).1 {
+                comind::credentials::Source::Team => "your key for this team (credentials file)",
+                comind::credentials::Source::Default => "your default key (credentials file)",
+                comind::credentials::Source::Environment => "OPENAI_API_KEY",
+                comind::credentials::Source::None => "none: `comind team key`",
             };
-            comind::ui::field("llm_api_key", &key);
+            comind::ui::field("api key on this machine", source);
             if let (Some(by), Some(at)) = (stored.changed_by, stored.changed_at) {
                 comind::ui::note(&format!(
                     "last changed by {by} at {}",
                     &at[..at.len().min(16)]
                 ));
             }
+            return Ok(());
+        }
+        Some(TeamWhat::Key { stdin, default }) => {
+            let team = if default { None } else { s.name.clone() };
+            let key = read_secret("COMIND_NEW_LLM_KEY", stdin, "LLM API key: ")?;
+            comind::credentials::set_llm_key(team.as_deref(), &key)?;
+            let r#for = team.map_or("your default".to_string(), |t| format!("team {t}"));
+            comind::ui::ok(&format!(
+                "key saved for {} in {}",
+                r#for,
+                comind::credentials::path().display()
+            ));
             return Ok(());
         }
         Some(TeamWhat::Set { pairs }) => {
@@ -1749,63 +1752,10 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 }
             }
         }
-        Some(TeamWhat::SetKey { stdin }) => {
-            let (mut secrets, pw) = match &s.sealed {
-                Some(sealed) => {
-                    let pw = password()?;
-                    (team::open(sealed, &pw)?, pw)
-                }
-                // A password from the environment (CI, scripts) is used as is; otherwise one is generated.
-                None => match std::env::var("COMIND_TEAM_PASSWORD")
-                    .ok()
-                    .filter(|p| !p.is_empty())
-                {
-                    Some(p) => (team::Secrets::default(), p),
-                    None => (team::Secrets::default(), team::passphrase()?),
-                },
-            };
-            let from_env = std::env::var_os("COMIND_TEAM_PASSWORD").is_some();
-            anyhow::ensure!(
-                s.name.as_deref().is_some_and(|n| !n.trim().is_empty()),
-                "give the team a name first: `comind team set name=…`"
-            );
-            let key = read_secret("COMIND_NEW_LLM_KEY", stdin, "Team LLM API key: ")?;
-            secrets.llm_api_key = Some(key);
-            let first = s.sealed.is_none();
-            s.sealed = Some(team::seal(&secrets, &pw)?);
-            rt.block_on(team::save(root, &s, stored.version))?;
-            if !from_env {
-                team::remember_password(&s, &pw)?;
-            }
-            comind::ui::ok("team LLM key saved, encrypted");
-            if first && !from_env {
-                print_new_password(&pw);
-            }
-            return Ok(());
-        }
-        Some(TeamWhat::Unlock { stdin }) => {
-            let sealed = s
-                .sealed
-                .as_ref()
-                .context("this team has no encrypted settings yet")?;
-            let pw = read_secret("COMIND_TEAM_PASSWORD", stdin, "Team password: ")?;
-            team::open(sealed, &pw)?;
-            team::remember_password(&s, &pw)?;
-            comind::ui::ok("unlocked; this machine remembers the team password");
-            return Ok(());
-        }
     }
     rt.block_on(team::save(root, &s, stored.version))?;
     comind::ui::ok("team settings saved; everyone using this index gets them");
     Ok(())
-}
-
-fn print_new_password(pw: &str) {
-    comind::ui::header("Team password (shown once)");
-    println!("  {pw}");
-    comind::ui::note(
-        "Share it out of band, e.g. in your password manager; CI uses COMIND_TEAM_PASSWORD.",
-    );
 }
 
 fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
@@ -1824,15 +1774,12 @@ fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
             personal.push(("aws_profile", comind::config::Setting::Text(p.to_string())));
         }
         comind::config::update(&personal)?;
-        let name = stored.settings.name.clone().unwrap_or_else(|| root.clone());
-        comind::ui::ok(&format!("joined {name}"));
-        if let Some(sealed) = &stored.settings.sealed {
-            if comind::team::password(&stored.settings).is_none() {
-                let pw = read_secret("COMIND_TEAM_PASSWORD", false, "Team password: ")?;
-                comind::team::open(sealed, &pw)?;
-                comind::team::remember_password(&stored.settings, &pw)?;
-                comind::ui::ok("team key unlocked on this machine");
-            }
+        let name = stored.settings.name.clone();
+        comind::ui::ok(&format!("joined {}", name.as_deref().unwrap_or(&root)));
+        if comind::credentials::llm_key(name.as_deref()).0.is_none() {
+            comind::ui::note(
+                "for LLM steps, add your API key: `comind team key` (or set OPENAI_API_KEY)",
+            );
         }
         comind::ui::note("connect your agent: `comind app` → Connect, or `claude mcp add --scope user comind -- comind serve`");
         Ok(())
