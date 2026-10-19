@@ -26,9 +26,9 @@ hide:
     </div>
     <code class="cm-install">curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh</code>
   </div>
-  <div class="cm-hero__mark">
-    <img src="assets/logo.svg#only-light" alt="" width="300" height="300">
-    <img src="assets/logo-dark.svg#only-dark" alt="" width="300" height="300">
+  <div class="cm-hero__shot">
+    <img src="assets/screenshots/explorer.webp#only-light" alt="comind showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
+    <img src="assets/screenshots/explorer-dark.webp#only-dark" alt="comind showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
   </div>
 </section>
 
@@ -38,6 +38,12 @@ hide:
   <div><strong>0 servers</strong><span>a folder or your own bucket holds the index</span></div>
   <div><strong>~0.2 s</strong><span>search against an index in S3</span></div>
 </div>
+
+<figure class="cm-shot" markdown>
+  ![The org map of an example shop: five repositories and the service contracts between them](assets/screenshots/overview.webp#only-light)
+  ![The org map of an example shop: five repositories and the service contracts between them](assets/screenshots/overview-dark.webp#only-dark)
+  <figcaption>The org map of an example shop: five repositories in three languages, linked by HTTP routes, an SNS topic and an SQS queue.</figcaption>
+</figure>
 
 <div class="grid cards" markdown>
 
