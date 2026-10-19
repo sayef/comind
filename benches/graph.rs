@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use comind::graph::CodeGraph;
-use comind::ledger::{Anchor, AuthorKind, Kind, Provenance, Record};
+use comindly::graph::CodeGraph;
+use comindly::ledger::{Anchor, AuthorKind, Kind, Provenance, Record};
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn corpus() -> (
-    Vec<comind::model::Symbol>,
-    Vec<comind::model::Edge>,
-    Vec<comind::facts::FileFacts>,
+    Vec<comindly::model::Symbol>,
+    Vec<comindly::model::Edge>,
+    Vec<comindly::facts::FileFacts>,
 ) {
     let root = Path::new("tests/fixtures/org");
     let mut out = (Vec::new(), Vec::new(), Vec::new());
@@ -21,7 +21,7 @@ fn corpus() -> (
     repos.sort_by_key(|e| e.file_name());
     for e in repos {
         let name = e.file_name().to_string_lossy().to_string();
-        let o = comind::parse::parse_repo(&e.path(), &name).unwrap();
+        let o = comindly::parse::parse_repo(&e.path(), &name).unwrap();
         out.0.extend(o.symbols);
         out.1.extend(o.edges);
         out.2.extend(o.facts);
@@ -32,10 +32,10 @@ fn corpus() -> (
 fn bench(c: &mut Criterion) {
     let (symbols, edges, facts) = corpus();
     c.bench_function("resolve fixture org", |b| {
-        b.iter(|| comind::resolve::resolve(&symbols, &edges, &facts))
+        b.iter(|| comindly::resolve::resolve(&symbols, &edges, &facts))
     });
 
-    let r = comind::resolve::resolve(&symbols, &edges, &facts);
+    let r = comindly::resolve::resolve(&symbols, &edges, &facts);
     let mut all = symbols.clone();
     all.extend(r.symbols);
     let graph = CodeGraph::build(&all, &r.edges);
@@ -67,7 +67,7 @@ fn bench(c: &mut Criterion) {
         })
         .collect();
     c.bench_function("ledger derive 1000 records", |b| {
-        b.iter(|| comind::ledger::derive(&records, &all))
+        b.iter(|| comindly::ledger::derive(&records, &all))
     });
 }
 

@@ -362,7 +362,7 @@ mod tests {
         let at = Position { line: 1, column: 0 };
         let sym = |repo: &str, path: &str, name: &str| Symbol {
             id: GlobalSymbolId {
-                scheme: "comind-treesitter".into(),
+                scheme: "comindly-treesitter".into(),
                 package_manager: ".".into(),
                 package: repo.into(),
                 version: ".".into(),

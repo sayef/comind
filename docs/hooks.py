@@ -5,7 +5,7 @@ import re
 from markdown import Extension
 from markdown.preprocessors import Preprocessor
 
-REPO = "https://github.com/sayef/comind/blob/main/"
+REPO = "https://github.com/sayef/comindly/blob/main/"
 PAGES = {"CHANGELOG.md": "changelog.md", "CONTRIBUTING.md": "contributing.md", "ARCHITECTURE.md": "architecture.md"}
 LINK = re.compile(
     r"\]\((CHANGELOG\.md|CONTRIBUTING\.md|ARCHITECTURE\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)(#[^)]*)?\)"
@@ -23,7 +23,7 @@ class RepoLinks(Preprocessor):
 
 class RepoLinksExtension(Extension):
     def extendMarkdown(self, md):
-        md.preprocessors.register(RepoLinks(md), "comind_repo_links", 20)
+        md.preprocessors.register(RepoLinks(md), "comindly_repo_links", 20)
 
 
 def on_config(config):

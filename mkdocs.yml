@@ -1,8 +1,8 @@
-site_name: comind
+site_name: comindly
 site_description: "Cross-repo code intelligence for coding agents: one versioned graph in your own storage."
-site_url: https://comind.pages.dev/
-repo_url: https://github.com/sayef/comind
-repo_name: sayef/comind
+site_url: https://comindly.pages.dev/
+repo_url: https://github.com/sayef/comindly
+repo_name: sayef/comindly
 edit_uri: edit/main/docs/
 copyright: Copyright &copy; Saiful Islam. Released under the MIT License.
 
@@ -98,7 +98,7 @@ nav:
   - Getting started: getting-started.md
   - Concepts: concepts.md
   - Guides:
-      - Using comind with agents: guides/agents.md
+      - Using comindly with agents: guides/agents.md
       - Team setup: guides/team-setup.md
       - S3 and compatible storage: guides/storage.md
       - Service contracts: guides/contracts.md
@@ -122,4 +122,4 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/sayef/comind
+      link: https://github.com/sayef/comindly

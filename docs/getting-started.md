@@ -1,50 +1,50 @@
 # Getting started
 
-comind builds a map of your repositories: what calls what, across repositories and through HTTP
+comindly builds a map of your repositories: what calls what, across repositories and through HTTP
 routes, queues, topics, buckets and tables, plus what your team recorded about the code. Your coding
 agent reads that map through MCP; you read it in the terminal and a local web UI.
 
-This page takes you from nothing to an agent that uses comind, in about ten minutes.
+This page takes you from nothing to an agent that uses comindly, in about ten minutes.
 
 ## 1. Install
 
 Prebuilt binaries for macOS (arm64, x64) and Linux (x64, arm64) are attached to each
-[GitHub release](https://github.com/sayef/comind/releases):
+[GitHub release](https://github.com/sayef/comindly/releases):
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
-comind --version
+curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
+comindly --version
 ```
 
 From source, with Rust 1.95 or newer plus `protoc` and `cmake`:
 
 ```sh
-git clone https://github.com/sayef/comind && cd comind && cargo build --release
+git clone https://github.com/sayef/comindly && cd comindly && cargo build --release
 ```
 
 ## 2. Index your code
 
-The quickest way is the app: `comind app` (macOS) or `comind ui --web --open`, then **Repositories**
+The quickest way is the app: `comindly app` (macOS) or `comindly ui --web --open`, then **Repositories**
 → Scan a folder → tick your repositories → **Index now**. The same from the terminal:
 
 ```sh
-comind repos add ../shared-lib ../orders ../payments   # remembered in config.toml
-comind link --index-dir ~/comind-index                 # each repo's default branch, never your folders
+comindly repos add ../shared-lib ../orders ../payments   # remembered in config.toml
+comindly link --index-dir ~/comindly-index                 # each repo's default branch, never your folders
 ```
 
-Or one repository, as it is on disk, into the default location (`comind config path` shows it):
+Or one repository, as it is on disk, into the default location (`comindly config path` shows it):
 
 ```sh
-comind index .
+comindly index .
 ```
 
-Several repositories that talk to each other belong in one index, so comind can connect them:
+Several repositories that talk to each other belong in one index, so comindly can connect them:
 
 ```sh
-comind link ../shared-lib ../orders ../payments --index-dir ~/comind-index
+comindly link ../shared-lib ../orders ../payments --index-dir ~/comindly-index
 ```
 
-Everything runs locally. With `OPENAI_API_KEY` set (or any OpenAI-compatible endpoint), comind also
+Everything runs locally. With `OPENAI_API_KEY` set (or any OpenAI-compatible endpoint), comindly also
 writes one-line summaries, flow walkthroughs and a style guide; `--no-llm` turns that off. Re-running
 `link` is incremental: only repositories that changed are parsed again.
 
@@ -54,11 +54,11 @@ everyone read it; see [Team setup](guides/team-setup.md).
 ## 3. Look around
 
 ```sh
-comind search "where do we retry HTTP calls" --index-dir ~/comind-index
-comind explore OrderService.place_order --index-dir ~/comind-index   # neighbourhood and blast radius
-comind contracts --index-dir ~/comind-index                         # who serves and who calls what
-comind app --index-dir ~/comind-index                               # macOS: its own window
-comind ui --web --open --index-dir ~/comind-index                   # any OS: in the browser
+comindly search "where do we retry HTTP calls" --index-dir ~/comindly-index
+comindly explore OrderService.place_order --index-dir ~/comindly-index   # neighbourhood and blast radius
+comindly contracts --index-dir ~/comindly-index                         # who serves and who calls what
+comindly app --index-dir ~/comindly-index                               # macOS: its own window
+comindly ui --web --open --index-dir ~/comindly-index                   # any OS: in the browser
 ```
 
 The web UI shows the org map, contracts, the ledger, conventions and internal packages; press
@@ -67,13 +67,13 @@ repeats the next step with your index path filled in.
 
 ## 4. Connect your agent
 
-comind serves MCP over stdio: the agent starts `comind serve` and calls its tools when a question
+comindly serves MCP over stdio: the agent starts `comindly serve` and calls its tools when a question
 needs them.
 
 === "Claude Code"
 
     ```sh
-    claude mcp add --scope user comind -- comind serve --index-dir ~/comind-index
+    claude mcp add --scope user comindly -- comindly serve --index-dir ~/comindly-index
     ```
 
 === "Cursor"
@@ -83,7 +83,7 @@ needs them.
     ```json
     {
       "mcpServers": {
-        "comind": { "command": "comind", "args": ["serve", "--index-dir", "~/comind-index"] }
+        "comindly": { "command": "comindly", "args": ["serve", "--index-dir", "~/comindly-index"] }
       }
     }
     ```
@@ -93,9 +93,9 @@ needs them.
     `~/.codex/config.toml`:
 
     ```toml
-    [mcp_servers.comind]
-    command = "comind"
-    args = ["serve", "--index-dir", "~/comind-index"]
+    [mcp_servers.comindly]
+    command = "comindly"
+    args = ["serve", "--index-dir", "~/comindly-index"]
     ```
 
 === "VS Code"
@@ -105,7 +105,7 @@ needs them.
     ```json
     {
       "servers": {
-        "comind": { "type": "stdio", "command": "comind", "args": ["serve", "--index-dir", "~/comind-index"] }
+        "comindly": { "type": "stdio", "command": "comindly", "args": ["serve", "--index-dir", "~/comindly-index"] }
       }
     }
     ```
@@ -120,7 +120,7 @@ Restart the agent and ask it something only a map of the whole codebase can answ
 - "What should I read before changing `PaymentClient.charge`?"
 - "Why is this function written this way? Did anyone try something else?"
 
-[Using comind with agents](guides/agents.md) lists every tool with the questions it answers.
+[Using comindly with agents](guides/agents.md) lists every tool with the questions it answers.
 
 ## 5. Optional: hooks
 
@@ -128,15 +128,15 @@ Hooks put what the team recorded in front of the agent without it asking: record
 repository when a session starts, and about a file just before the agent edits it.
 
 ```sh
-comind init-hooks claude     # prints settings to merge into ~/.claude/settings.json
+comindly init-hooks claude     # prints settings to merge into ~/.claude/settings.json
 ```
 
-`comind init-hooks cursor`, `gemini`, `codex` and `generic` print the equivalent for other agents.
+`comindly init-hooks cursor`, `gemini`, `codex` and `generic` print the equivalent for other agents.
 
 ## 6. Check your setup
 
 ```sh
-comind doctor --index-dir ~/comind-index
+comindly doctor --index-dir ~/comindly-index
 ```
 
 It checks the index, the ledger, cloud credentials, hooks, the LLM key, signing and SCIP indexers,
@@ -144,7 +144,7 @@ and says how to fix what is missing. The web UI's Connect page shows the same ch
 
 ## Next
 
-- [Using comind with agents](guides/agents.md): the tools, hooks and good habits.
+- [Using comindly with agents](guides/agents.md): the tools, hooks and good habits.
 - [Team setup](guides/team-setup.md): one shared index from CI.
 - [The ledger](guides/ledger.md): recording why code is the way it is.
 - [Preflight](guides/preflight.md): checks before a commit or in MR pipelines.

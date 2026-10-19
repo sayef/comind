@@ -3,8 +3,8 @@
 Before a change lands: what the team already knows about the code it touches.
 
 ```bash
-comind preflight .                          # your uncommitted changes
-comind preflight . --base origin/main --strict   # in an MR pipeline; fails on violated checks
+comindly preflight .                          # your uncommitted changes
+comindly preflight . --base origin/main --strict   # in an MR pipeline; fails on violated checks
 ```
 
 Preflight lists recorded constraints and dead ends on the touched code, contracts other services
@@ -16,10 +16,10 @@ failing constraint checks.
 A constraint can carry a rule that runs against the graph or the manifests:
 
 ```bash
-comind remember constraint --on raw_query --title "Handlers never call raw SQL" \
+comindly remember constraint --on raw_query --title "Handlers never call raw SQL" \
   --field "check=forbid calls from svc/app/handlers/** to **::raw_*"
-comind remember constraint --on Settings --title "No lance 1.0.1" --field "check=forbid dep lance =1.0.1"
-comind ledger --check                       # non-zero exit when a `must` rule is violated
+comindly remember constraint --on Settings --title "No lance 1.0.1" --field "check=forbid dep lance =1.0.1"
+comindly ledger --check                       # non-zero exit when a `must` rule is violated
 ```
 
 Rules: `forbid [<edge kind>] from <glob>[::<name>] to <glob>[::<name>]` and

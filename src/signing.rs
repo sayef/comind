@@ -1,5 +1,5 @@
 //! Optional SSH signatures on ledger records, with the key developers already sign git commits
-//! with (`ssh-keygen -Y`, namespace `comind-ledger`). A signature that does not verify against
+//! with (`ssh-keygen -Y`, namespace `comindly-ledger`). A signature that does not verify against
 //! `allowed_signers` drops the record to T0; unsigned records are unaffected.
 
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ledger::Record;
 
-pub const NAMESPACE: &str = "comind-ledger";
+pub const NAMESPACE: &str = "comindly-ledger";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Signature {
@@ -27,9 +27,10 @@ pub fn canonical(rec: &Record) -> Vec<u8> {
     serde_json::to_vec(&r).unwrap_or_default()
 }
 
-/// `COMIND_SIGNING_KEY` → config `signing_key` → git `user.signingkey` when `gpg.format=ssh`.
+/// `COMINDLY_SIGNING_KEY` → config `signing_key` → git `user.signingkey` when `gpg.format=ssh`.
 pub fn signing_key() -> Option<PathBuf> {
-    if let Some(k) = env("COMIND_SIGNING_KEY").or_else(|| crate::config::Config::load().signing_key)
+    if let Some(k) =
+        env("COMINDLY_SIGNING_KEY").or_else(|| crate::config::Config::load().signing_key)
     {
         return Some(expand(&k));
     }
@@ -41,9 +42,9 @@ pub fn signing_key() -> Option<PathBuf> {
     (!k.starts_with("key::")).then(|| expand(&k))
 }
 
-/// `COMIND_ALLOWED_SIGNERS` → config `allowed_signers` → git `gpg.ssh.allowedSignersFile`.
+/// `COMINDLY_ALLOWED_SIGNERS` → config `allowed_signers` → git `gpg.ssh.allowedSignersFile`.
 pub fn allowed_signers() -> Option<PathBuf> {
-    let p = env("COMIND_ALLOWED_SIGNERS")
+    let p = env("COMINDLY_ALLOWED_SIGNERS")
         .or_else(|| crate::config::Config::load().allowed_signers)
         .or_else(|| {
             git2::Config::open_default()
@@ -170,13 +171,13 @@ fn public_key(key: &Path) -> Result<String> {
 }
 
 fn scratch() -> Result<PathBuf> {
-    let d = std::env::temp_dir().join(format!("comind-sign-{}", uuid::Uuid::now_v7()));
+    let d = std::env::temp_dir().join(format!("comindly-sign-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&d)?;
     Ok(d)
 }
 
 fn cache_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comind/verified"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comindly/verified"))
 }
 
 fn env(k: &str) -> Option<String> {

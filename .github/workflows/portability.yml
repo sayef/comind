@@ -1,4 +1,4 @@
-# Comind cross-platform smoke test.
+# Comindly cross-platform smoke test.
 #
 # Build once on an OLD glibc (portable), then run the prebuilt binary on clean distro images
 # via `docker run` — the real "does it run on a fresh box" test (no Rust/protoc installed there).
@@ -51,8 +51,8 @@ jobs:
       - run: cargo build --release
       - uses: actions/upload-artifact@v7
         with:
-          name: comind-linux
-          path: target/release/comind
+          name: comindly-linux
+          path: target/release/comindly
 
   smoke-linux:
     needs: build-linux
@@ -70,16 +70,16 @@ jobs:
             musl: true # glibc binary on musl — expected to fail until we ship a musl build
     steps:
       - uses: actions/download-artifact@v8
-        with: { name: comind-linux }
-      - run: chmod +x comind
+        with: { name: comindly-linux }
+      - run: chmod +x comindly
       - name: Smoke test on ${{ matrix.image }}
         continue-on-error: ${{ matrix.musl == true }}
         run: |
           docker run --rm -v "$PWD":/w -w /w "${{ matrix.image }}" sh -c '
             set -e
             mkdir -p /tmp/s && printf "class A:\n  def run(self):\n    pass\n" > /tmp/s/x.py
-            ./comind --help
-            ./comind index /tmp/s            # exercises tree-sitter + binary load, no network
+            ./comindly --help
+            ./comindly index /tmp/s            # exercises tree-sitter + binary load, no network
           '
 
   # ---- macOS: build + smoke on Apple Silicon; x86_64 built there too and run under Rosetta ---
@@ -103,8 +103,8 @@ jobs:
       - name: Smoke test
         run: |
           mkdir -p /tmp/s && printf 'class A:\n  def run(self):\n    pass\n' > /tmp/s/x.py
-          ./target/${{ matrix.target }}/release/comind --help
-          ./target/${{ matrix.target }}/release/comind index /tmp/s
+          ./target/${{ matrix.target }}/release/comindly --help
+          ./target/${{ matrix.target }}/release/comindly index /tmp/s
 
   # Windows is intentionally omitted for now: aws-lc-sys (BoringSSL) + vendored libgit2 on MSVC
   # need extra setup (nasm, protoc, cmake). Add a windows-latest job once those are proven.

@@ -1,4 +1,4 @@
-# Pre-commit hooks for comind. Install with either runner:
+# Pre-commit hooks for comindly. Install with either runner:
 #   pipx install pre-commit && pre-commit install     # the Python tool
 #   cargo install prek && prek install                # Rust-native, reads this same file
 #

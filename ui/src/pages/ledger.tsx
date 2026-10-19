@@ -61,7 +61,7 @@ export function LedgerPage() {
       {ledger.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
       {ledger.data && rows.length === 0 && (
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          No records yet. Add one with <code className="font-mono">comind remember</code>; agents add them through MCP.
+          No records yet. Add one with <code className="font-mono">comindly remember</code>; agents add them through MCP.
         </div>
       )}
       <div className="grid gap-3">

@@ -45,9 +45,9 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
-const PLACEHOLDER: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>comind</title>
+const PLACEHOLDER: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>comindly</title>
 <style>body{font:15px system-ui;max-width:36rem;margin:15vh auto;padding:0 1rem;color:#16202e}
 code{background:#eef1f5;padding:.1rem .35rem;border-radius:4px}</style></head><body>
-<h1>comind</h1><p>This binary was built without the web UI. Build it with
-<code>npm ci &amp;&amp; npm run build</code> in <code>ui/</code>, then rebuild comind.
+<h1>comindly</h1><p>This binary was built without the web UI. Build it with
+<code>npm ci &amp;&amp; npm run build</code> in <code>ui/</code>, then rebuild comindly.
 The JSON API is available under <code>/api/</code>.</p></body></html>"#;

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  # Run by hand: publishes `comind` to crates.io, tags `v*` and creates the GitHub release for the version
+  # Run by hand: publishes `comindly` to crates.io, tags `v*` and creates the GitHub release for the version
   # on main. The tag is pushed with GITHUB_TOKEN, so release.yml picks it up through `workflow_run`.
   release:
     if: github.repository_owner == 'sayef' && github.event_name == 'workflow_dispatch'

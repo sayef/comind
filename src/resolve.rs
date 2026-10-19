@@ -1,4 +1,4 @@
-//! Comind resolve — bind per-file facts to definitions, within and across repos.
+//! Comindly resolve — bind per-file facts to definitions, within and across repos.
 //!
 //! A reference path (`self.api.get`, `events.publish`, `kit.formatDate`) is resolved segment by
 //! segment through imports, re-exports, modules, classes (incl. bases) and typed variables.

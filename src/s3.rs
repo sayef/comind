@@ -1,7 +1,7 @@
 //! S3 and S3-compatible storage through the standard AWS chain: environment, `~/.aws` profiles
 //! (keys, SSO, `credential_process`, assumed roles), web identity and instance roles. Region and
 //! endpoint come from the same places (`AWS_REGION`, `AWS_ENDPOINT_URL`, a profile's `region` and
-//! `endpoint_url`), so MinIO or R2 need nothing comind-specific.
+//! `endpoint_url`), so MinIO or R2 need nothing comindly-specific.
 
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
@@ -159,8 +159,8 @@ fn expired_env_keys() -> Option<String> {
     let t = chrono::DateTime::parse_from_rfc3339(&at).ok()?;
     (t < chrono::Utc::now()).then(|| {
         format!(
-            "the AWS keys in comind's environment (AWS_ACCESS_KEY_ID) expired at {at} and win over your \
-             profile; start comind from a shell without them"
+            "the AWS keys in comindly's environment (AWS_ACCESS_KEY_ID) expired at {at} and win over your \
+             profile; start comindly from a shell without them"
         )
     })
 }

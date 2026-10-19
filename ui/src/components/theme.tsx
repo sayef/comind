@@ -5,7 +5,7 @@ const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({ theme
 
 function initial(): Theme {
   try {
-    const saved = localStorage.getItem("comind.theme");
+    const saved = localStorage.getItem("comindly.theme");
     if (saved === "light" || saved === "dark") return saved;
   } catch {
     // storage may be unavailable
@@ -18,7 +18,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     try {
-      localStorage.setItem("comind.theme", theme);
+      localStorage.setItem("comindly.theme", theme);
     } catch {
       // ignore
     }

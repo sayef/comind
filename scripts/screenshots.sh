@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/target/release/comind"
+BIN="$ROOT/target/release/comindly"
 OUT="$ROOT/docs/assets/screenshots"
 LLM=1
 [ "${1:-}" = "--no-llm" ] && LLM=0
@@ -13,7 +13,7 @@ WORK="$(mktemp -d)"
 export REAL_HOME="$HOME"
 trap '[ -n "${SERVER:-}" ] && kill "$SERVER" 2>/dev/null; rm -rf "$WORK"' EXIT
 export HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config"
-unset AWS_PROFILE COMIND_AUTHOR_NAME
+unset AWS_PROFILE COMINDLY_AUTHOR_NAME
 mkdir -p "$HOME" "$OUT"
 INDEX="$WORK/index"
 
@@ -35,8 +35,8 @@ commit inventory "Fulfilment team" "2026-09-05T08:15:00Z"
 commit storefront "Web team" "2026-09-08T11:45:00Z"
 REPOS=("$WORK"/repos/{acme-common,orders,payments,inventory,storefront})
 
-mkdir -p "$XDG_CONFIG_HOME/comind"
-printf 'index_dir = "%s"\n' "$INDEX" > "$XDG_CONFIG_HOME/comind/config.toml"
+mkdir -p "$XDG_CONFIG_HOME/comindly"
+printf 'index_dir = "%s"\n' "$INDEX" > "$XDG_CONFIG_HOME/comindly/config.toml"
 for r in "${REPOS[@]}"; do "$BIN" repos add "$r" >/dev/null; done
 
 if [ "$LLM" = 1 ]; then
@@ -47,7 +47,7 @@ fi
 
 remember() {
   local who=$1 out; shift
-  out=$(COMIND_AUTHOR_NAME="$who" "$BIN" remember --index-dir "$INDEX" "$@" 2>&1) || { echo "$out" >&2; return 1; }
+  out=$(COMINDLY_AUTHOR_NAME="$who" "$BIN" remember --index-dir "$INDEX" "$@" 2>&1) || { echo "$out" >&2; return 1; }
   echo "$out" | grep -o '([0-9a-f-]*)' | tr -d '()'
 }
 idem=$(remember "Payments team" constraint --on PaymentProvider.charge \
@@ -66,7 +66,7 @@ remember "Checkout team" gotcha --on cancel_order \
   --trigger "touching cancellation or stock levels" >/dev/null
 remember "Web team" question --on Cart.checkout \
   --title "Should checkout check stock again after payment succeeds?" >/dev/null
-COMIND_AUTHOR_NAME="Checkout team" "$BIN" review "$idem" confirm --index-dir "$INDEX" >/dev/null
+COMINDLY_AUTHOR_NAME="Checkout team" "$BIN" review "$idem" confirm --index-dir "$INDEX" >/dev/null
 "$BIN" conventions add --index-dir "$INDEX" --dimension money "Amounts are acme_common.Money in integer cents; no floats for money" >/dev/null
 "$BIN" conventions add --index-dir "$INDEX" --repo payments --dimension queues "Every queue handler is idempotent per message" >/dev/null
 

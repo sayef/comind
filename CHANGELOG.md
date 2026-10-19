@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed from comind to **comindly**: the crate, the binary, the MCP server, `~/.config/comindly`,
+  `~/.local/share/comindly`, `~/.cache/comindly`, `COMINDLY_*` variables, the GitHub repository
+  (sayef/comindly) and the docs (comindly.pages.dev). Symbol ids and the signing namespace changed
+  too, so indexes and signed records made before the rename need re-indexing.
+
 ### Added
 
 - A bolder logo, an outlined wordmark, README banners, a social preview and a new docs home page,

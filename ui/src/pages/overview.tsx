@@ -66,7 +66,7 @@ function JoinTeam() {
         on this machine, in Settings.
       </p>
       <div className="mt-3 flex flex-col gap-2">
-        <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comind or a folder" className="font-mono text-xs" />
+        <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comindly or a folder" className="font-mono text-xs" />
         {s3 && (
           <select className="h-9 rounded-md border bg-card px-2 text-sm" value={profile} onChange={(e) => setProfile(e.target.value)}>
             <option value="">AWS profile: default</option>
@@ -124,7 +124,7 @@ export function OverviewPage() {
         <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
         <h1 className="text-xl font-semibold">No index here yet</h1>
         <p className="text-sm text-muted-foreground">
-          comind looked in <span className="font-mono">{o.root}</span>. Join your team's index, or add repositories and build one.
+          comindly looked in <span className="font-mono">{o.root}</span>. Join your team's index, or add repositories and build one.
         </p>
         <JoinTeam />
         <p className="text-xs text-muted-foreground">or start your own</p>

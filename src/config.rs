@@ -1,4 +1,4 @@
-//! Comind configuration — persistent defaults for the data location and model choices.
+//! Comindly configuration — persistent defaults for the data location and model choices.
 //!
 //! Precedence, highest first: CLI flag → environment variable → `config.toml` → built-in default.
 //! Secrets (`OPENAI_API_KEY`) are never read from the file; keep them in the environment.
@@ -49,7 +49,7 @@ pub struct Config {
     pub auto_index: Option<bool>,
     /// When the AWS SSO session has expired, start `aws sso login` (you still approve it).
     pub sso_auto_login: Option<bool>,
-    /// Repositories `comind link` indexes when given none: comind checks out each one's default
+    /// Repositories `comindly link` indexes when given none: comindly checks out each one's default
     /// branch in its own worktree.
     #[serde(default)]
     pub repos: Vec<RepoEntry>,
@@ -98,18 +98,18 @@ impl Config {
         match toml::from_str(&text) {
             Ok(cfg) => cfg,
             Err(e) => {
-                eprintln!("comind: ignoring {}: {e}", path.display());
+                eprintln!("comindly: ignoring {}: {e}", path.display());
                 Self::default()
             }
         }
     }
 
-    /// Resolve the index location: flag → `COMIND_INDEX_DIR` → file → `~/.local/share/comind`.
+    /// Resolve the index location: flag → `COMINDLY_INDEX_DIR` → file → `~/.local/share/comindly`.
     pub fn index_dir(&self, flag: Option<&str>) -> String {
         if let Some(f) = flag {
             return expand_tilde(f);
         }
-        if let Some(e) = non_empty_env("COMIND_INDEX_DIR") {
+        if let Some(e) = non_empty_env("COMINDLY_INDEX_DIR") {
             return expand_tilde(&e);
         }
         if let Some(d) = &self.index_dir {
@@ -130,26 +130,26 @@ impl Config {
         std::time::Duration::from_secs(self.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL))
     }
 
-    /// Resolve the LLM model: `COMIND_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
+    /// Resolve the LLM model: `COMINDLY_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
     pub fn llm_model(&self) -> String {
         team(|t| t.llm_model.clone())
-            .or_else(|| non_empty_env("COMIND_LLM_MODEL"))
+            .or_else(|| non_empty_env("COMINDLY_LLM_MODEL"))
             .or_else(|| self.llm_model.clone())
             .unwrap_or_else(|| crate::llm::DEFAULT_MODEL.to_string())
     }
 
-    /// Resolve the embedding model: `COMIND_EMBED_MODEL` → file → `crate::embed::DEFAULT_MODEL`.
+    /// Resolve the embedding model: `COMINDLY_EMBED_MODEL` → file → `crate::embed::DEFAULT_MODEL`.
     pub fn embed_model(&self) -> String {
         team(|t| t.embed_model.clone())
-            .or_else(|| non_empty_env("COMIND_EMBED_MODEL"))
+            .or_else(|| non_empty_env("COMINDLY_EMBED_MODEL"))
             .or_else(|| self.embed_model.clone())
             .unwrap_or_else(|| crate::embed::DEFAULT_MODEL.to_string())
     }
 
-    /// Resolve an OpenAI-compatible base URL: `COMIND_LLM_BASE_URL` → file → none.
+    /// Resolve an OpenAI-compatible base URL: `COMINDLY_LLM_BASE_URL` → file → none.
     pub fn llm_base_url(&self) -> Option<String> {
         team(|t| t.llm_base_url.clone())
-            .or_else(|| non_empty_env("COMIND_LLM_BASE_URL"))
+            .or_else(|| non_empty_env("COMINDLY_LLM_BASE_URL"))
             .or_else(|| self.llm_base_url.clone())
     }
 
@@ -163,9 +163,9 @@ impl Config {
         self.max_flows.unwrap_or(usize::MAX)
     }
 
-    /// Default output format: `COMIND_FORMAT` → file → `md`.
+    /// Default output format: `COMINDLY_FORMAT` → file → `md`.
     pub fn format(&self) -> String {
-        non_empty_env("COMIND_FORMAT")
+        non_empty_env("COMINDLY_FORMAT")
             .or_else(|| self.format.clone())
             .unwrap_or_else(|| "md".to_string())
     }
@@ -185,18 +185,23 @@ impl Config {
         team(|t| t.guide).or(self.guide).unwrap_or(true)
     }
 
-    /// SCIP mode: `COMIND_SCIP` → file → `auto`.
+    /// SCIP mode: `COMINDLY_SCIP` → file → `auto`.
     pub fn scip(&self) -> crate::scip::Mode {
-        non_empty_env("COMIND_SCIP")
+        non_empty_env("COMINDLY_SCIP")
             .or_else(|| self.scip.clone())
             .and_then(|s| crate::scip::Mode::parse(&s))
             .unwrap_or(crate::scip::Mode::Auto)
     }
 }
 
-/// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
+/// `$XDG_CONFIG_HOME/comindly/config.toml`, else `~/.config/comindly/config.toml`.
 pub fn config_path() -> PathBuf {
-    config_home().join("comind").join("config.toml")
+    config_dir().join("config.toml")
+}
+
+/// comindly's config folder.
+pub fn config_dir() -> PathBuf {
+    config_home().join("comindly")
 }
 
 /// A setting to write: a string, a flag or a number; `Remove` deletes the key.
@@ -233,7 +238,7 @@ fn team<T>(pick: impl Fn(&crate::team::TeamSettings) -> Option<T>) -> Option<T> 
 
 /// The web UI's access token for browsers: created once, so bookmarks keep working.
 pub fn ui_token() -> Result<String> {
-    let path = config_home().join("comind").join("ui-token");
+    let path = config_dir().join("ui-token");
     if let Ok(t) = std::fs::read_to_string(&path) {
         if !t.trim().is_empty() {
             return Ok(t.trim().to_string());
@@ -250,9 +255,9 @@ pub fn ui_token() -> Result<String> {
     Ok(token)
 }
 
-/// `$XDG_DATA_HOME/comind`, else `~/.local/share/comind`.
+/// `$XDG_DATA_HOME/comindly`, else `~/.local/share/comindly`.
 pub fn default_index_dir() -> String {
-    data_home().join("comind").to_string_lossy().into_owned()
+    data_home().join("comindly").to_string_lossy().into_owned()
 }
 
 /// Write a commented `config.toml` with the resolved defaults. Without `force`, errors if one
@@ -266,7 +271,7 @@ pub fn init(force: bool) -> Result<PathBuf> {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let body = format!(
-        "# Comind configuration. CLI flags and environment variables override these.\n\
+        "# Comindly configuration. CLI flags and environment variables override these.\n\
          # Secrets (OPENAI_API_KEY) belong in the environment, not here.\n\n\
          index_dir   = \"{}\"\n\
          llm_model   = \"{}\"\n\
@@ -295,7 +300,12 @@ pub fn init(force: bool) -> Result<PathBuf> {
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|v| !v.is_empty())
+    env(key).filter(|v| !v.is_empty())
+}
+
+/// An environment variable, if set.
+pub fn env(key: &str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
 fn home() -> PathBuf {

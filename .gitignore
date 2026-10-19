@@ -15,8 +15,8 @@
 # Claude / AI assistant
 .claude/
 
-# CoMind local data / indexes
-.comind/
+# comindly local data / indexes
+.comindly/
 *.duckdb
 *.duckdb.wal
 

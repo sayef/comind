@@ -4,12 +4,12 @@ use std::path::Path;
 
 #[test]
 fn symbols_roundtrip_with_fingerprints() {
-    let out = comind::parse::parse_repo(Path::new("tests/fixtures/org/pkg-common"), "pkg-common")
+    let out = comindly::parse::parse_repo(Path::new("tests/fixtures/org/pkg-common"), "pkg-common")
         .unwrap();
-    let dir = std::env::temp_dir().join(format!("comind-roundtrip-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("comindly-roundtrip-{}", std::process::id()));
     let uri = dir.to_string_lossy().to_string();
-    comind::index::write_graph_blocking(&uri, &out.symbols, &out.edges).unwrap();
-    let (mut back, _) = comind::index::read_graph_blocking(&uri).unwrap();
+    comindly::index::write_graph_blocking(&uri, &out.symbols, &out.edges).unwrap();
+    let (mut back, _) = comindly::index::read_graph_blocking(&uri).unwrap();
     std::fs::remove_dir_all(&dir).ok();
 
     let mut orig = out.symbols.clone();

@@ -77,13 +77,13 @@ def mark(theme, solid=False):
 
 
 def lockup(x, top, size, theme):
-    """The mark, then `comind` in bold; `size` is the cap height of the lockup. Returns body and width."""
+    """The mark, then `comindly` in bold; `size` is the cap height of the lockup. Returns body and width."""
     scale = size / 256
     body = f'<g transform="translate({x} {top}) scale({scale:.4f})">{mark(theme)}</g>'
     text_size = size * 0.78
     # Optical centre of lowercase text on the mark: between the x-height's middle and the ascenders'.
     baseline = top + size * 0.5 + text_size * 0.30
-    name, name_w = text_path(BOLD, "comind", x + size * 1.12, baseline, text_size, -0.035)
+    name, name_w = text_path(BOLD, "comindly", x + size * 1.12, baseline, text_size, -0.035)
     body += f'<path d="{name}" fill="{THEMES[theme]["text"]}"/>'
     return body, size * 1.12 + name_w
 
@@ -96,15 +96,15 @@ def svg(width, height, body, label):
 
 
 if __name__ == "__main__":
-    (OUT / "logo.svg").write_text(svg(256, 256, mark("light"), "comind"))
-    (OUT / "logo-dark.svg").write_text(svg(256, 256, mark("dark"), "comind"))
+    (OUT / "logo.svg").write_text(svg(256, 256, mark("light"), "comindly"))
+    (OUT / "logo-dark.svg").write_text(svg(256, 256, mark("dark"), "comindly"))
     # The app icon and favicon: solid petals on a dark tile read at 16 px.
     tile = f'<rect width="256" height="256" rx="58" fill="{INK}"/><g transform="translate(128 128) scale(0.84) translate(-128 -128)">{mark("dark", solid=True)}</g>'
-    (OUT / "icon.svg").write_text(svg(256, 256, tile, "comind"))
+    (OUT / "icon.svg").write_text(svg(256, 256, tile, "comindly"))
 
     for theme, suffix in (("light", ""), ("dark", "-dark")):
         body, w = lockup(8, 8, 96, theme)
-        (OUT / f"wordmark{suffix}.svg").write_text(svg(round(w + 20), 112, body, "comind"))
+        (OUT / f"wordmark{suffix}.svg").write_text(svg(round(w + 20), 112, body, "comindly"))
 
         _, w = lockup(0, 0, 96, theme)
         _, tag_w = text_path(MEDIUM, TAGLINE, 0, 0, 25)
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         # A background of its own keeps the banner legible where the page's theme differs from it.
         panel = f'<rect width="{width}" height="184" rx="16" fill="{THEMES[theme]["back"]}"/>'
         (OUT / f"banner-{theme}.svg").write_text(
-            svg(width, 184, f'{panel}\n{body}\n<path d="{tag}" fill="{THEMES[theme]["tagline"]}"/>', f"comind: {TAGLINE.lower()}")
+            svg(width, 184, f'{panel}\n{body}\n<path d="{tag}" fill="{THEMES[theme]["tagline"]}"/>', f"comindly: {TAGLINE.lower()}")
         )
 
     body, w = lockup(0, 0, 150, "dark")
@@ -124,7 +124,7 @@ if __name__ == "__main__":
 <g transform="translate({(1280 - w) / 2:.1f} 190)">{body}</g>
 <g transform="translate({(1280 - tag_w) / 2:.1f} 420)"><path d="{tag}" fill="#A3ADA6"/></g>
 <g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#4ADE80"/></g>"""
-    (OUT / "social-preview.svg").write_text(svg(1280, 640, social, "comind"))
+    (OUT / "social-preview.svg").write_text(svg(1280, 640, social, "comindly"))
 
     # PNGs for places that take no SVG (GitHub social preview, app bundles), if ImageMagick is installed.
     magick = shutil.which("magick")

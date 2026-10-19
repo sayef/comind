@@ -1,5 +1,5 @@
 ---
-title: comind
+title: comindly
 hide:
   - navigation
   - toc
@@ -17,18 +17,18 @@ hide:
         <span>What the team learned, where agents look<span class="cm-dot">.</span></span>
       </span>
     </h1>
-    <p class="cm-lede">comind indexes a team's repositories into one versioned graph in your own storage and
+    <p class="cm-lede">comindly indexes a team's repositories into one versioned graph in your own storage and
     serves it to agents over MCP: who breaks if this changes, which services call this route, and what the
     team already learned the hard way about this code.</p>
     <div class="cm-actions">
       <a class="md-button md-button--primary" href="getting-started/">Get started</a>
-      <a class="md-button" href="https://github.com/sayef/comind">GitHub</a>
+      <a class="md-button" href="https://github.com/sayef/comindly">GitHub</a>
     </div>
-    <code class="cm-install">curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh</code>
+    <code class="cm-install">curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh</code>
   </div>
   <div class="cm-hero__shot">
-    <img src="assets/screenshots/explorer.webp#only-light" alt="comind showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
-    <img src="assets/screenshots/explorer-dark.webp#only-dark" alt="comind showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
+    <img src="assets/screenshots/explorer.webp#only-light" alt="comindly showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
+    <img src="assets/screenshots/explorer-dark.webp#only-dark" alt="comindly showing create_order in an example shop: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900">
   </div>
 </section>
 

@@ -1470,7 +1470,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "comind"
+name = "comindly"
 version = "0.4.0"
 dependencies = [
  "anyhow",

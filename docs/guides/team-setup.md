@@ -5,7 +5,7 @@
 The index lives in **your** object store (or a local path). Nothing is sent anywhere else.
 
 ```bash
-comind link ../shared-lib ../service-a ../service-b --index-dir s3://your-bucket/comind --no-llm
+comindly link ../shared-lib ../service-a ../service-b --index-dir s3://your-bucket/comindly --no-llm
 ```
 
 - Run it from CI on every merge to the default branch (see [CI](ci.md)); `--incremental`
@@ -17,13 +17,13 @@ comind link ../shared-lib ../service-a ../service-b --index-dir s3://your-bucket
 - `--no-llm` keeps indexing free and local; drop it to add LLM summaries, flow walkthroughs and
   a style guide (sends code to your configured LLM).
 
-Each developer can run `comind doctor` to check their setup (index, hooks, keys, signing).
+Each developer can run `comindly doctor` to check their setup (index, hooks, keys, signing).
 
 ## Give agents the index
 
 ```bash
-comind serve --index-dir s3://your-bucket/comind        # MCP server (add to the agent's config)
-comind init-hooks claude                                # Claude Code hooks to paste into settings
+comindly serve --index-dir s3://your-bucket/comindly        # MCP server (add to the agent's config)
+comindly init-hooks claude                                # Claude Code hooks to paste into settings
 ```
 
 - **MCP tools**: navigation (`search`, `find`, `zoom`, `thread`, `flow`), impact (`ripple`,
@@ -31,7 +31,7 @@ comind init-hooks claude                                # Claude Code hooks to p
   `remember`, `review`).
 - **Hooks** inject a short digest at session start and the records about a file just before an
   agent edits it (about 60 ms; a remote index is read from a local mirror refreshed in the
-  background). Other agents: `comind hook generic pre-edit` prints plain markdown.
+  background). Other agents: `comindly hook generic pre-edit` prints plain markdown.
 
 ## Team settings
 
@@ -47,8 +47,8 @@ the trust boundary.
 Set them once, in the app (Settings → Team) or from the terminal:
 
 ```sh
-comind team set name="Platform" llm_model=gpt-6-luna enrich=true
-comind team                    # what is set, and where your API key comes from
+comindly team set name="Platform" llm_model=gpt-6-luna enrich=true
+comindly team                    # what is set, and where your API key comes from
 ```
 
 Saving needs write access to the index; two people saving at once cannot overwrite each other (the
@@ -56,21 +56,21 @@ second save is refused and asks to reload).
 
 ### API keys
 
-Everyone brings their own LLM API key. comind looks for it, in order:
+Everyone brings their own LLM API key. comindly looks for it, in order:
 
-1. the entry for the team's name in `~/.config/comind/credentials`,
+1. the entry for the team's name in `~/.config/comindly/credentials`,
 2. the default key in that file,
 3. `OPENAI_API_KEY`.
 
 The file is created readable only by you. Set it from the app (Settings → Your API key) or the terminal:
 
 ```sh
-comind team key              # prompts for the key; stored under the team's name
-comind team key --default    # your default key, for any team
+comindly team key              # prompts for the key; stored under the team's name
+comindly team key --default    # your default key, for any team
 ```
 
 ```toml
-# ~/.config/comind/credentials
+# ~/.config/comindly/credentials
 llm_api_key = "sk-..."       # default
 
 [[team]]
@@ -86,7 +86,7 @@ A colleague needs only the index location and their own cloud access:
 
 ```sh
 aws sso login --profile team-dev                        # their own access to the bucket
-comind join s3://bucket/comind --profile team-dev      # remembers both
+comindly join s3://bucket/comindly --profile team-dev      # remembers both
 ```
 
 or, in the app, **Join a team** on the first screen (index location, AWS profile). For LLM steps they add

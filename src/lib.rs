@@ -1,4 +1,4 @@
-//! Comind — deterministic, cross-repo code intelligence for coding agents.
+//! Comindly — deterministic, cross-repo code intelligence for coding agents.
 //!
 //! One crate, one module per pipeline stage:
 //! `model` (SCIP identity + Symbol/Edge) → `parse` (tree-sitter) → `git` (incremental) →

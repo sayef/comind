@@ -55,7 +55,7 @@ pub fn ingest(
         return Ok(out);
     }
     let mut indexes = find_indexes(root);
-    let tmp = std::env::temp_dir().join(format!("comind-scip-{}-{repo}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("comindly-scip-{}-{repo}", std::process::id()));
     if indexes.is_empty() {
         indexes = run_indexers(root, &tmp);
     }

@@ -17,7 +17,7 @@ const browser = [
 ].find((p) => p && existsSync(p));
 if (!browser) throw new Error("no Chrome or Edge found; set CHROME");
 
-const profile = mkdtempSync(join(tmpdir(), "comind-shots-"));
+const profile = mkdtempSync(join(tmpdir(), "comindly-shots-"));
 const port = 9300 + Math.floor(Math.random() * 600);
 // A mock keychain keeps macOS from asking where to store the browser's secrets.
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--use-mock-keychain", "--password-store=basic", "--no-first-run"];
@@ -59,7 +59,7 @@ await sleep(2000);
 const focus = await evaluate(`fetch("/api/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
 
 for (const theme of ["light", "dark"]) {
-  await evaluate(`localStorage.setItem("comind.theme", "${theme}")`);
+  await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
   const suffix = theme === "dark" ? "-dark" : "";
   await go("/");
   await shot(`overview${suffix}`);

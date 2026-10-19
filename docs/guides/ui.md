@@ -2,7 +2,7 @@
 
 ## Desktop app (macOS)
 
-`comind app [--index-dir …]` opens the UI in its own window, like the Ollama app: the operating
+`comindly app [--index-dir …]` opens the UI in its own window, like the Ollama app: the operating
 system's WebKit, no browser and no bundled Chromium. The window shows a loading screen while the
 index loads, then the UI from a private server on a random local port that only this window can
 call. Links to other sites open in your browser.
@@ -12,10 +12,10 @@ and Windows: use the web UI.
 
 ## Web UI
 
-`comind ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. It prints a link
+`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. It prints a link
 with an access token; open it once (or pass `--open`) and the browser keeps the token in a cookie,
 so the plain address works as a bookmark afterwards. Other programs and web pages cannot call the
-UI's API without it. The token is kept in `~/.config/comind/ui-token`; delete the file to issue a
+UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
 new one.
 
 - **Overview**: counts, the org map (repositories and the service contracts between them; click a
@@ -34,13 +34,13 @@ new one.
 - **Repositories**: what is in the index, and where each repository lives on this machine. The index
   records each repository's remote URL, so one indexed elsewhere shows **no folder here** with
   **Locate** (point at your copy) and **Clone** (URL filled in); **Scan a folder** ticks the ones it
-  finds. comind indexes all repositories together so cross-repo links stay complete, so **Index now**
+  finds. comindly indexes all repositories together so cross-repo links stay complete, so **Index now**
   waits until every indexed repository has a folder here, unless you choose to drop the missing ones.
   Add a folder, scan a folder and tick the repositories you want (untick to drop one), or clone one by HTTPS or SSH URL with your own git access: your SSH key,
   your git credential helper, or `GITLAB_TOKEN` / `GITHUB_TOKEN`. When none of these gives access to an
   HTTPS repository, the app asks for an access token and hands it to git for that clone only; your
   credential helper (on macOS the keychain) keeps it for later fetches. **Index now** fetches each
-  repository's default branch into comind's own worktree (`~/.cache/comind/worktrees`), so your
+  repository's default branch into comindly's own worktree (`~/.cache/comindly/worktrees`), so your
   folders and branches are never touched, rebuilds the index and shows its progress; every page
   then shows the new index. LLM summaries are opt-in per run. With **Re-index automatically** on
   (`auto_index`), the app checks every freshness interval whether a default branch moved on the
@@ -49,7 +49,7 @@ new one.
 - **Settings**: the index location (with a connection test), the team settings (shared LLM and
   embedding model), your own API key, the AWS profile for S3, your name on ledger records, and how often to check for a
   new index version. Changing the index location switches the UI without a restart.
-- **Connect**: checks of this setup (as `comind doctor`), how to register the MCP server with
+- **Connect**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.
 - **Symbol view**, opened from search, a link or a graph node: the dependency graph (dependents
@@ -59,7 +59,7 @@ new one.
 
 ### What it looks like
 
-The example company in `examples/acme`, indexed with comind (`scripts/screenshots.sh`).
+The example company in `examples/acme`, indexed with comindly (`scripts/screenshots.sh`).
 
 ![Overview: the org map with the service contracts between repositories](../assets/screenshots/overview.webp#only-light)
 ![Overview: the org map with the service contracts between repositories](../assets/screenshots/overview-dark.webp#only-dark)
@@ -110,5 +110,5 @@ pan. The theme follows the system and can be toggled. Against a read-only index,
 
 ## Terminal UI
 
-`comind ui` is the compact terminal view: overview, contracts, ledger (with a timeline), explorer and
+`comindly ui` is the compact terminal view: overview, contracts, ledger (with a timeline), explorer and
 conventions.

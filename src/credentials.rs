@@ -1,4 +1,4 @@
-//! `~/.config/comind/credentials`: your LLM API keys, a default and optionally one per team name.
+//! `~/.config/comindly/credentials`: your LLM API keys, a default and optionally one per team name.
 //! Created readable only by you and never shared; `OPENAI_API_KEY` is the fallback.
 
 use std::path::PathBuf;
@@ -81,7 +81,7 @@ pub fn set_llm_key(team: Option<&str>, key: &str) -> Result<()> {
     let p = path();
     std::fs::create_dir_all(p.parent().context("config dir")?)?;
     let text = format!(
-        "# comind API keys: a default, and one per team name if needed. Keep this file private.\n\n{}",
+        "# comindly API keys: a default, and one per team name if needed. Keep this file private.\n\n{}",
         toml::to_string(&f)?
     );
     let tmp = p.with_extension("tmp");

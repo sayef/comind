@@ -1,8 +1,8 @@
-# Comind Ledger — design plan
+# Comindly Ledger — design plan
 
 > Status: **plan, not implemented**. Date: 2026-10-13. Sequencing: [roadmap.md](roadmap.md) (Track B).
 > Decision 2026-10-16: no automatic sources. Git harvest and the MR distiller were removed; records
-> come from people (`comind remember`) and agents (MCP, hooks). Sections on harvest and the distiller
+> come from people (`comindly remember`) and agents (MCP, hooks). Sections on harvest and the distiller
 > are historical.
 > One line: *the code graph says what breaks; the ledger says why it is this way, what was
 > already tried, and what must not be done — anchored to symbols, across repos, never stale.*
@@ -25,7 +25,7 @@ Prior art (researched 2026-10, sources at the end) splits into four camps. Each 
 | Review learnings | CodeRabbit, Greptile, Qodo rules | repo / file | Review-time only; not agent-facing at edit time |
 | Decision records | ADR/MADR, Lore trailers, trace-mcp | path / doc | Path-level, age-based staleness, no cross-repo, no team sharing |
 
-**What nobody does, and comind can, because it already has a cross-repo SCIP symbol graph:**
+**What nobody does, and comindly can, because it already has a cross-repo SCIP symbol graph:**
 
 1. **Symbol anchors that survive refactors and span repos.** Everyone else anchors to lines, paths
    or commits.
@@ -150,7 +150,7 @@ Promotion is automatic where mechanical (T1→T2 when the linked commit lands on
 
 - **Transaction time** = record id (UUIDv7) + ledger commit time. "What did we know at T?"
 - **Valid time** = `valid_from` commit → first commit where status leaves `active`.
-  "What was true about the code at commit C?" — enables `comind why X --at <sha>`.
+  "What was true about the code at commit C?" — enables `comindly why X --at <sha>`.
 - Lance version numbers are local and not portable; time columns are explicit. Local Lance
   versions are tagged `ledger@<git-oid>` for reproducibility only.
 
@@ -158,7 +158,7 @@ Promotion is automatic where mechanical (T1→T2 when the linked commit lands on
 
 ## 4. Storage
 
-Same model as the code index: the user points comind at **their own** object store
+Same model as the code index: the user points comindly at **their own** object store
 (`--to s3://their-bucket/prefix` or a local path). The ledger lives under that prefix, next to the
 graph. Nothing is pushed to git remotes, and nothing goes anywhere the user did not configure.
 
@@ -177,14 +177,14 @@ graph. Nothing is pushed to git remotes, and nothing goes anywhere the user did 
   fragments and constant compaction. Immutable objects + batched compaction keep Lance tidy.
 - Least privilege falls out naturally: agents/devs need only `PutObject` on `_ledger/inbox/*`;
   only the compactor writes Lance tables; consumers only read.
-- Optional per-record **SSHSIG** signature field (`ssh-key`, namespace `comind-ledger`), reusing
+- Optional per-record **SSHSIG** signature field (`ssh-key`, namespace `comindly-ledger`), reusing
   developers' existing SSH signing keys and `allowed_signers`.
-- Git is used **read-only** for harvesting (reverts, Lore trailers, `Comind-Record:` trailers);
+- Git is used **read-only** for harvesting (reverts, Lore trailers, `Comindly-Record:` trailers);
   it is never the ledger store.
 
 ### 4.2 Compaction and freshness
 
-- `comind ledger --compact` (run by the CI index job, or by anyone) folds inbox objects missing
+- `comindly ledger --compact` (run by the CI index job, or by anyone) folds inbox objects missing
   from the snapshot into Lance via `merge_insert` on the inbox key, and deletes snapshot rows whose
   object is gone — idempotent, so a retried or duplicated compaction is harmless. Lance resolves
   concurrent commits itself, so CI and clients may both run it. (Implemented.)
@@ -208,9 +208,9 @@ Consumers pull the ledger with the graph in the same `serve --from <uri>` load.
 ### 4.4 Local layers
 
 ```text
-.git/comind/drafts/        distiller proposals awaiting review (local until accepted)
-.git/comind/transcripts/   optional, redacted, local-only pointers (hash → path); never shared
-~/.cache/comind/ledger/    mmap-able compacted view for the hook fast path
+.git/comindly/drafts/        distiller proposals awaiting review (local until accepted)
+.git/comindly/transcripts/   optional, redacted, local-only pointers (hash → path); never shared
+~/.cache/comindly/ledger/    mmap-able compacted view for the hook fast path
 ```
 
 ---
@@ -220,10 +220,10 @@ Consumers pull the ledger with the graph in the same `serve --from <uri>` load.
 ### A. Explicit (MCP / CLI)
 
 - MCP `remember` — one tool, `kind` is a parameter; schema-validated, length-capped.
-- CLI `comind remember attempt --on <symbol> --approach … --outcome reverted --evidence <sha>`.
+- CLI `comindly remember attempt --on <symbol> --approach … --outcome reverted --evidence <sha>`.
 - Writes go to drafts or directly to the actor ref depending on trust config.
 
-### B. Agent hooks (`comind hook <agent> <event>`)
+### B. Agent hooks (`comindly hook <agent> <event>`)
 
 One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 
@@ -235,7 +235,7 @@ One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 | revert-in-session | `PostToolUse` (git ops) | Candidate `attempt` |
 | turn-end / compact | `Stop`, `PreCompact`, `SessionEnd` | Run the distiller (async) → drafts |
 
-`comind init-hooks claude|codex|cursor|gemini` writes the agent's hook config. Hooks prefer the
+`comindly init-hooks claude|codex|cursor|gemini` writes the agent's hook config. Hooks prefer the
 `mcp_tool` hook type where supported (no process spawn).
 
 ### C. Git harvest (deterministic, no LLM)
@@ -243,12 +243,12 @@ One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 - **Reverts** → `attempt` (outcome `reverted`, evidence = revert SHA, T2 immediately).
 - **Lore-protocol trailers** (`Constraint:`, `Rejected:`, `Directive:`, `Tested:` …, arXiv
   2603.15566) → typed records. We *ingest and emit* Lore — free interop.
-- `Comind-Record: <uuid>` trailer links commits ↔ records.
+- `Comindly-Record: <uuid>` trailer links commits ↔ records.
 
 ### D. MR / PR harvest
 
 - MR descriptions and resolved review threads (GitLab / GitHub API) → distiller → drafts.
-- Bot command in review: `/comind remember constraint …`.
+- Bot command in review: `/comindly remember constraint …`.
 
 ### E. Interop ingest (provenance only, never raw transcripts)
 
@@ -259,8 +259,8 @@ One adapter normalizes Claude Code / Codex / Cursor / Gemini CLI events:
 
 ## 6. The distiller — the prompt that matters most
 
-> Implemented in `src/distill.rs` (`comind distill git`). **Decision 2026-10-15: comind never reads
-> agent session transcripts**; the transcript inputs, `.git/comind/transcripts/` and the turn-end /
+> Implemented in `src/distill.rs` (`comindly distill git`). **Decision 2026-10-15: comindly never reads
+> agent session transcripts**; the transcript inputs, `.git/comindly/transcripts/` and the turn-end /
 > compact hook below are not built. The distiller works from commit messages (and later MR threads).
 > Ops: `new` and `supersede`; proposals land in the shared inbox at T1 (author `distilled`). A
 > supersede or retract by a non-human author only retires machine records; a human-backed record
@@ -331,20 +331,20 @@ Hard caps: top-k with diversity (one per anchor cluster), token budget like `con
 | `context_pack` / `zoom` / `ripple` | Gain a "Known constraints & dead ends" section; `ripple` also lists *constraints affected downstream across repos* |
 | **Just-in-time pre-edit hook** | ≤ 500 tokens, only when relevant, only T2+, once per session per record |
 | `preflight` (CLI + MCP) | Input: plan text or diff. Output: conflicts with attempts/constraints on touched symbols + their ripple, with severity and evidence; runs compiled checks (§8) |
-| MR bot / CI `comind ledger check` | "This reintroduces approach X, reverted in !123 because Y" / "Violates constraint C (T4)" / "3 records anchored here are now stale — confirm or retract" |
-| MCP resources | `comind://why/{scip}` resource template; MCP prompt `why-is-this-like-this` |
+| MR bot / CI `comindly ledger check` | "This reintroduces approach X, reverted in !123 because Y" / "Violates constraint C (T4)" / "3 records anchored here are now stale — confirm or retract" |
+| MCP resources | `comindly://why/{scip}` resource template; MCP prompt `why-is-this-like-this` |
 | Revival notices | "Attempt failed under lance =1.0.1; you are now on 1.3 — retry condition met" |
 
 ### 7.3 Rendering format (what gets injected)
 
 ```text
-<comind-ledger source="comind ledger" note="recorded facts; verify before relying">
+<comindly-ledger source="comindly ledger" note="recorded facts; verify before relying">
 [attempt · T2 · active] Redis cache for permission checks — reverted
   on: service-a `authz/check_permission().` (verified at 4f1c2a)
   evidence: revert 9b2e01 ("stale grants after role change"), MR !412
   relevant when: adding caching to authorization paths
   verify: read authz/check.py:40-88
-</comind-ledger>
+</comindly-ledger>
 ```
 
 Factual, attributed, bounded, with a verify pointer. Agents that confirm/retract after verifying
@@ -358,12 +358,12 @@ A constraint can optionally compile to a check, promoting it to T4:
 
 | Check type | Example |
 |---|---|
-| **Graph rule** (native) | `forbid edge Calls from module:handlers/** to symbol:db.raw_query().` — evaluated on the comind graph, cross-repo |
+| **Graph rule** (native) | `forbid edge Calls from module:handlers/** to symbol:db.raw_query().` — evaluated on the comindly graph, cross-repo |
 | **Dependency rule** | `forbid dep lance =1.0.1` |
 | **ast-grep / Semgrep rule** | pattern-based, run if the tool is installed |
 | **Test reference** | constraint is proven by test `tests/test_x.py::test_y` |
 
-`preflight` and `comind ledger check` evaluate them. A decision expressed as a rule cannot go
+`preflight` and `comindly ledger check` evaluate them. A decision expressed as a rule cannot go
 silently stale — it fails CI. The distiller may *propose* a rule; a human must accept it.
 
 ---
@@ -401,19 +401,19 @@ multi-round-trip `input_required` flow (replacing elicitation). No sampling (dep
 ### 10.2 CLI
 
 ```text
-comind why <symbol|path[:line]> [--at <sha>] [--all]
-comind remember <kind> --on <anchor> …
-comind preflight [--diff [<range>] | --plan <file|->]
-comind ledger init|sync|compact|log|inbox|audit|check|import|export|gc
-comind hook <agent> <event>               # stdin JSON → stdout JSON
-comind init-hooks <claude|codex|cursor|gemini>
-comind ui [--web [--port]]
-comind eval ledger …                      # §13
+comindly why <symbol|path[:line]> [--at <sha>] [--all]
+comindly remember <kind> --on <anchor> …
+comindly preflight [--diff [<range>] | --plan <file|->]
+comindly ledger init|sync|compact|log|inbox|audit|check|import|export|gc
+comindly hook <agent> <event>               # stdin JSON → stdout JSON
+comindly init-hooks <claude|codex|cursor|gemini>
+comindly ui [--web [--port]]
+comindly eval ledger …                      # §13
 ```
 
 ### 10.3 Daemon fast path
 
-`comind serve` already exists. Hooks connect to it over a Unix socket when running; otherwise
+`comindly serve` already exists. Hooks connect to it over a Unix socket when running; otherwise
 they read the mmap'd compacted cache. Targets: hook p95 < 100 ms, `why` < 50 ms warm,
 `preflight` < 300 ms, incremental compaction < 1 s for 1k new records.
 
@@ -421,7 +421,7 @@ they read the mmap'd compacted cache. Targets: hook p95 < 100 ms, `why` < 50 ms 
 
 ## 11. UI — TUI and web, same backend
 
-### 11.1 `comind ui` (TUI, ratatui 0.30)
+### 11.1 `comindly ui` (TUI, ratatui 0.30)
 
 Elm-style architecture (Model / Msg / update / view), one `tokio::mpsc` event bus, background
 workers for index and ledger queries, pure rendering. gitui/bottom-style component structure.
@@ -438,7 +438,7 @@ workers for index and ledger queries, pure rendering. gitui/bottom-style compone
 Terminal graphs stay local (≤ a few dozen nodes, Sugiyama layout, image protocol on capable
 terminals via `ratatui-image`, ASCII fallback). Big graphs go to the web UI.
 
-### 11.2 `comind ui --web` (embedded SPA)
+### 11.2 `comindly ui --web` (embedded SPA)
 
 axum + `rust-embed` serving a Vite/TypeScript SPA from the same binary on `127.0.0.1`, random
 per-launch token, Host/Origin checks.
@@ -459,13 +459,13 @@ Later: the same views as MCP Apps inside agent clients.
 
 - **Memory poisoning** (OWASP Agentic ASI06; MINJA, AgentPoison, MemoryGraft): trust tiers gate
   injection; T0 for anything derived from tool output/web; schema + length caps; Unicode
-  tag/bidi stripping; instruction-phrasing lint; optional record signatures; `comind ledger audit`
+  tag/bidi stripping; instruction-phrasing lint; optional record signatures; `comindly ledger audit`
   lists all agent-authored records since T; retraction as a kill switch.
 - **Secrets**: scanned before any record is written; raw transcripts never enter the shared store.
 - **GDPR**: pseudonymous actor ids; no PII in record bodies (lint); configurable retention.
   Erasure is a real delete, unlike git history: remove the inbox object, `delete` the Lance rows,
   then clean up old Lance versions (deleted rows survive in prior versions until cleanup).
-  Implemented as `comind erase <id…> | --actor <id|me> [--yes]`: deletes the inbox objects and
+  Implemented as `comindly erase <id…> | --actor <id|me> [--yes]`: deletes the inbox objects and
   relations about them, compacts, rewrites the snapshot and prunes all old versions, and leaves
   id-only tombstones (`_ledger/erased/<id>`) so `harvest` does not re-create harvested records.
   Run it while no other compaction is in progress (pruning skips the in-flight safety window).
@@ -479,7 +479,7 @@ Later: the same views as MCP Apps inside agent clients.
 
 ## 13. Proving it works — evaluation built in
 
-`comind eval ledger`:
+`comindly eval ledger`:
 
 1. **Replay benchmark from your own history.** Mine reverts and Lore `Rejected:` trailers from git
    history → tasks where a known-bad approach is tempting. Run the agent with ledger on vs off.
@@ -505,12 +505,12 @@ enabled by default.
 |---|---|---|
 | **P0 Foundations** | rmcp 2.2 → 3.x (spec 2026-07-28); re-test lancedb 0.40 (lance recursion bug); symbol fingerprints in the index; `src/ledger/` module skeleton | Existing 10 MCP tools pass on new rmcp; fingerprints stable across reformatting |
 | **P1 Ledger core** | Record schema, object-store inbox (create-only PUT), idempotent compaction to Lance, derived status, CLI `remember` / `why` / `ledger log|sync` | Many concurrent writers on S3 and local FS; compaction converges identically and is idempotent |
-| **P2 Agent loop** | MCP `why`/`remember`/`review`; ledger sections in `context_pack`/`zoom`/`ripple`; Claude Code hooks (session-start digest, pre-edit JIT); **eval harness v0** | Dogfooded on comind itself; JIT hook p95 < 100 ms; replay benchmark runs |
+| **P2 Agent loop** | MCP `why`/`remember`/`review`; ledger sections in `context_pack`/`zoom`/`ripple`; Claude Code hooks (session-start digest, pre-edit JIT); **eval harness v0** | Dogfooded on comindly itself; JIT hook p95 < 100 ms; replay benchmark runs |
 | **P3 Staleness engine** | Re-anchoring, drift classes, cascade, dependency anchors, decay, inbox | Seeded refactor suite: renames re-anchor, real changes flag stale, ≥ 95% precision |
 | **P4 Harvest + distill** | Reverts, Lore trailers, MR import, distiller + drafts, Agent Trace / git-ai / Entire / ADR ingest; Codex/Cursor/Gemini adapters | Distiller inbox accept rate ≥ 60%, duplicate rate ≤ 5% |
 | **P5 Preflight + enforcement** | `preflight`, compiled constraints (graph/dep rules, ast-grep), `ledger check` in CI, MR bot | A reverted approach re-proposed in a test MR is caught with evidence |
-| **P6 TUI** | `comind ui` screens of §11.1 | All review flows doable without leaving the terminal |
-| **P7 Web UI** | `comind ui --web` views of §11.2 | Org map renders 50k+ nodes smoothly; time slider works |
+| **P6 TUI** | `comindly ui` screens of §11.1 | All review flows doable without leaving the terminal |
+| **P7 Web UI** | `comindly ui --web` views of §11.2 | Org map renders 50k+ nodes smoothly; time slider works |
 | **P8 Hardening** | Signing, poisoning red-team, GDPR erasure path, docs, public launch | Release gate of §13 passes |
 
 P2 is the first moment of real value — keep P0–P2 tight and dogfood immediately.
@@ -526,7 +526,7 @@ P2 is the first moment of real value — keep P0–P2 tight and dogfood immediat
 | Signing | `ssh-key` (SSHSIG) | Optional per-record signature field |
 | Derived store | LanceDB (existing; evaluate 0.40) | FTS + vectors exactly like `search` |
 | Fingerprints | tree-sitter (bump to 0.27) | Hand-rolled blake3 memo; **not** salsa (experimental) |
-| Watching | `notify` + `notify-debouncer-full` | For `comind ui` / daemon live mode |
+| Watching | `notify` + `notify-debouncer-full` | For `comindly ui` / daemon live mode |
 | MCP | `rmcp` 3.x | Structured output, resources, subscriptions |
 | LLM (distiller only) | Rig (existing) | Optional; everything else is deterministic |
 | TUI | `ratatui` 0.30, `crossterm`, `tui-tree-widget`, `ratatui-image` | Elm architecture |
@@ -542,7 +542,7 @@ check,hook}.rs`, `src/ui/{tui,web}/`.
 1. **Default write path for agent records:** drafts-first (human inbox) vs direct T1. *Recommend
    drafts-first; T1 direct only for explicit `remember` calls.*
 2. **Compaction owner:** concurrency is safe either way; *recommend CI as the routine owner, with
-   `comind ledger compact` available to anyone.*
+   `comindly ledger compact` available to anyone.*
 3. **Constraint enforcement default:** advisory vs blocking in CI. *Recommend advisory until T4
    precision is proven, then opt-in blocking per constraint.*
 4. **rmcp 3 upgrade timing** — it is breaking; do it first (P0) rather than mid-feature.

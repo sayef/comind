@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 const TABLE: &str = "settings";
 
-/// What everyone using an index shares; `None` leaves comind's default.
+/// What everyone using an index shares; `None` leaves comindly's default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TeamSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_load_and_refuse_a_stale_write() {
-        let dir = std::env::temp_dir().join(format!("comind-team-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-team-{}", std::process::id()));
         let root = dir.to_str().unwrap();
         let first = TeamSettings {
             llm_model: Some("m1".into()),

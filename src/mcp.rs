@@ -1,4 +1,4 @@
-//! Comind MCP server — the code graph as tools a coding agent calls live.
+//! Comindly MCP server — the code graph as tools a coding agent calls live.
 //!
 //! Loads the resolved org graph from LanceDB once at startup (local mmap or S3), holds it in
 //! memory, and serves deterministic navigation over stdio:
@@ -38,7 +38,7 @@ type Cached = (std::time::Instant, Vec<crate::ledger::Record>);
 type Enrichment = HashMap<String, (String, Vec<String>)>;
 
 #[derive(Clone)]
-pub struct ComindServer {
+pub struct ComindlyServer {
     graph: Arc<CodeGraph>,
     enrichment: Arc<Enrichment>,
     style_guide: Arc<Option<String>>,
@@ -63,7 +63,7 @@ pub struct ComindServer {
     markdown: bool,
 }
 
-impl ComindServer {
+impl ComindlyServer {
     /// The index root holding `_graph` and `_ledger`.
     fn ledger_root(&self) -> String {
         self.uri
@@ -95,10 +95,9 @@ impl ComindServer {
         }
     }
 
-    /// The calling agent: `COMIND_AGENT`, else the client name from the MCP handshake.
+    /// The calling agent: `COMINDLY_AGENT`, else the client name from the MCP handshake.
     fn agent(peer: &rmcp::Peer<rmcp::RoleServer>) -> crate::ledger::Provenance {
-        let name = std::env::var("COMIND_AGENT")
-            .ok()
+        let name = crate::config::env("COMINDLY_AGENT")
             .or_else(|| Some(peer.peer_info()?.client_info.name.clone()));
         crate::ledger::Provenance::agent("mcp", name)
     }
@@ -559,7 +558,7 @@ trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthr
 (on by default unless the index was built with --no-embed); the graph tools always work.";
 
 #[tool_router(vis = "pub(crate)")]
-impl ComindServer {
+impl ComindlyServer {
     #[tool(
         name = "search",
         description = "Natural-language + lexical hybrid code search, reranked by dependency-graph centrality. Ask a question ('how do we create a migration?') or pass a symbol name."
@@ -606,7 +605,7 @@ impl ComindServer {
                 .repos()
                 .into_iter()
                 .map(|(repo, symbols)| RepoCount {
-                    depends_on: comind_deps(&self.packages, &repo),
+                    depends_on: comindly_deps(&self.packages, &repo),
                     repo,
                     symbols,
                 })
@@ -1069,7 +1068,7 @@ impl ComindServer {
 }
 
 #[rmcp::tool_handler(router = Self::tool_router())]
-impl rmcp::ServerHandler for ComindServer {
+impl rmcp::ServerHandler for ComindlyServer {
     fn get_info(&self) -> rmcp::model::ServerConfig {
         rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
@@ -1153,7 +1152,7 @@ fn md_repos(d: &ReposDto) -> String {
     o
 }
 
-fn comind_deps(rows: &[crate::manifests::PackageRow], repo: &str) -> Vec<DepDto> {
+fn comindly_deps(rows: &[crate::manifests::PackageRow], repo: &str) -> Vec<DepDto> {
     crate::manifests::internal(rows)
         .into_iter()
         .filter(|d| d.consumer == repo)
@@ -1380,7 +1379,7 @@ fn md_guide(d: &GuideDto) -> String {
         None => "## Conventions — org baseline\n".to_string(),
     };
     if d.conventions.is_empty() {
-        o.push_str("\n_none measured — re-run `comind index`/`link` to store facts._\n");
+        o.push_str("\n_none measured — re-run `comindly index`/`link` to store facts._\n");
     }
     let mut org_header = false;
     for c in &d.conventions {
@@ -1458,12 +1457,12 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let embedder = match crate::embed::Embedder::load_default() {
         Ok(e) => Some(e),
         Err(e) => {
-            eprintln!("comind serve: embedding model unavailable, `search` disabled: {e:#}");
+            eprintln!("comindly serve: embedding model unavailable, `search` disabled: {e:#}");
             None
         }
     };
 
-    let server = ComindServer {
+    let server = ComindlyServer {
         graph,
         enrichment: Arc::new(enrichment),
         style_guide: Arc::new(style_guide),
@@ -1487,7 +1486,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
 
 /// The MCP tools this server offers: `(name, description)`.
 pub fn tools() -> Vec<(String, String)> {
-    ComindServer::tool_router()
+    ComindlyServer::tool_router()
         .list_all()
         .into_iter()
         .map(|t| {

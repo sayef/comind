@@ -43,12 +43,12 @@ jobs:
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar xz gitleaks
           ./gitleaks dir --redact --no-banner -v site
-      # Cloudflare Pages serves the site at comind.pages.dev; pull requests only build it.
+      # Cloudflare Pages serves the site at comindly.pages.dev; pull requests only build it.
       - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Creates the project on the first deploy; later runs only report that it exists.
-          preCommands: wrangler pages project create comind --production-branch=main || true
-          command: pages deploy site --project-name=comind --branch=main
+          preCommands: wrangler pages project create comindly --production-branch=main || true
+          command: pages deploy site --project-name=comindly --branch=main

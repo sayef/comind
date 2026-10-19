@@ -1,5 +1,5 @@
 //! Index a local repo into the cross-repo graph, then run graph queries — all in-process,
-//! no network and no object storage. This is the deterministic core of comind:
+//! no network and no object storage. This is the deterministic core of comindly:
 //! `parse` (tree-sitter) → `resolve` (bind edges) → `graph` (ripple / zoom).
 //!
 //! Run it against any Python/TypeScript repo:
@@ -9,7 +9,7 @@
 //! cargo run --example index_and_search -- ../some-repo Settings   # focus a specific symbol
 //! ```
 
-use comind::model::SymbolKind;
+use comindly::model::SymbolKind;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -23,7 +23,7 @@ fn main() -> ExitCode {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
-    let parsed = match comind::parse::parse_repo(Path::new(repo), name) {
+    let parsed = match comindly::parse::parse_repo(Path::new(repo), name) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("parse failed for {repo:?}: {e:#}");
@@ -32,12 +32,12 @@ fn main() -> ExitCode {
     };
 
     // 2. Bind imports, calls and bases to real definitions (cross-repo aware).
-    let resolved = comind::resolve::resolve(&parsed.symbols, &parsed.edges, &parsed.facts);
+    let resolved = comindly::resolve::resolve(&parsed.symbols, &parsed.edges, &parsed.facts);
     let mut symbols = parsed.symbols.clone();
     symbols.extend(resolved.symbols);
 
     // 3. Build the in-memory dependency graph (code + contract nodes).
-    let g = comind::graph::CodeGraph::build(&symbols, &resolved.edges);
+    let g = comindly::graph::CodeGraph::build(&symbols, &resolved.edges);
     println!(
         "indexed {} symbols, {} edges",
         g.node_count(),

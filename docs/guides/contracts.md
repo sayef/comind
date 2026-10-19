@@ -1,11 +1,11 @@
 # Service contracts
 
-A contract is a route, queue, topic, bucket or SQL table. comind finds who provides it and who uses it,
+A contract is a route, queue, topic, bucket or SQL table. comindly finds who provides it and who uses it,
 across repositories, so blast radius crosses service boundaries.
 
 ```sh
-comind contracts --index-dir ./comind-index      # everything
-comind contracts --type http --dangling          # routes nobody calls, calls nobody serves
+comindly contracts --index-dir ./comindly-index      # everything
+comindly contracts --type http --dangling          # routes nobody calls, calls nobody serves
 ```
 
 ## What is detected

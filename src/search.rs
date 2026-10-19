@@ -1,8 +1,8 @@
-//! Hybrid code search: native LanceDB retrieval (BM25 + vector via RRF) followed by comind's
+//! Hybrid code search: native LanceDB retrieval (BM25 + vector via RRF) followed by comindly's
 //! code-aware rerank — definition/exact-name boosts, structured path penalties, LLM-query
 //! recall boost, and a dependency-graph **centrality** signal no pure search tool has.
 //!
-//! Shared by the `comind search` CLI and the `search` MCP tool.
+//! Shared by the `comindly search` CLI and the `search` MCP tool.
 
 use std::collections::HashMap;
 
@@ -93,7 +93,7 @@ pub fn markdown(query: &str, hits: &[SearchHit]) -> String {
     o
 }
 
-/// Apply comind's code-aware + centrality boosts to native-retrieval candidates `(id, base)`.
+/// Apply comindly's code-aware + centrality boosts to native-retrieval candidates `(id, base)`.
 pub fn rank_candidates(
     candidates: Vec<(String, f32)>,
     by_id: &HashMap<String, Symbol>,

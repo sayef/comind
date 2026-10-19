@@ -1,4 +1,4 @@
-//! comind-git — git change detection for incremental indexing.
+//! comindly-git — git change detection for incremental indexing.
 //!
 //! Uses `git2` (vendored libgit2, statically linked → single binary preserved). At index time
 //! the working tree and `.git` are present; in CI indexing runs on a pushed commit, so

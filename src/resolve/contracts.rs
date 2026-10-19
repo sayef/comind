@@ -1642,7 +1642,7 @@ fn sql_tables(sql: &str) -> Vec<(String, bool)> {
 
 pub fn contract_id(key: &str) -> GlobalSymbolId {
     GlobalSymbolId {
-        scheme: "comind-contract".into(),
+        scheme: "comindly-contract".into(),
         package_manager: ".".into(),
         package: CONTRACTS.into(),
         version: ".".into(),

@@ -1,4 +1,4 @@
-# Comind — Rust Architecture
+# Comindly — Rust Architecture
 
 > Polyglot, cross-repo code-intelligence engine. CLI + MCP server, single static binary.
 > Read-heavy / write-rare: the index is a **versioned artifact in S3**, not a live shared DB.
@@ -20,10 +20,10 @@ read/write database. Instead:
 
 ```
                     ┌──────────────────────────── CI on push to master ─────────────────────────┐
-  repo A push ─────▶│ comind index → Lance tables {symbols, edges, embeddings, chunks}          │
-                    │              → write to  s3://comind/<repo>/<commit>/                       │
+  repo A push ─────▶│ comindly index → Lance tables {symbols, edges, embeddings, chunks}          │
+                    │              → write to  s3://comindly/<repo>/<commit>/                       │
                     │ link-resolver: merge stack-graphs across ALL repos → cross-repo edges       │
-                    │              → s3://comind/_graph/<ts>/  → atomically bump "latest" pointer  │
+                    │              → s3://comindly/_graph/<ts>/  → atomically bump "latest" pointer  │
                     └───────────────────────────────────────────────────────────────────────────┘
                                                      │
    each dev's MCP server / CLI ──▶ watch "latest" ──▶ pull delta ──▶ build in-mem petgraph ──▶ serve locally
@@ -104,11 +104,11 @@ src/
   cache.rs    local mirror of a remote (S3) index for hooks, refreshed in the background.
   checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
   preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
-  tui.rs      `comind ui`: overview, contracts, ledger, explorer, conventions (ratatui).
-  web.rs      `comind ui --web`: axum JSON API + the React app from ui/ (embedded by build.rs), 127.0.0.1 only.
+  tui.rs      `comindly ui`: overview, contracts, ledger, explorer, conventions (ratatui).
+  web.rs      `comindly ui --web`: axum JSON API + the React app from ui/ (embedded by build.rs), 127.0.0.1 only.
   resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
   resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
-  eval.rs     graph-quality eval against a gold fixture (`comind eval graph`).
+  eval.rs     graph-quality eval against a gold fixture (`comindly eval graph`).
   index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
   graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
   embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
@@ -117,11 +117,11 @@ src/
   ui.rs       styled stderr output (indicatif progress + console + comfy-table tables).
   config.rs   config.toml + defaults (index dir, models, format, caps); precedence resolver.
   git.rs      git2 change detection for incremental indexing.
-  main.rs     clap binary: `comind index|link|explore|search|flow|changed|serve|config`. The single distributable.
+  main.rs     clap binary: `comindly index|link|explore|search|flow|changed|serve|config`. The single distributable.
 ```
 
-One crate, one module per stage; `main.rs` uses the library as `comind::<module>`. (Earlier phases
-below were built as a `cargo` workspace of `comind-*` crates and later consolidated into this single crate.)
+One crate, one module per stage; `main.rs` uses the library as `comindly::<module>`. (Earlier phases
+below were built as a `cargo` workspace of `comindly-*` crates and later consolidated into this single crate.)
 
 MCP verb semantics follow a design proven in the original Python implementation.
 

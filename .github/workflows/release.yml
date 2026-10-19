@@ -1,6 +1,6 @@
 name: Release
 
-# Builds `comind-<target>.tar.gz` (+ `.sha256`) for each target and attaches them to the GitHub release
+# Builds `comindly-<target>.tar.gz` (+ `.sha256`) for each target and attaches them to the GitHub release
 # that release-plz created; scripts/install.sh downloads these.
 on:
   push:
@@ -102,13 +102,13 @@ jobs:
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         run: |
-          tar -C target/${{ matrix.target }}/release -czf "comind-${{ matrix.target }}.tar.gz" comind
-          shasum -a 256 "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256" \
-            2>/dev/null || sha256sum "comind-${{ matrix.target }}.tar.gz" > "comind-${{ matrix.target }}.tar.gz.sha256"
+          tar -C target/${{ matrix.target }}/release -czf "comindly-${{ matrix.target }}.tar.gz" comindly
+          shasum -a 256 "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256" \
+            2>/dev/null || sha256sum "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256"
       - uses: actions/upload-artifact@v7
         with:
-          name: comind-${{ matrix.target }}
-          path: comind-${{ matrix.target }}.tar.gz*
+          name: comindly-${{ matrix.target }}
+          path: comindly-${{ matrix.target }}.tar.gz*
 
   publish:
     needs: [tag, build]

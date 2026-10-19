@@ -48,7 +48,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="p-5">
         <DialogTitle className="text-base font-semibold">Add a repository</DialogTitle>
-        <p className="mt-1 text-sm text-muted-foreground">Your local clone. comind indexes its default branch from its own checkout.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Your local clone. comindly indexes its default branch from its own checkout.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className={field}>
             Folder
@@ -102,7 +102,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
         <DialogTitle className="text-base font-semibold">Scan a folder for repositories</DialogTitle>
-        <p className="mt-1 text-sm text-muted-foreground">Tick the ones comind should index; untick to drop one from the list.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Tick the ones comindly should index; untick to drop one from the list.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className={field}>
             Folder
@@ -179,7 +179,7 @@ function CloneDialog({ open, onOpenChange, initialUrl }: { open: boolean; onOpen
       <DialogContent className="p-5">
         <DialogTitle className="text-base font-semibold">Clone a repository</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
-          HTTPS or SSH. comind uses the git access this machine already has: your SSH key, your git credential helper, or
+          HTTPS or SSH. comindly uses the git access this machine already has: your SSH key, your git credential helper, or
           GITLAB_TOKEN / GITHUB_TOKEN. If none works it asks for a token.
         </p>
         <div className="mt-4 flex flex-col gap-3">
@@ -258,7 +258,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
         <div>
           <CardTitle>Index</CardTitle>
           <CardDescription>
-            Fetches each repository's default branch into comind's own checkout, then rebuilds the index. Unchanged code reuses its
+            Fetches each repository's default branch into comindly's own checkout, then rebuilds the index. Unchanged code reuses its
             embeddings{llm ? " and summaries" : ""}.
           </CardDescription>
         </div>
@@ -332,7 +332,7 @@ export function RepositoriesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Repositories</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            What comind indexes. Each repository is indexed at its default branch from comind's own checkout, so your folders and
+            What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout, so your folders and
             branches are never touched.
           </p>
         </div>
@@ -354,7 +354,7 @@ export function RepositoriesPage() {
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <span className="min-w-0 [overflow-wrap:anywhere]">
             {unlisted.length === 1 ? "One repository" : `${unlisted.length} repositories`} in this index {unlisted.length === 1 ? "has" : "have"} no
-            folder on this machine yet. Locate your copy or clone it to index from here; comind indexes all repositories together so
+            folder on this machine yet. Locate your copy or clone it to index from here; comindly indexes all repositories together so
             their links stay complete.
           </span>
         </p>
@@ -378,7 +378,7 @@ export function RepositoriesPage() {
               </div>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{r.path}</div>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="What comind indexes">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="What comindly indexes">
               <GitBranch className="size-3.5" /> indexes <span className="font-mono text-foreground">origin/{r.branch ?? "?"}</span>
               {r.indexed_commit && <span className="font-mono">@ {r.indexed_commit.slice(0, 7)}</span>}
             </div>
@@ -400,7 +400,7 @@ export function RepositoriesPage() {
                 {r.symbols != null && <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
               </div>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                {r.remote ?? "remote unknown (indexed before comind recorded remotes)"}
+                {r.remote ?? "remote unknown (indexed before comindly recorded remotes)"}
               </div>
             </div>
             {r.commit && <span className="font-mono text-xs text-muted-foreground">indexed @ {r.commit.slice(0, 7)}</span>}

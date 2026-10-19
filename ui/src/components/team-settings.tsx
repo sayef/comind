@@ -36,7 +36,7 @@ export function ApiKey() {
         <Badge variant={source === "none" ? "outline" : "brand"}>{sources[source]}</Badge>
       </p>
       <p className="text-xs text-muted-foreground">
-        Saved in ~/.config/comind/credentials{name ? ` under ${name}` : ""}, readable only by you; otherwise OPENAI_API_KEY is used.
+        Saved in ~/.config/comindly/credentials{name ? ` under ${name}` : ""}, readable only by you; otherwise OPENAI_API_KEY is used.
       </p>
       <div className="flex flex-wrap gap-2">
         <Input type="password" className="max-w-sm" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your API key" />
@@ -78,7 +78,7 @@ export function TeamSection() {
           <Users className="size-4" /> Team
         </CardTitle>
         <CardDescription>
-          Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comind's
+          Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comindly's
           default, shown in grey. Changing them needs write access to the index.
           {t.changed_by && (
             <span>

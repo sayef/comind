@@ -1,11 +1,11 @@
-//! Comind embed — local static embeddings for semantic code search.
+//! Comindly embed — local static embeddings for semantic code search.
 //!
 //! Uses **Model2Vec** (`model2vec-rs`) static embeddings: pure-Rust, CPU-only, no ONNX
 //! runtime, tiny + fast (~ms/query) — the approach semble validated for agentic code
 //! search. Vectors are L2-normalized, so cosine similarity is a plain dot product.
 //!
 //! This is the *optional semantic layer*. It rides on top of the deterministic graph:
-//! search fuses this signal with lexical BM25 and graph centrality (see comind's hybrid
+//! search fuses this signal with lexical BM25 and graph centrality (see comindly's hybrid
 //! search) — never the sole retrieval path.
 
 use crate::model::Symbol;
@@ -69,7 +69,7 @@ mod tests {
         a.iter().zip(b).map(|(x, y)| x * y).sum()
     }
 
-    // Downloads a model from Hugging Face — run explicitly: `cargo test -p comind-embed -- --ignored`.
+    // Downloads a model from Hugging Face — run explicitly: `cargo test -p comindly-embed -- --ignored`.
     #[test]
     #[ignore]
     fn embeds_and_ranks_semantically() {
@@ -94,7 +94,7 @@ mod tests {
 
 /// Code-aware ranking signals for hybrid search: identifier splitting, lexical scoring,
 /// query classification, and path penalties. Ideas borrowed from semble (re-implemented,
-/// not copied); comind adds a dependency-graph centrality signal on top (applied by the caller).
+/// not copied); comindly adds a dependency-graph centrality signal on top (applied by the caller).
 pub mod rank {
     use std::collections::BTreeSet;
 

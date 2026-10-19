@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// `npm run dev` proxies the API to a running `comind ui --web` (default port 7878).
+// `npm run dev` proxies the API to a running `comindly ui --web` (default port 7878).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },

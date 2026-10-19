@@ -28,7 +28,7 @@ async fn root(app: &Shared) -> anyhow::Result<String> {
         .context("read-only UI")
 }
 
-/// comind's built-in values, shown where a setting is left empty.
+/// comindly's built-in values, shown where a setting is left empty.
 pub(super) fn defaults() -> Value {
     json!({
         "llm_model": crate::llm::DEFAULT_MODEL,

@@ -151,11 +151,11 @@ impl Provenance {
     }
 }
 
-/// The name new records carry: `COMIND_AUTHOR_NAME`, config `author_name`, else git `user.name`.
+/// The name new records carry: `COMINDLY_AUTHOR_NAME`, config `author_name`, else git `user.name`.
 pub fn author_name() -> Option<String> {
-    let name = match std::env::var("COMIND_AUTHOR_NAME") {
-        Ok(n) => Some(n),
-        Err(_) => {
+    let name = match crate::config::env("COMINDLY_AUTHOR_NAME") {
+        Some(n) => Some(n),
+        None => {
             let cfg = crate::config::Config::load();
             if cfg.record_names == Some(false) {
                 return None;
@@ -419,7 +419,7 @@ pub(crate) fn suspicious(text: &str) -> Option<&'static str> {
 
 /// A pseudonymous, stable actor id for this machine and user (no names stored).
 pub fn actor() -> String {
-    if let Ok(a) = std::env::var("COMIND_ACTOR") {
+    if let Some(a) = crate::config::env("COMINDLY_ACTOR") {
         return a;
     }
     let who = std::env::var("USER").unwrap_or_default();
@@ -544,7 +544,7 @@ impl Ledger {
             };
             match serde_json::from_str::<Record>(&json) {
                 Ok(r) => out.push((key, r)),
-                Err(e) => eprintln!("comind: skipping unreadable ledger record {key}: {e}"),
+                Err(e) => eprintln!("comindly: skipping unreadable ledger record {key}: {e}"),
             }
         }
         out.sort_by(|a, b| a.1.id.cmp(&b.1.id));
@@ -1228,7 +1228,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_only_inbox_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("comind-ledger-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-ledger-{}", std::process::id()));
         let ledger = Ledger::open(dir.to_str().unwrap()).unwrap();
         let s = sym("f", 1, 1);
         let mut rec = Record::new(
@@ -1253,7 +1253,7 @@ mod tests {
 
     #[tokio::test]
     async fn compaction_folds_and_forgets() {
-        let dir = std::env::temp_dir().join(format!("comind-compact-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-compact-{}", std::process::id()));
         let ledger = Ledger::open(dir.to_str().unwrap()).unwrap();
         let s = sym("f", 1, 1);
         let rec = |t: &str| {
@@ -1295,7 +1295,7 @@ mod tests {
 
     #[tokio::test]
     async fn erase_takes_relations_along() {
-        let dir = std::env::temp_dir().join(format!("comind-erase-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-erase-{}", std::process::id()));
         let ledger = Ledger::open(dir.to_str().unwrap()).unwrap();
         let s = sym("f", 1, 1);
         let mine = Record::new(

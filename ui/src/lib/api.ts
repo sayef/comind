@@ -187,7 +187,7 @@ export interface Team {
   defaults: Defaults;
 }
 
-/** comind's built-in values, used where a setting is empty. */
+/** comindly's built-in values, used where a setting is empty. */
 export interface Defaults {
   llm_model: string;
   llm_base_url: string;
@@ -277,7 +277,7 @@ export interface IndexJob {
 declare global {
   interface Window {
     ipc?: { postMessage: (m: string) => void };
-    __comindPicked?: (path: string | null) => void;
+    __comindlyPicked?: (path: string | null) => void;
   }
 }
 
@@ -285,7 +285,7 @@ declare global {
 export const pickFolder = window.ipc
   ? () =>
       new Promise<string | null>((resolve) => {
-        window.__comindPicked = resolve;
+        window.__comindlyPicked = resolve;
         window.ipc!.postMessage("pick-folder");
       })
   : undefined;

@@ -1,4 +1,4 @@
-//! Comind index — the versioned LanceDB store (local dir or S3).
+//! Comindly index — the versioned LanceDB store (local dir or S3).
 //!
 //! Tables: `symbols`, `edges`, `file_facts`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
 //! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
@@ -696,7 +696,7 @@ pub async fn write_search_table(uri: &str, rows: &[SearchRow]) -> Result<u64> {
         .execute()
         .await
     {
-        eprintln!("comind: vector ANN index skipped (non-fatal): {e}");
+        eprintln!("comindly: vector ANN index skipped (non-fatal): {e}");
     }
     Ok(version)
 }
@@ -1189,7 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn repo_meta_gains_remotes_and_old_tables_still_read() {
-        let dir = std::env::temp_dir().join(format!("comind-meta-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-meta-{}", std::process::id()));
         let uri = dir.to_str().unwrap();
         let old = RecordBatch::try_new(
             Arc::new(Schema::new(vec![

@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 
-const DOCS = "https://comind.pages.dev";
+const DOCS = "https://comindly.pages.dev";
 
 /** An example question per MCP tool; agents pick the tool themselves. */
 const ASK: Record<string, string> = {
@@ -71,19 +71,19 @@ function connect(agent: Agent, index: string, remote: boolean) {
   const args = ["serve", "--index-dir", index];
   const env = remote ? { AWS_PROFILE: "<profile>", AWS_REGION: "<region>" } : null;
   const json = (servers: string, extra: object = {}) =>
-    JSON.stringify({ [servers]: { comind: { ...extra, command: "comind", args, ...(env ? { env } : {}) } } }, null, 2);
+    JSON.stringify({ [servers]: { comindly: { ...extra, command: "comindly", args, ...(env ? { env } : {}) } } }, null, 2);
   switch (agent) {
     case "claude":
       return {
         where: "Run once in a terminal (user scope: every project):",
-        code: `claude mcp add --scope user comind${env ? " -e AWS_PROFILE=<profile> -e AWS_REGION=<region>" : ""} -- comind ${args.join(" ")}`,
+        code: `claude mcp add --scope user comindly${env ? " -e AWS_PROFILE=<profile> -e AWS_REGION=<region>" : ""} -- comindly ${args.join(" ")}`,
       };
     case "cursor":
       return { where: "Add to ~/.cursor/mcp.json:", code: json("mcpServers") };
     case "codex":
       return {
         where: "Add to ~/.codex/config.toml:",
-        code: `[mcp_servers.comind]\ncommand = "comind"\nargs = ${JSON.stringify(args)}${env ? `\nenv = { AWS_PROFILE = "<profile>", AWS_REGION = "<region>" }` : ""}`,
+        code: `[mcp_servers.comindly]\ncommand = "comindly"\nargs = ${JSON.stringify(args)}${env ? `\nenv = { AWS_PROFILE = "<profile>", AWS_REGION = "<region>" }` : ""}`,
       };
     case "vscode":
       return { where: "Add to .vscode/mcp.json in your workspace:", code: json("servers", { type: "stdio" }) };
@@ -105,7 +105,7 @@ export function SetupPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Connect your agent</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            comind answers your coding agent's questions about the whole codebase: what calls what across repositories, which services
+            comindly answers your coding agent's questions about the whole codebase: what calls what across repositories, which services
             talk through which routes and queues, what a change can break, and what the team recorded about the code.
           </p>
         </div>
@@ -120,7 +120,7 @@ export function SetupPage() {
         <CardHeader>
           <CardTitle>This setup</CardTitle>
           <CardDescription>
-            comind {s?.version ?? "…"} · index <span className="font-mono">{index}</span>
+            comindly {s?.version ?? "…"} · index <span className="font-mono">{index}</span>
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1.5 text-sm">
@@ -143,9 +143,9 @@ export function SetupPage() {
 
       <Card>
         <CardContent className="flex flex-col gap-6 pt-6">
-          <Step n={1} title="Install comind on your machine">
-            <p>Prebuilt for macOS and Linux. Check with <code className="font-mono">comind --version</code>.</p>
-            <Code>{"curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh"}</Code>
+          <Step n={1} title="Install comindly on your machine">
+            <p>Prebuilt for macOS and Linux. Check with <code className="font-mono">comindly --version</code>.</p>
+            <Code>{"curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh"}</Code>
           </Step>
           <Step n={2} title="Register the MCP server with your agent">
             <Tabs value={agent} onValueChange={(v) => setAgent(v as Agent)}>
@@ -165,7 +165,7 @@ export function SetupPage() {
                 uses. Hooks read a local mirror that refreshes itself.
               </p>
             )}
-            <p>Restart the agent; it then lists comind's tools and calls them on its own when a question needs them.</p>
+            <p>Restart the agent; it then lists comindly's tools and calls them on its own when a question needs them.</p>
           </Step>
           <Step n={3} title="Optional: hooks for Claude Code">
             <p>
@@ -173,14 +173,14 @@ export function SetupPage() {
               starts, and about a file just before the agent edits it (each record once per session). Print the settings and merge them
               into <code className="font-mono">~/.claude/settings.json</code>:
             </p>
-            <Code>{"comind init-hooks claude"}</Code>
+            <Code>{"comindly init-hooks claude"}</Code>
             <p>
-              For Cursor, Gemini or Codex: <code className="font-mono">comind init-hooks cursor</code> (or{" "}
+              For Cursor, Gemini or Codex: <code className="font-mono">comindly init-hooks cursor</code> (or{" "}
               <code className="font-mono">gemini</code>, <code className="font-mono">codex</code>, <code className="font-mono">generic</code>).
             </p>
           </Step>
           <Step n={4} title="Check it">
-            <Code>{`comind doctor --index-dir ${index}`}</Code>
+            <Code>{`comindly doctor --index-dir ${index}`}</Code>
           </Step>
         </CardContent>
       </Card>
@@ -214,12 +214,12 @@ export function SetupPage() {
         <CardContent>
           <Code>
             {[
-              `comind search "where do we retry HTTP calls" --index-dir ${index}`,
-              `comind explore OrderService.place_order --index-dir ${index}   # neighbourhood, blast radius, context`,
-              `comind contracts --dangling --index-dir ${index}             # routes or queues missing a side`,
-              `comind why OrderService --index-dir ${index}                 # what the team recorded`,
-              `comind preflight . --index-dir ${index}                      # before you commit`,
-              `comind remember constraint --on OrderService --title "…" --index-dir ${index}`,
+              `comindly search "where do we retry HTTP calls" --index-dir ${index}`,
+              `comindly explore OrderService.place_order --index-dir ${index}   # neighbourhood, blast radius, context`,
+              `comindly contracts --dangling --index-dir ${index}             # routes or queues missing a side`,
+              `comindly why OrderService --index-dir ${index}                 # what the team recorded`,
+              `comindly preflight . --index-dir ${index}                      # before you commit`,
+              `comindly remember constraint --on OrderService --title "…" --index-dir ${index}`,
             ].join("\n")}
           </Code>
         </CardContent>

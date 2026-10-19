@@ -5,7 +5,7 @@ use std::path::Path;
 #[test]
 fn scip_answers_are_used_and_exact() {
     let only = ["ui-kit", "web-app"];
-    let r = comind::eval::eval_with(
+    let r = comindly::eval::eval_with(
         Path::new("tests/fixtures/org"),
         Some(&only),
         Some(Path::new("tests/fixtures/scip")),

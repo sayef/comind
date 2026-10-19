@@ -79,7 +79,7 @@ export function SettingsPage() {
       <Section title="Index" description="Where the index lives: a local folder or an S3 location (s3://bucket/prefix).">
         <label className={field}>
           Location
-          <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="~/comind-index or s3://bucket/comind" />
+          <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="~/comindly-index or s3://bucket/comindly" />
         </label>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={!index.trim() || test.isPending} onClick={() => test.mutate(index)}>
@@ -98,7 +98,7 @@ export function SettingsPage() {
 
       <Section
         title="Storage access"
-        description="S3 and S3-compatible stores use your AWS configuration (~/.aws): keys, SSO, credential_process or a custom endpoint. comind only remembers which profile to use."
+        description="S3 and S3-compatible stores use your AWS configuration (~/.aws): keys, SSO, credential_process or a custom endpoint. comindly only remembers which profile to use."
       >
         <label className={field}>
           AWS profile

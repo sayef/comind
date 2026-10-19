@@ -1,4 +1,4 @@
-//! `comind app`: the web UI in a native WebKit window, like Ollama's desktop app. The UI server
+//! `comindly app`: the web UI in a native WebKit window, like Ollama's desktop app. The UI server
 //! listens on a random local port with a token only this window knows.
 
 use std::net::TcpListener;
@@ -30,7 +30,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
     let bigger = MenuItem::new("Zoom In", true, key("CmdOrCtrl+="));
     let smaller = MenuItem::new("Zoom Out", true, key("CmdOrCtrl+-"));
     let about = AboutMetadata {
-        name: Some("comind".into()),
+        name: Some("comindly".into()),
         version: Some(env!("CARGO_PKG_VERSION").into()),
         ..Default::default()
     };
@@ -48,7 +48,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
     )?;
     let menu = Menu::with_items(&[
         &Submenu::with_items(
-            "comind",
+            "comindly",
             true,
             &[
                 &PredefinedMenuItem::about(None, Some(about)),
@@ -86,7 +86,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
     }));
 
     let window = WindowBuilder::new()
-        .with_title("comind")
+        .with_title("comindly")
         .with_inner_size(LogicalSize::new(1320.0, 860.0))
         .with_min_inner_size(LogicalSize::new(880.0, 560.0))
         .build(&event_loop)?;
@@ -144,7 +144,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
                     .map(|p| p.to_string_lossy().into_owned());
                 let arg = serde_json::to_string(&picked).unwrap_or_else(|_| "null".into());
                 let _ = webview.evaluate_script(&format!(
-                    "window.__comindPicked && window.__comindPicked({arg})"
+                    "window.__comindlyPicked && window.__comindlyPicked({arg})"
                 ));
             }
             Event::UserEvent(Msg::Failed(e)) => {
@@ -192,9 +192,9 @@ fn escape(s: &str) -> String {
 fn failed(error: &str, config: &str) -> String {
     format!(
         r#"<!doctype html><html><head><meta charset="utf-8"><style>{STYLE}</style></head><body><main>
-<h1>comind could not open the index</h1><pre>{}</pre>
+<h1>comindly could not open the index</h1><pre>{}</pre>
 <p>Set <code>index_dir</code> in <code>{}</code>, or start the app from a terminal with
-<code>comind app --index-dir …</code>. An index in S3 needs AWS credentials in the environment the
+<code>comindly app --index-dir …</code>. An index in S3 needs AWS credentials in the environment the
 app starts from.</p></main></body></html>"#,
         escape(error),
         escape(config)

@@ -5,7 +5,7 @@
 //! classes for design patterns, per-library call-sites for library usage, …), then run one focused
 //! LLM call per dimension and stitch the results. The valuable, non-surface conventions live in the
 //! code, so every section is grounded in real excerpts, dependency facts, or measured stats.
-//! `COMIND_DEBUG_EVIDENCE=1` prints each section's evidence to stderr.
+//! `COMINDLY_DEBUG_EVIDENCE=1` prints each section's evidence to stderr.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -67,7 +67,7 @@ pub fn build_sections(
          "Dominant docstring style (Google/NumPy/reST/JSDoc) and when docs are expected (public API?), comment density/placement. Quote a real docstring. Don't demand docs the repo doesn't write.",
          ev_docstrings),
     ];
-    let debug = std::env::var("COMIND_DEBUG_EVIDENCE").is_ok();
+    let debug = crate::config::env("COMINDLY_DEBUG_EVIDENCE").is_some();
     specs
         .iter()
         .filter_map(|(title, guidance, f)| {

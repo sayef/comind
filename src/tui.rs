@@ -1,4 +1,4 @@
-//! `comind ui`: a terminal UI over the index — overview, contracts, ledger, explorer and
+//! `comindly ui`: a terminal UI over the index — overview, contracts, ledger, explorer and
 //! conventions. Data loads once; rendering is a pure function of the app state.
 
 use anyhow::Result;
@@ -321,7 +321,7 @@ impl App {
                 .map(|(i, t)| format!("{} {t}", i + 1)),
         )
         .select(self.tab)
-        .block(Block::bordered().title(" comind "))
+        .block(Block::bordered().title(" comindly "))
         .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD));
         f.render_widget(tabs, top);
         match self.tab {
@@ -502,7 +502,7 @@ impl App {
         let selected = self.lists[2].selected().unwrap_or(0);
         let text = match self.entries().get(selected) {
             Some(e) => crate::ledger::markdown("record", &[e]),
-            None => "no ledger records — add some with `comind remember` or through MCP".into(),
+            None => "no ledger records — add some with `comindly remember` or through MCP".into(),
         };
         f.render_widget(
             detail_box(

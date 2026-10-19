@@ -1,6 +1,6 @@
 # Acme: a small example company
 
-Five tiny repositories that talk to each other the way real services do, used for comind's demo and
+Five tiny repositories that talk to each other the way real services do, used for comindly's demo and
 screenshots. The code is illustrative and does not run as a product.
 
 | Repository | Language | What it does |
@@ -11,5 +11,5 @@ screenshots. The code is illustrative and does not run as a product.
 | `inventory` | Go | Stock levels and reservations |
 | `acme-common` | Python package | Money, events and HTTP helpers; `payments` still pins an older version |
 
-Index them with `comind link examples/acme/*`, or run `scripts/screenshots.sh` to build the demo index
+Index them with `comindly link examples/acme/*`, or run `scripts/screenshots.sh` to build the demo index
 and the product screenshots.

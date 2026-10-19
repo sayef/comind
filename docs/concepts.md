@@ -1,7 +1,7 @@
 # Concepts
 
 **Symbols and identity.** Every function, method, class, file and contract has a global id in the SCIP
-scheme (`comind-treesitter . <repo> . <path>/<name>().`), so a definition in one repository and its users
+scheme (`comindly-treesitter . <repo> . <path>/<name>().`), so a definition in one repository and its users
 in another meet on the same id. When a repository has a SCIP index, its compiler-grade answers are used
 as well.
 

@@ -1,6 +1,6 @@
 //! Terminal UI helpers — styled status lines, spinners, and progress bars.
 //!
-//! Everything writes to **stderr** so `comind serve`'s stdout stays pure JSON-RPC. Styling and
+//! Everything writes to **stderr** so `comindly serve`'s stdout stays pure JSON-RPC. Styling and
 //! animation degrade automatically when stderr is not a TTY (pipes, CI), keeping logs clean.
 
 use std::time::Duration;

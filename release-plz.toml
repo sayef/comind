@@ -3,7 +3,7 @@
 # is not published yet, even if other commits landed after the release PR.
 release_always = true
 pr_labels = ["release"]
-# The library is comind's engine, not a stable public API; the CLI and MCP tools are the interface.
+# The library is comindly's engine, not a stable public API; the CLI and MCP tools are the interface.
 semver_check = false
 changelog_update = true
 changelog_path = "CHANGELOG.md"

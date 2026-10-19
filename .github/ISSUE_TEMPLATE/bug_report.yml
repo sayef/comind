@@ -20,8 +20,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: comind version
-      description: Output of `comind --version`.
+      label: comindly version
+      description: Output of `comindly --version`.
       placeholder: "0.3.0"
     validations:
       required: true

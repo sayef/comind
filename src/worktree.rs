@@ -1,5 +1,5 @@
-//! comind's own checkout of each repository's default branch: a detached git worktree under
-//! `~/.cache/comind/worktrees`, so indexing never touches your working folder or branches. Uses the
+//! comindly's own checkout of each repository's default branch: a detached git worktree under
+//! `~/.cache/comindly/worktrees`, so indexing never touches your working folder or branches. Uses the
 //! `git` command, so your SSH keys and credential helpers apply.
 
 use std::path::{Path, PathBuf};
@@ -99,9 +99,9 @@ fn git_auth(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Result<String> {
     let mut cmd = Command::new("git");
     if let Some(a) = auth {
         cmd.arg("-c")
-            .arg(r#"credential.helper=!f() { test "$1" = get && printf 'username=%s\npassword=%s\n' "$COMIND_GIT_USER" "$COMIND_GIT_TOKEN"; }; f"#)
-            .env("COMIND_GIT_USER", &a.username)
-            .env("COMIND_GIT_TOKEN", &a.token);
+            .arg(r#"credential.helper=!f() { test "$1" = get && printf 'username=%s\npassword=%s\n' "$COMINDLY_GIT_USER" "$COMINDLY_GIT_TOKEN"; }; f"#)
+            .env("COMINDLY_GIT_USER", &a.username)
+            .env("COMINDLY_GIT_TOKEN", &a.token);
     }
     let out = cmd
         .arg("-C")
@@ -188,12 +188,12 @@ fn worktree_dir(repo: &Path) -> Result<PathBuf> {
     let key = blake3::hash(abs.to_string_lossy().as_bytes()).to_hex();
     let home = std::env::var_os("HOME").context("HOME")?;
     Ok(PathBuf::from(home)
-        .join(".cache/comind/worktrees")
+        .join(".cache/comindly/worktrees")
         .join(&key[..12])
         .join(name(repo)))
 }
 
-/// Fetch `branch` (default: the repository's default branch) and check it out in comind's
+/// Fetch `branch` (default: the repository's default branch) and check it out in comindly's
 /// worktree, detached, so `branch` stays free to check out in your folder.
 pub fn prepare(repo: &Path, branch: Option<&str>) -> Result<Checkout> {
     if !repo.join(".git").exists() {
@@ -250,7 +250,7 @@ pub fn prepare(repo: &Path, branch: Option<&str>) -> Result<Checkout> {
     })
 }
 
-/// Remove comind's worktree for `repo` (your folder is untouched).
+/// Remove comindly's worktree for `repo` (your folder is untouched).
 pub fn remove(repo: &Path) -> Result<()> {
     let dir = worktree_dir(repo)?;
     if dir.exists() {
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn worktree_follows_main_and_leaves_the_folder_alone() {
-        let base = std::env::temp_dir().join(format!("comind-wt-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("comindly-wt-{}", std::process::id()));
         let origin = base.join("origin");
         let mine = base.join("mine");
         std::fs::create_dir_all(&origin).unwrap();

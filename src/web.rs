@@ -1,4 +1,4 @@
-//! Local web UI (`comind ui --web`): one embedded page over a small JSON API, bound to
+//! Local web UI (`comindly ui --web`): one embedded page over a small JSON API, bound to
 //! 127.0.0.1. Ledger reviews write to the index root like the terminal UI.
 
 use std::collections::{BTreeMap, HashMap};
@@ -228,7 +228,7 @@ async fn guard(
             format!("{path}?{}", rest.join("&"))
         };
         let cookie =
-            format!("comind_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
+            format!("comindly_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
         return (
             StatusCode::SEE_OTHER,
             [(header::LOCATION, to), (header::SET_COOKIE, cookie)],
@@ -236,7 +236,7 @@ async fn guard(
             .into_response();
     }
     if req.uri().path().starts_with("/api/") {
-        let want = format!("comind_token={token}");
+        let want = format!("comindly_token={token}");
         let ok = req
             .headers()
             .get_all(header::COOKIE)
@@ -246,7 +246,7 @@ async fn guard(
             .any(|c| c.trim() == want);
         if !ok {
             let msg =
-                "open comind with the link `comind ui --web` printed (it carries the access token)";
+                "open comindly with the link `comindly ui --web` printed (it carries the access token)";
             return (StatusCode::FORBIDDEN, Json(json!({ "error": msg }))).into_response();
         }
     }
@@ -269,7 +269,7 @@ async fn local_only(
     } else {
         (
             StatusCode::FORBIDDEN,
-            "comind web UI answers on localhost only",
+            "comindly web UI answers on localhost only",
         )
             .into_response()
     }
@@ -649,7 +649,7 @@ struct SearchQ {
     repo: Option<String>,
 }
 
-/// Hybrid code search (BM25, vectors, centrality), as `comind search` and the MCP tool.
+/// Hybrid code search (BM25, vectors, centrality), as `comindly search` and the MCP tool.
 async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
     let run = async {
         let tables = s.tables.as_ref().context("no index root")?;
@@ -864,7 +864,7 @@ async fn apply_review(s: &Session, b: &ReviewBody) -> Result<String> {
         &target,
         &b.action,
         &b.reason,
-        Provenance::human("comind-web"),
+        Provenance::human("comindly-web"),
     )?;
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
@@ -908,7 +908,7 @@ async fn remember(Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse
             let sym = s.data.symbols.iter().find(|x| x.id.render() == id);
             anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?));
         }
-        let mut rec = Record::new(kind, &b.title, anchors, Provenance::human("comind-web"));
+        let mut rec = Record::new(kind, &b.title, anchors, Provenance::human("comindly-web"));
         rec.body = b.body.trim().to_string();
         rec.trigger = b.trigger.filter(|t| !t.trim().is_empty());
         rec.evidence = b

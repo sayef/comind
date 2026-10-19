@@ -9,14 +9,14 @@ fn ripple_crosses_service_boundary_through_http_contract() {
     let mut facts = Vec::new();
     for repo in ["courses-svc", "profile-svc"] {
         let out =
-            comind::parse::parse_repo(&Path::new("tests/fixtures/org").join(repo), repo).unwrap();
+            comindly::parse::parse_repo(&Path::new("tests/fixtures/org").join(repo), repo).unwrap();
         symbols.extend(out.symbols);
         edges.extend(out.edges);
         facts.extend(out.facts);
     }
-    let resolved = comind::resolve::resolve(&symbols, &edges, &facts);
+    let resolved = comindly::resolve::resolve(&symbols, &edges, &facts);
     symbols.extend(resolved.symbols);
-    let g = comind::graph::CodeGraph::build(&symbols, &resolved.edges);
+    let g = comindly::graph::CodeGraph::build(&symbols, &resolved.edges);
 
     let get_course = g.lookup("get_course").expect("handler indexed");
     let hops = g.ripple(get_course, 4);

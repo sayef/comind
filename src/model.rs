@@ -1,4 +1,4 @@
-//! Comind core domain model.
+//! Comindly core domain model.
 //!
 //! Storage-agnostic types shared by every crate: global symbol identity (SCIP scheme),
 //! symbols, edges, languages, and source ranges. No heavy dependencies — this crate is
@@ -49,7 +49,7 @@ pub enum SymbolKind {
     Constant,
     Import,
     TypeAlias,
-    /// A detected multi-step execution flow (comind-specific higher-order node).
+    /// A detected multi-step execution flow (comindly-specific higher-order node).
     Process,
     /// A cross-service contract: an HTTP route, queue, topic, bucket or table.
     Contract,
@@ -123,7 +123,7 @@ pub struct Commit(pub String);
 /// e.g. `scip-python pip acme 1.4.0 acme/foo/bar().`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GlobalSymbolId {
-    /// Indexer scheme, e.g. `scip-python`, `scip-typescript`, `comind-treesitter`.
+    /// Indexer scheme, e.g. `scip-python`, `scip-typescript`, `comindly-treesitter`.
     pub scheme: String,
     /// Package manager, e.g. `pip`, `npm`, `cargo`, `.` when local/unmanaged.
     pub package_manager: String,

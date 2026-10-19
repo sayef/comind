@@ -1,6 +1,6 @@
-# Contributing to comind
+# Contributing to comindly
 
-Thanks for your interest in comind. Bug reports, language and framework support, documentation fixes and
+Thanks for your interest in comindly. Bug reports, language and framework support, documentation fixes and
 code are all welcome.
 
 ## Before you start
@@ -17,7 +17,7 @@ You need Rust 1.95 or newer (the minimum supported version, checked in CI), plus
 brew install protobuf cmake                          # macOS
 sudo apt-get install -y protobuf-compiler cmake      # Debian/Ubuntu
 
-git clone https://github.com/sayef/comind && cd comind
+git clone https://github.com/sayef/comindly && cd comindly
 cargo test
 cargo run -q -- eval graph -v                        # resolver quality on the fixture org
 ```
@@ -25,11 +25,11 @@ cargo run -q -- eval graph -v                        # resolver quality on the f
 Tests that need a bucket or an LLM key are opt-in; everything else runs offline.
 
 The web UI lives in `ui/` (React, TypeScript, Vite) and is embedded into the binary at build time. Without
-a build, `comind ui --web` serves a placeholder page. With Node 24:
+a build, `comindly ui --web` serves a placeholder page. With Node 24:
 
 ```sh
 cd ui && npm ci && npm run build && cd ..            # embedded on the next cargo build
-comind ui --web &                                    # API on 127.0.0.1:7878; open its printed link once
+comindly ui --web &                                    # API on 127.0.0.1:7878; open its printed link once
 cd ui && npm run dev                                 # hot reload on 127.0.0.1:5173, /api proxied
 ```
 
@@ -39,7 +39,7 @@ cd ui && npm run dev                                 # hot reload on 127.0.0.1:5
 - UI changes build with `npm run build` in `ui/` (type-checked).
 - `cargo deny check` passes (licences, advisories and sources; install with `cargo install cargo-deny --locked`).
 - New behaviour has tests. Resolver, contract and infrastructure changes add cases to
-  `tests/fixtures/org` with gold edges in `expected.toml`, and `comind eval graph` stays at 100%
+  `tests/fixtures/org` with gold edges in `expected.toml`, and `comindly eval graph` stays at 100%
   precision and recall.
 - Real-world changes are checked on real repositories as well: no new spurious contracts, and a note in
   the pull request of what changed.
@@ -48,12 +48,12 @@ cd ui && npm run dev                                 # hot reload on 127.0.0.1:5
 - Determinism holds: the same repositories give the same graph, ids and ordering.
 - Changes to stored formats (Lance tables, ledger records, facts) keep reading what older versions wrote
   (`#[serde(default)]` on new fields).
-- Commands, MCP tools and configuration keys are reflected in the README, [docs](https://comind.pages.dev/) and the
+- Commands, MCP tools and configuration keys are reflected in the README, [docs](https://comindly.pages.dev/) and the
   [changelog](CHANGELOG.md) (under `## [Unreleased]`).
 
 ## Project layout
 
-One crate: a library with one module per pipeline stage, and the `comind` binary
+One crate: a library with one module per pipeline stage, and the `comindly` binary
 (see [ARCHITECTURE.md](ARCHITECTURE.md)). Language support lives in `src/lang/` behind the `LangSpec`
 trait; contract linking in `src/resolve/contracts.rs`.
 

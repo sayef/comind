@@ -231,7 +231,10 @@ impl Store {
             let bytes = self.store.get(&m.location).await?.bytes().await?;
             match serde_json::from_slice::<Manual>(&bytes) {
                 Ok(c) => out.push(c),
-                Err(e) => eprintln!("comind: skipping unreadable convention {}: {e}", m.location),
+                Err(e) => eprintln!(
+                    "comindly: skipping unreadable convention {}: {e}",
+                    m.location
+                ),
             }
         }
         out.sort_by(|a, b| a.id.cmp(&b.id));

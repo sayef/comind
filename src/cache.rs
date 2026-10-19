@@ -30,7 +30,7 @@ pub fn dir(index_root: &str) -> Option<PathBuf> {
     let key = blake3::hash(index_root.as_bytes()).to_hex();
     Some(
         PathBuf::from(home)
-            .join(".cache/comind/remote")
+            .join(".cache/comindly/remote")
             .join(&key[..16]),
     )
 }
@@ -112,7 +112,7 @@ fn sync(index_root: &str, cache: &Path) -> Result<bool> {
     Ok(copied)
 }
 
-/// Start `comind cache refresh` detached, so the caller never waits on the remote store.
+/// Start `comindly cache refresh` detached, so the caller never waits on the remote store.
 pub fn refresh_in_background(index_root: &str) {
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn mirror_follows_the_remote() {
-        let base = std::env::temp_dir().join(format!("comind-cache-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("comindly-cache-{}", std::process::id()));
         let remote = base.join("remote");
         let cache = base.join("cache");
         let root = remote.to_str().unwrap();

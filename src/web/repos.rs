@@ -1,4 +1,4 @@
-//! Repositories from the UI: the list `comind link` indexes, scanning a folder, cloning, and an
+//! Repositories from the UI: the list `comindly link` indexes, scanning a folder, cloning, and an
 //! indexing job whose output the page follows.
 
 use std::path::Path;
@@ -154,7 +154,7 @@ pub(super) struct Change {
     remove: Vec<String>,
 }
 
-/// Add and remove repositories (folders); removed ones lose comind's worktree, not your folder.
+/// Add and remove repositories (folders); removed ones lose comindly's worktree, not your folder.
 pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
     let run = tokio::task::spawn_blocking(move || {
         let mut list = Config::load().repos;
@@ -269,7 +269,7 @@ pub(super) async fn start(State(app): State<Shared>, Json(q): Json<IndexQ>) -> i
     }
 }
 
-/// Start `comind link` over the listed repositories into the loaded index; the page follows
+/// Start `comindly link` over the listed repositories into the loaded index; the page follows
 /// `/api/index` and the UI switches to the new index when it succeeds. `why` opens the log.
 pub(super) async fn begin(
     app: &Shared,

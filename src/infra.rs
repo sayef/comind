@@ -306,7 +306,7 @@ impl Module {
 
 fn file(repo: &str, rel: &str, contracts: Vec<ContractFact>) -> (Symbol, FileFacts) {
     let id = GlobalSymbolId {
-        scheme: "comind-treesitter".into(),
+        scheme: "comindly-treesitter".into(),
         package_manager: ".".into(),
         package: repo.to_string(),
         version: ".".into(),
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn declarations_and_subscriptions() {
-        let dir = std::env::temp_dir().join(format!("comind-tf-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-tf-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("iac")).unwrap();
         std::fs::write(
             dir.join("iac/main.tf"),

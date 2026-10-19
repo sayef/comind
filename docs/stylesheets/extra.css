@@ -2,14 +2,14 @@
 
 /* Ink and paper, with the mark's green as the one accent. */
 :root {
-  --comind-ink: #0e1512;
-  --comind-paper: #f3f6f2;
-  --comind-green: #16a34a;
-  --comind-teal: #0d9488;
+  --comindly-ink: #0e1512;
+  --comindly-paper: #f3f6f2;
+  --comindly-green: #16a34a;
+  --comindly-teal: #0d9488;
 }
 
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color: var(--comind-ink);
+  --md-primary-fg-color: var(--comindly-ink);
   --md-primary-fg-color--light: #1f2a25;
   --md-primary-fg-color--dark: #000000;
   --md-accent-fg-color: #15803d;
@@ -19,7 +19,7 @@
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: var(--comind-ink);
+  --md-primary-fg-color: var(--comindly-ink);
   --md-primary-fg-color--light: #1f2a25;
   --md-primary-fg-color--dark: #000000;
   --md-accent-fg-color: #4ade80;
@@ -31,7 +31,7 @@
 
 .md-header,
 .md-tabs {
-  background: var(--comind-ink);
+  background: var(--comindly-ink);
 }
 
 /* The wordmark stands in for the site name. */
@@ -78,7 +78,7 @@
 }
 
 .cm-dot {
-  color: var(--comind-green);
+  color: var(--comindly-green);
 }
 
 .md-typeset .cm-lede {
@@ -102,8 +102,8 @@
 }
 
 .md-typeset .cm-actions .md-button--primary:hover {
-  background-color: var(--comind-green);
-  border-color: var(--comind-green);
+  background-color: var(--comindly-green);
+  border-color: var(--comindly-green);
   color: #ffffff;
 }
 

@@ -1,4 +1,4 @@
-//! Comind parse — tree-sitter extraction of symbols, the `Contains` hierarchy and per-file facts.
+//! Comindly parse — tree-sitter extraction of symbols, the `Contains` hierarchy and per-file facts.
 //!
 //! The walk is language-agnostic; [`crate::lang`] answers the syntax questions per grammar.
 //! Imports, references and type hints go into [`FileFacts`], which [`crate::resolve`] binds.
@@ -18,7 +18,7 @@ use ignore::WalkBuilder;
 use rayon::prelude::*;
 use tree_sitter::{Node, Parser};
 
-const SCHEME: &str = "comind-treesitter";
+const SCHEME: &str = "comindly-treesitter";
 
 /// Type-hint name for a callable's declared return type.
 pub const RETURN: &str = "<return>";
@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn extracts_python_class_method_and_call() {
-        let dir = std::env::temp_dir().join(format!("comind-parse-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-parse-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         write(
             &dir,
@@ -876,7 +876,7 @@ mod tests {
 
     fn fp_of(body: &str, name: &str) -> Fingerprint {
         let dir = std::env::temp_dir().join(format!(
-            "comind-fp-{}-{}",
+            "comindly-fp-{}-{}",
             std::process::id(),
             blake3::hash(body.as_bytes()).to_hex()
         ));
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn tsx_components_are_references() {
-        let dir = std::env::temp_dir().join(format!("comind-tsx-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("comindly-tsx-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         write(
             &dir,

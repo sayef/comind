@@ -49,9 +49,9 @@ export function Layout() {
         <div className="max-w-md text-center">
           <img src="/logo.svg" alt="" className="mx-auto size-10 dark:hidden" />
           <img src="/logo-dark.svg" alt="" className="mx-auto hidden size-10 dark:block" />
-          <h1 className="mt-4 text-lg font-semibold">Open comind from its link</h1>
+          <h1 className="mt-4 text-lg font-semibold">Open comindly from its link</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            The UI only answers browsers that hold its access token. Run <code className="font-mono">comind ui --web --open</code>, or open
+            The UI only answers browsers that hold its access token. Run <code className="font-mono">comindly ui --web --open</code>, or open
             the link it prints once; after that, this address works as a bookmark.
           </p>
         </div>
@@ -65,7 +65,7 @@ export function Layout() {
         <div className="flex h-14 items-center gap-2.5 px-5">
           <img src="/logo.svg" alt="" className="size-7 dark:hidden" />
           <img src="/logo-dark.svg" alt="" className="hidden size-7 dark:block" />
-          <span className="text-[15px] font-semibold tracking-tight">comind</span>
+          <span className="text-[15px] font-semibold tracking-tight">comindly</span>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 px-3 py-2">
           {NAV.map(({ to, label, icon: Icon }) => (

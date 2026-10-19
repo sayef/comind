@@ -1,4 +1,4 @@
-//! Setup checks shared by `comind doctor` and the web UI's setup page.
+//! Setup checks shared by `comindly doctor` and the web UI's setup page.
 
 use std::path::Path;
 
@@ -38,7 +38,7 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
             false,
             false,
             "",
-            "no index here yet: run `comind link <repos> --index-dir …`",
+            "no index here yet: run `comindly link <repos> --index-dir …`",
         ),
     }
     match crate::ledger::all_blocking(root) {
@@ -56,7 +56,7 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
             fresh,
             false,
             "local mirror present (hooks read it)",
-            "no local mirror yet: `comind cache refresh` (hooks create it on first use)",
+            "no local mirror yet: `comindly cache refresh` (hooks create it on first use)",
         );
         match crate::s3::check() {
             Ok(m) => check(true, false, &m, ""),
@@ -69,10 +69,10 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
         .unwrap_or_default();
     let local = std::fs::read_to_string(".claude/settings.json").unwrap_or_default();
     check(
-        settings.contains("comind hook") || local.contains("comind hook"),
+        settings.contains("comindly hook") || local.contains("comindly hook"),
         true,
         "Claude Code hooks configured",
-        "Claude Code hooks not found: `comind init-hooks claude`",
+        "Claude Code hooks not found: `comindly init-hooks claude`",
     );
     check(
         set("OPENAI_API_KEY")

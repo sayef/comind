@@ -1,11 +1,11 @@
-//! Comind LLM enrichment — per-symbol summaries, symbol-aware query generation, and a
+//! Comindly LLM enrichment — per-symbol summaries, symbol-aware query generation, and a
 //! repo style guide, via **Rig** (provider-agnostic: OpenAI by default; any OpenAI-compatible
-//! endpoint via `COMIND_LLM_BASE_URL`; Bedrock/Vertex/others can be added behind cargo features).
+//! endpoint via `COMINDLY_LLM_BASE_URL`; Bedrock/Vertex/others can be added behind cargo features).
 //!
 //! **Opt-in / data egress:** these functions send code (signatures, snippets) to the configured
 //! LLM provider. They run only when the caller explicitly enables enrichment
-//! (`comind link --enrich`), never as part of plain indexing. Requires `OPENAI_API_KEY` (or a
-//! provider key + `COMIND_LLM_BASE_URL`).
+//! (`comindly link --enrich`), never as part of plain indexing. Requires `OPENAI_API_KEY` (or a
+//! provider key + `COMINDLY_LLM_BASE_URL`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -59,7 +59,7 @@ impl LlmClient {
         let cfg = crate::config::Config::load();
         let model = cfg.llm_model();
         // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
-        // (LiteLLM proxy, Ollama, vLLM, Azure) with COMIND_LLM_BASE_URL.
+        // (LiteLLM proxy, Ollama, vLLM, Azure) with COMINDLY_LLM_BASE_URL.
         let openai_native = cfg.llm_base_url().is_none()
             && std::env::var("OPENAI_BASE_URL").map_or(true, |u| u.contains("api.openai.com"));
         let client = match cfg.llm_base_url() {
@@ -71,7 +71,7 @@ impl LlmClient {
             // Rig's from_env reads OPENAI_API_KEY (and honours OPENAI_BASE_URL too).
             None => openai::OpenAI::from_env().map_err(|e| {
                 anyhow::anyhow!(
-                    "OpenAI client (set OPENAI_API_KEY, or COMIND_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
+                    "OpenAI client (set OPENAI_API_KEY, or COMINDLY_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
                 )
             })?,
         };
@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(e.queries[0], "how to connect to postgres");
     }
 
-    // Real API call — run with a key: `cargo test -p comind-llm -- --ignored`.
+    // Real API call — run with a key: `cargo test -p comindly-llm -- --ignored`.
     #[tokio::test]
     #[ignore]
     async fn live_enrich_symbol() {

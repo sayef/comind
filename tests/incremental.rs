@@ -45,7 +45,7 @@ fn index(repo: &Path, dir: &Path, incremental: bool) {
     if incremental {
         args.push("--incremental");
     }
-    let out = Command::new(env!("CARGO_BIN_EXE_comind"))
+    let out = Command::new(env!("CARGO_BIN_EXE_comindly"))
         .args(&args)
         .output()
         .unwrap();
@@ -58,7 +58,7 @@ fn index(repo: &Path, dir: &Path, incremental: bool) {
 
 fn edges(dir: &Path) -> BTreeSet<(String, String, String)> {
     let (_, edges) =
-        comind::index::read_graph_blocking(&format!("{}/_graph", dir.display())).unwrap();
+        comindly::index::read_graph_blocking(&format!("{}/_graph", dir.display())).unwrap();
     edges
         .into_iter()
         .map(|e| (e.src.render(), e.dst.render(), e.kind.to_string()))
@@ -67,7 +67,7 @@ fn edges(dir: &Path) -> BTreeSet<(String, String, String)> {
 
 #[test]
 fn incremental_matches_full_after_cross_file_change() {
-    let tmp = std::env::temp_dir().join(format!("comind-incr-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("comindly-incr-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let repo = tmp.join("service-a");
     copy_dir(Path::new("tests/fixtures/org/service-a"), &repo);
