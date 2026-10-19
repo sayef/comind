@@ -37,6 +37,8 @@ pub struct Data {
     pub deps: Vec<InternalDep>,
     /// Index root for writing ledger reviews; `None` makes the UI read-only.
     pub root: Option<String>,
+    /// Why the index could not be loaded (the UIs then start empty).
+    pub problem: Option<String>,
 }
 
 impl Data {
@@ -68,7 +70,29 @@ impl Data {
             manual,
             deps,
             root: Some(root.to_string()),
+            problem: None,
         })
+    }
+
+    /// No index yet: an empty view of `root` that says why.
+    pub fn empty(root: &str, problem: String) -> Data {
+        Data {
+            graph: CodeGraph::build(&[], &[]),
+            symbols: Vec::new(),
+            edges: Vec::new(),
+            contracts: Vec::new(),
+            entries: Vec::new(),
+            conventions: Vec::new(),
+            manual: Vec::new(),
+            deps: Vec::new(),
+            root: Some(root.to_string()),
+            problem: Some(problem),
+        }
+    }
+
+    /// The index at `root`, or an empty view saying why it could not be read.
+    pub fn load_or_empty(root: &str) -> Data {
+        Data::load(root).unwrap_or_else(|e| Data::empty(root, format!("{e:#}")))
     }
 }
 
@@ -738,7 +762,7 @@ mod tests {
         let mut symbols = Vec::new();
         let mut edges = Vec::new();
         let mut facts = Vec::new();
-        for repo in ["skills-svc", "profile-svc"] {
+        for repo in ["courses-svc", "profile-svc"] {
             let out = crate::parse::parse_repo(
                 &std::path::Path::new("tests/fixtures/org").join(repo),
                 repo,
@@ -758,12 +782,13 @@ mod tests {
             manual: Vec::new(),
             deps: Vec::new(),
             root: None,
+            problem: None,
             graph,
             symbols,
             edges: r.edges,
         };
         let mut app = App::new(data);
-        app.query = "get_skill".into();
+        app.query = "get_course".into();
         let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
         for tab in 0..TABS.len() {
             app.switch(tab);
@@ -773,7 +798,7 @@ mod tests {
         term.draw(|f| app.draw(f)).unwrap();
         let screen = format!("{:?}", term.backend().buffer());
         assert!(
-            screen.contains("http:GET /v1/skills/{}"),
+            screen.contains("http:GET /v1/courses/{}"),
             "contracts tab shows the route"
         );
     }

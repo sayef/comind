@@ -628,7 +628,7 @@ impl<'a> Cx<'a> {
         out
     }
 
-    /// The topmost internal error class above `class` (`NotFoundError` → `CobrainerError`).
+    /// The topmost internal error class above `class` (`NotFoundError` → `AcmeError`).
     fn error_root(&self, class: &'a Symbol) -> &'a Symbol {
         let mut cur = class;
         for _ in 0..8 {
@@ -891,7 +891,7 @@ impl<'a> Cx<'a> {
         }]
     }
 
-    /// Internal wrappers preferred over direct third-party use (`cobrainer.aws` over `boto3`).
+    /// Internal wrappers preferred over direct third-party use (`acme.aws` over `boto3`).
     fn libraries(&self, repo: &str) -> Vec<Convention> {
         let mut direct: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut wrapped: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();

@@ -16,7 +16,7 @@ curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.s
 comind --version
 ```
 
-From source, with Rust 1.94.1 or newer plus `protoc` and `cmake`:
+From source, with Rust 1.95 or newer plus `protoc` and `cmake`:
 
 ```sh
 git clone https://github.com/sayef/comind && cd comind && cargo build --release
@@ -24,7 +24,15 @@ git clone https://github.com/sayef/comind && cd comind && cargo build --release
 
 ## 2. Index your code
 
-One repository, into the default location (`comind config path` shows it):
+The quickest way is the app: `comind app` (macOS) or `comind ui --web --open`, then **Repositories**
+→ Scan a folder → tick your repositories → **Index now**. The same from the terminal:
+
+```sh
+comind repos add ../shared-lib ../orders ../payments   # remembered in config.toml
+comind link --index-dir ~/comind-index                 # each repo's default branch, never your folders
+```
+
+Or one repository, as it is on disk, into the default location (`comind config path` shows it):
 
 ```sh
 comind index .

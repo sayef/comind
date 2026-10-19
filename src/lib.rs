@@ -16,6 +16,7 @@ pub mod configvals;
 pub mod conventions;
 pub mod doctor;
 
+pub mod credentials;
 pub mod facts;
 pub mod git;
 pub mod lang;
@@ -27,6 +28,8 @@ pub mod recipes;
 pub mod resolve;
 pub mod s3;
 pub mod scip;
+pub mod team;
+pub mod worktree;
 
 pub mod eval;
 

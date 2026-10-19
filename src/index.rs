@@ -149,7 +149,11 @@ fn edges_batch(edges: &[Edge]) -> Result<RecordBatch> {
 /// overwriting in place. Overwrite creates a **new Lance version** while retaining prior
 /// versions — so the newest version manifest is the atomic "latest" pointer, and older
 /// versions remain available for pinning/rollback (`checkout`). Returns the new version.
-async fn write_versioned(db: &lancedb::Connection, name: &str, batch: RecordBatch) -> Result<u64> {
+pub(crate) async fn write_versioned(
+    db: &lancedb::Connection,
+    name: &str,
+    batch: RecordBatch,
+) -> Result<u64> {
     // lancedb 0.31 implements `Scannable` for `RecordBatch`, so pass it directly.
     let tbl = match db.open_table(name).execute().await {
         Ok(t) => {
@@ -263,7 +267,7 @@ fn id_from_rendered(s: &str) -> GlobalSymbolId {
     }
 }
 
-fn str_col<'a>(
+pub(crate) fn str_col<'a>(
     batch: &'a lancedb::arrow::arrow_array::RecordBatch,
     name: &str,
 ) -> Result<&'a StringArray> {

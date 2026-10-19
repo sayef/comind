@@ -18,11 +18,17 @@ use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
+mod aws;
+mod repos;
+mod settings;
+mod team;
+
 mod assets {
     include!(concat!(env!("OUT_DIR"), "/ui_assets.rs"));
 }
 
-struct AppState {
+/// Everything tied to one loaded index; replaced as a whole when the index changes.
+struct Session {
     data: Data,
     entries: RwLock<Vec<Entry>>,
     manual: RwLock<Vec<crate::conventions::Manual>>,
@@ -46,7 +52,7 @@ struct Search {
     by_id: HashMap<String, crate::model::Symbol>,
 }
 
-impl AppState {
+impl Session {
     async fn extras(&self) -> &Extras {
         self.extras
             .get_or_init(|| async {
@@ -91,31 +97,74 @@ impl AppState {
     }
 }
 
+struct AppState {
+    current: RwLock<Arc<Session>>,
+    job: tokio::sync::Mutex<repos::Job>,
+    watch: tokio::sync::Mutex<repos::Watch>,
+    signin: tokio::sync::Mutex<aws::SignIn>,
+}
+
 type Shared = Arc<AppState>;
+
+/// The session a request works on: the index loaded when it arrived.
+struct Cur(Arc<Session>);
+
+impl axum::extract::FromRequestParts<Shared> for Cur {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _: &mut axum::http::request::Parts,
+        app: &Shared,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        Ok(Cur(app.current.read().await.clone()))
+    }
+}
+
+impl Session {
+    async fn open(mut data: Data) -> Session {
+        let entries = std::mem::take(&mut data.entries);
+        let manual = std::mem::take(&mut data.manual);
+        let tables = match data.root.as_ref() {
+            Some(r) => {
+                let uri = format!("{}/_graph", r.trim_end_matches('/'));
+                let fresh = crate::config::Config::load().fresh();
+                crate::index::Tables::connect(&uri, fresh).await.ok()
+            }
+            None => None,
+        };
+        Session {
+            data,
+            entries: RwLock::new(entries),
+            manual: RwLock::new(manual),
+            extras: OnceCell::new(),
+            search: OnceCell::new(),
+            tables,
+            past: Default::default(),
+        }
+    }
+}
+
+impl AppState {
+    /// Load the index at `root` and make it the one every request sees.
+    async fn reload(&self, root: &str) -> Result<()> {
+        let root = root.to_string();
+        let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&root)).await?;
+        *self.current.write().await = Arc::new(Session::open(data).await);
+        Ok(())
+    }
+}
 
 /// Serve the UI on `listener` (bound to 127.0.0.1) until the process ends. API calls must carry
 /// `token` as a cookie; opening any page with `?token=` sets it.
-pub fn serve(mut data: Data, listener: std::net::TcpListener, token: String) -> Result<()> {
+pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
-    let entries = std::mem::take(&mut data.entries);
-    let manual = std::mem::take(&mut data.manual);
-    let tables = data.root.as_ref().and_then(|r| {
-        let uri = format!("{}/_graph", r.trim_end_matches('/'));
-        rt.block_on(crate::index::Tables::connect(
-            &uri,
-            crate::config::Config::load().fresh(),
-        ))
-        .ok()
-    });
     let state = Arc::new(AppState {
-        data,
-        entries: RwLock::new(entries),
-        manual: RwLock::new(manual),
-        extras: OnceCell::new(),
-        search: OnceCell::new(),
-        tables,
-        past: Default::default(),
+        current: RwLock::new(Arc::new(rt.block_on(Session::open(data)))),
+        job: Default::default(),
+        watch: Default::default(),
+        signin: Default::default(),
     });
+    rt.spawn(repos::watch(state.clone()));
     let app = Router::new()
         .route("/api/overview", get(overview))
         .route("/api/orgmap", get(orgmap))
@@ -132,6 +181,19 @@ pub fn serve(mut data: Data, listener: std::net::TcpListener, token: String) -> 
         .route("/api/review", post(review))
         .route("/api/erase", post(erase))
         .route("/api/remember", post(remember))
+        .route("/api/settings", get(settings::get).post(settings::save))
+        .route("/api/settings/test", post(settings::test))
+        .route("/api/repos", get(repos::list).post(repos::change))
+        .route("/api/repos/scan", post(repos::scan))
+        .route("/api/repos/clone", post(repos::clone))
+        .route("/api/index", get(repos::job).post(repos::start))
+        .route("/api/index/watch", get(repos::watch_state))
+        .route("/api/team", get(team::get).post(team::save))
+        .route("/api/team/key", post(team::key))
+        .route("/api/team/unlock", post(team::unlock))
+        .route("/api/join", post(team::join))
+        .route("/api/aws", get(aws::status))
+        .route("/api/aws/login", post(aws::start))
         .fallback(get(asset))
         .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
         .layer(axum::middleware::from_fn(local_only))
@@ -259,7 +321,7 @@ async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
         .into_response()
 }
 
-async fn overview(State(s): State<Shared>) -> Json<Value> {
+async fn overview(Cur(s): Cur) -> Json<Value> {
     let d = &s.data;
     let entries = s.entries.read().await;
     let mut status: BTreeMap<String, usize> = BTreeMap::new();
@@ -293,6 +355,8 @@ async fn overview(State(s): State<Shared>) -> Json<Value> {
         "ledger": status,
         "skew": skew,
         "writable": d.root.is_some(),
+        "root": d.root,
+        "problem": d.problem,
     }))
 }
 
@@ -302,14 +366,14 @@ struct AtQ {
     at: Option<usize>,
 }
 
-fn graph_uri(s: &AppState) -> Option<String> {
+fn graph_uri(s: &Session) -> Option<String> {
     s.data
         .root
         .as_ref()
         .map(|r| format!("{}/_graph", r.trim_end_matches('/')))
 }
 
-async fn versions(State(s): State<Shared>) -> Json<Value> {
+async fn versions(Cur(s): Cur) -> Json<Value> {
     let list = match &s.tables {
         Some(t) => t.versions().await.unwrap_or_default(),
         None => Vec::new(),
@@ -320,7 +384,7 @@ async fn versions(State(s): State<Shared>) -> Json<Value> {
         .collect::<Vec<_>>()))
 }
 
-async fn orgmap(State(s): State<Shared>, Query(q): Query<AtQ>) -> impl IntoResponse {
+async fn orgmap(Cur(s): Cur, Query(q): Query<AtQ>) -> impl IntoResponse {
     let d = &s.data;
     let Some(i) = q.at else {
         return (
@@ -409,11 +473,11 @@ fn org(
     json!({"nodes": nodes, "edges": edges})
 }
 
-async fn contracts(State(s): State<Shared>) -> Json<Value> {
+async fn contracts(Cur(s): Cur) -> Json<Value> {
     Json(json!(s.data.contracts))
 }
 
-async fn ledger(State(s): State<Shared>) -> Json<Value> {
+async fn ledger(Cur(s): Cur) -> Json<Value> {
     let entries = s.entries.read().await;
     let mut v: Vec<&Entry> = entries.iter().collect();
     v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
@@ -425,7 +489,7 @@ struct RepoQ {
     repo: Option<String>,
 }
 
-async fn conventions(State(s): State<Shared>, Query(q): Query<RepoQ>) -> Json<Value> {
+async fn conventions(Cur(s): Cur, Query(q): Query<RepoQ>) -> Json<Value> {
     let manual = s.manual.read().await;
     let mine = |r: &str| q.repo.as_deref().is_none_or(|q| r == q);
     let shown: Vec<Value> = crate::conventions::apply(s.data.conventions.clone(), &manual)
@@ -458,10 +522,7 @@ struct ConventionBody {
     rule: String,
 }
 
-async fn change_convention(
-    State(s): State<Shared>,
-    Json(b): Json<ConventionBody>,
-) -> impl IntoResponse {
+async fn change_convention(Cur(s): Cur, Json(b): Json<ConventionBody>) -> impl IntoResponse {
     match apply_convention(&s, b).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
@@ -471,7 +532,7 @@ async fn change_convention(
     }
 }
 
-async fn apply_convention(s: &AppState, b: ConventionBody) -> Result<String> {
+async fn apply_convention(s: &Session, b: ConventionBody) -> Result<String> {
     use crate::conventions::{change, Change, Manual, Write, ORG};
     let root = s.data.root.as_deref().context("read-only UI")?;
     let mut manual = s.manual.write().await;
@@ -513,7 +574,7 @@ struct FindQ {
     q: String,
 }
 
-async fn find(State(s): State<Shared>, Query(q): Query<FindQ>) -> Json<Value> {
+async fn find(Cur(s): Cur, Query(q): Query<FindQ>) -> Json<Value> {
     Json(json!(s.data.graph.find(&q.q, 40)))
 }
 
@@ -522,7 +583,7 @@ struct NodeQ {
     focus: String,
 }
 
-async fn node(State(s): State<Shared>, Query(q): Query<NodeQ>) -> impl IntoResponse {
+async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
     let g = &s.data.graph;
     let Some(idx) = g.lookup(&q.focus) else {
         return (
@@ -572,7 +633,7 @@ struct SearchQ {
 }
 
 /// Hybrid code search (BM25, vectors, centrality), as `comind search` and the MCP tool.
-async fn search(State(s): State<Shared>, Query(q): Query<SearchQ>) -> impl IntoResponse {
+async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
     let run = async {
         let tables = s.tables.as_ref().context("no index root")?;
         let engine = s
@@ -627,7 +688,7 @@ struct ContextQ {
 }
 
 /// The context pack for a symbol as markdown, ready to paste into an agent.
-async fn context(State(s): State<Shared>, Query(q): Query<ContextQ>) -> impl IntoResponse {
+async fn context(Cur(s): Cur, Query(q): Query<ContextQ>) -> impl IntoResponse {
     let g = &s.data.graph;
     let Some(idx) = g.lookup(&q.focus) else {
         return (StatusCode::NOT_FOUND, "no such symbol".to_string());
@@ -665,7 +726,7 @@ async fn context(State(s): State<Shared>, Query(q): Query<ContextQ>) -> impl Int
     (StatusCode::OK, o)
 }
 
-async fn packages(State(s): State<Shared>) -> Json<Value> {
+async fn packages(Cur(s): Cur) -> Json<Value> {
     Json(json!(s
         .data
         .deps
@@ -679,7 +740,7 @@ async fn packages(State(s): State<Shared>) -> Json<Value> {
 }
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
-async fn setup(State(s): State<Shared>) -> Json<Value> {
+async fn setup(Cur(s): Cur) -> Json<Value> {
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
         let root = root.clone();
@@ -757,7 +818,7 @@ struct ReviewBody {
     reason: String,
 }
 
-async fn review(State(s): State<Shared>, Json(b): Json<ReviewBody>) -> impl IntoResponse {
+async fn review(Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
     match apply_review(&s, &b).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
@@ -767,7 +828,7 @@ async fn review(State(s): State<Shared>, Json(b): Json<ReviewBody>) -> impl Into
     }
 }
 
-async fn apply_review(s: &AppState, b: &ReviewBody) -> Result<String> {
+async fn apply_review(s: &Session, b: &ReviewBody) -> Result<String> {
     let root = s.data.root.as_deref().context("read-only UI")?;
     let (kind, _) = crate::ledger::review_action(&b.action).context("unknown action")?;
     let ledger = crate::ledger::Ledger::open(root)?;
@@ -816,7 +877,7 @@ struct RememberBody {
 }
 
 /// A record written by the person using the UI.
-async fn remember(State(s): State<Shared>, Json(b): Json<RememberBody>) -> impl IntoResponse {
+async fn remember(Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse {
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
@@ -862,7 +923,7 @@ struct EraseBody {
 }
 
 /// Permanently delete a record and the reviews about it.
-async fn erase(State(s): State<Shared>, Json(b): Json<EraseBody>) -> impl IntoResponse {
+async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let ledger = crate::ledger::Ledger::open(root)?;

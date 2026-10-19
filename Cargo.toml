@@ -2,7 +2,7 @@
 name = "comind"
 version = "0.4.0"
 edition = "2021"
-rust-version = "1.94.1"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/sayef/comind"
 authors = ["Saiful Islam"]
@@ -33,26 +33,33 @@ indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
 console = "0.16" # styled status lines + TTY detection
 comfy-table = "7" # unicode result tables
 anyhow = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util"] }
 futures = "0.3"
 # S3 access through the standard AWS chain (profiles, SSO, credential_process); lance uses it too.
 aws-config = "1"
 aws-credential-types = "1"
 async-trait = "0.1"
 toml_edit = "0.25"
+# Team secrets: Argon2id from the team password, XChaCha20-Poly1305 for the data.
+argon2 = "0.6"
+chacha20poly1305 = "0.11"
+getrandom = "0.3"
+base64 = "0.22"
+bip39 = { version = "3", default-features = false }
+rpassword = "7"
 rayon = "1"
-ignore = "=0.4.23"
+ignore = "0.4"
 petgraph = "0.8.3"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 tree-sitter = "0.27"
 tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
-model2vec-rs = "0.2.1"
+model2vec-rs = "0.3"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
 lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
-rig-core = "0.36"
+rig = { package = "rig-core", version = "0.44", features = ["reqwest"] }
 rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
 blake3 = "1"
 tree-sitter-go = "0.25"
@@ -69,8 +76,8 @@ ratatui = { version = "0.30.2", default-features = false, features = ["crossterm
 crossterm = "0.29"
 globset = "0.4"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
-yaml-rust2 = "0.10"
-hcl-rs = "0.18"
+yaml-rust2 = "0.13"
+hcl-rs = "0.19"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 
 [profile.release]
@@ -91,6 +98,7 @@ debug = false
 wry = "0.57"
 tao = "0.37"
 muda = "0.21"
+rfd = { version = "0.17", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }

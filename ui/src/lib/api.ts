@@ -23,6 +23,8 @@ export interface Overview {
   ledger: Record<string, number>;
   skew: { package: string; publisher: string; published: string | null; consumer: string; locked: string | null }[];
   writable: boolean;
+  root: string | null;
+  problem: string | null;
 }
 
 export interface OrgMap {
@@ -143,6 +145,126 @@ export interface Package {
   skewed: boolean;
 }
 
+export interface Settings {
+  config_path: string;
+  index_dir: string | null;
+  index_effective: string;
+  aws_profile: string | null;
+  aws_profile_env: string | null;
+  aws_profiles: string[];
+  aws_status: { ok: boolean; message: string } | null;
+  author_name: string | null;
+  author_effective: string | null;
+  record_names: boolean;
+  llm_base_url: string | null;
+  llm_model: string;
+  llm_key: "environment" | "none";
+  cache_ttl_secs: number;
+  auto_index: boolean;
+  sso_auto_login: boolean;
+  defaults: Defaults;
+}
+
+export interface TeamSettings {
+  name?: string;
+  llm_base_url?: string;
+  llm_model?: string;
+  embed_model?: string;
+  enrich?: boolean;
+  flows?: boolean;
+  guide?: boolean;
+}
+
+export interface Team {
+  settings: TeamSettings;
+  has_key: boolean;
+  unlocked: boolean;
+  locked: string | null;
+  version: number | null;
+  changed_by: string | null;
+  changed_at: string | null;
+  defaults: Defaults;
+}
+
+/** comind's built-in values, used where a setting is empty. */
+export interface Defaults {
+  llm_model: string;
+  llm_base_url: string;
+  embed_model: string;
+}
+
+export interface AwsStatus {
+  needed: boolean;
+  ok?: boolean;
+  message?: string;
+  signin?: boolean;
+  profile?: string | null;
+  auto?: boolean;
+  run?: { running: boolean; ok: boolean | null; message: string; started: string | null };
+}
+
+export type SettingsChange = Partial<{
+  index_dir: string;
+  aws_profile: string;
+  author_name: string;
+  record_names: boolean;
+  llm_base_url: string;
+  llm_model: string;
+  cache_ttl_secs: number;
+  auto_index: boolean;
+  sso_auto_login: boolean;
+}>;
+
+/** POST JSON; throws the server's message when it reports failure. */
+async function post<T = { ok: boolean; message: string }>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const out = await r.json();
+  if (out && out.ok === false) throw new Error(out.message ?? `${path}: ${r.status}`);
+  return out as T;
+}
+
+export interface RepoRow {
+  path: string;
+  name: string;
+  exists: boolean;
+  branch: string | null;
+  your_branch: string | null;
+  remote: string | null;
+  symbols: number | null;
+  indexed_commit: string | null;
+}
+
+export interface ScanHit {
+  path: string;
+  name: string;
+  listed: boolean;
+  remote: string | null;
+}
+
+export interface IndexJob {
+  running: boolean;
+  ok: boolean | null;
+  lines: string[];
+  started: string | null;
+  finished: string | null;
+}
+
+declare global {
+  interface Window {
+    ipc?: { postMessage: (m: string) => void };
+    __comindPicked?: (path: string | null) => void;
+  }
+}
+
+/** A native folder dialog when running in the desktop app; `undefined` in a browser. */
+export const pickFolder = window.ipc
+  ? () =>
+      new Promise<string | null>((resolve) => {
+        window.__comindPicked = resolve;
+        window.ipc!.postMessage("pick-folder");
+      })
+  : undefined;
+
 export interface Setup {
   index: string;
   remote: boolean;
@@ -181,6 +303,23 @@ export const api = {
   search: (q: string) => get<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
   packages: () => get<Package[]>("/api/packages"),
   setup: () => get<Setup>("/api/setup"),
+  settings: () => get<Settings>("/api/settings"),
+  repos: () => get<{ repos: RepoRow[]; unlisted: string[]; root: string | null }>("/api/repos"),
+  changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
+  scanRepos: (dir: string) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }),
+  cloneRepo: (url: string, dir: string) => post("/api/repos/clone", { url, dir }),
+  indexJob: () => get<IndexJob>("/api/index"),
+  startIndex: (llm: boolean) => post("/api/index", { llm }),
+  indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),
+  aws: () => get<AwsStatus>("/api/aws"),
+  team: () => get<Team>("/api/team"),
+  saveTeam: (settings: TeamSettings, version: number | null) => post("/api/team", { settings, version }),
+  teamKey: (key: string) => post<{ ok: boolean; message: string; password: string | null }>("/api/team/key", { key }),
+  teamUnlock: (password: string) => post("/api/team/unlock", { password }),
+  join: (index: string, password: string) => post("/api/join", { index, password }),
+  awsLogin: () => post("/api/aws/login", {}),
+  saveSettings: (c: SettingsChange) => post("/api/settings", c),
+  testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),
   context: async (focus: string) => {
     const r = await fetch(`/api/context?focus=${encodeURIComponent(focus)}`);
     return r.text();

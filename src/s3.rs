@@ -143,8 +143,15 @@ pub fn check() -> Result<String, String> {
         rt.block_on(p.provide_credentials())
             .map(|_| format!("AWS credentials resolve (profile `{profile}`)"))
             .map_err(|e| {
-                let msg = format!("{e:#}");
-                if msg.to_lowercase().contains("sso") || msg.contains("token") {
+                let mut msg = e.to_string();
+                let mut cause = std::error::Error::source(&e);
+                while let Some(c) = cause {
+                    msg.push_str(": ");
+                    msg.push_str(&c.to_string());
+                    cause = c.source();
+                }
+                let lower = msg.to_lowercase();
+                if lower.contains("sso") || lower.contains("token") {
                     format!("AWS sign-in needed: `aws sso login --profile {profile}`")
                 } else {
                     format!("AWS credentials for profile `{profile}` do not resolve: {msg}")
@@ -153,4 +160,39 @@ pub fn check() -> Result<String, String> {
     })
     .join()
     .unwrap_or_else(|_| Err("AWS credential check failed".into()))
+}
+
+/// Profile names from the AWS config and credentials files (nothing else is read from them).
+pub fn profiles() -> Vec<String> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let file = |var: &str, default: &str| {
+        std::env::var_os(var)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home.join(".aws").join(default))
+    };
+    let mut names = std::collections::BTreeSet::new();
+    for (path, prefixed) in [
+        (file("AWS_CONFIG_FILE", "config"), true),
+        (file("AWS_SHARED_CREDENTIALS_FILE", "credentials"), false),
+    ] {
+        for line in std::fs::read_to_string(path).unwrap_or_default().lines() {
+            let Some(section) = line
+                .trim()
+                .strip_prefix('[')
+                .and_then(|l| l.strip_suffix(']'))
+            else {
+                continue;
+            };
+            let name = match (prefixed, section.strip_prefix("profile ")) {
+                (true, Some(n)) => n.trim(),
+                (true, None) if section.trim() == "default" => "default",
+                (false, None) => section.trim(),
+                _ => continue,
+            };
+            names.insert(name.to_string());
+        }
+    }
+    names.into_iter().collect()
 }

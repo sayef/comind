@@ -11,6 +11,8 @@ import { ExplorerPage } from "@/pages/explorer";
 import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
 import { PackagesPage } from "@/pages/packages";
+import { RepositoriesPage } from "@/pages/repositories";
+import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import "./index.css";
 
@@ -31,6 +33,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="conventions" element={<ConventionsPage />} />
                 <Route path="packages" element={<PackagesPage />} />
                 <Route path="setup" element={<SetupPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="repositories" element={<RepositoriesPage />} />
                 <Route path="*" element={<OverviewPage />} />
               </Route>
             </Routes>

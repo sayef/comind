@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use comind::model::{Edge, EdgeKind, Symbol, SymbolKind};
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// Cross-repo code intelligence for coding agents.
 ///
@@ -68,7 +68,8 @@ enum Cmd {
     /// Link several repos into one cross-repo index (adds cross-repo edges + blast radius)
     Link {
         /// Repository paths
-        #[arg(required = true)]
+        /// Repository folders, indexed as they are; none: the configured list (`comind repos`),
+        /// each at its default branch in comind's own worktree
         repos: Vec<String>,
         /// Index directory — root; default: configured index dir (local path or s3://…)
         #[arg(long = "index-dir")]
@@ -170,10 +171,13 @@ enum Cmd {
         #[arg(long)]
         repo: Vec<String>,
     },
-    /// List indexed repositories and their symbol counts
+    /// Indexed repositories with their symbol counts, and the list `comind link` indexes when
+    /// given no folders (`add`, `remove`, `scan`)
     Repos {
+        #[command(subcommand)]
+        what: Option<ReposWhat>,
         /// Index directory to read — root; default: configured index dir
-        #[arg(long = "index-dir")]
+        #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
     },
     /// Index statistics per repo: symbols, edges, kinds, enrichment coverage
@@ -277,6 +281,18 @@ enum Cmd {
         #[arg(long)]
         open: bool,
     },
+    /// Team settings shared by everyone using this index: LLM, embedding model, the team's key
+    Team {
+        #[command(subcommand)]
+        what: Option<TeamWhat>,
+        #[arg(long = "index-dir", global = true)]
+        index_dir: Option<String>,
+    },
+    /// Use a team's index on this machine: remember its location and unlock its key
+    Join {
+        /// The team's index (s3://bucket/prefix or a folder)
+        index: String,
+    },
     /// The web UI in its own window (macOS)
     App {
         #[arg(long = "index-dir")]
@@ -368,6 +384,49 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
+enum TeamWhat {
+    /// Set team settings: name, llm_model, llm_base_url, embed_model, enrich, flows, guide (empty removes)
+    Set {
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        pairs: Vec<String>,
+    },
+    /// Store the team's LLM API key, encrypted with the team password (one is generated the first time)
+    SetKey {
+        /// Read the key from stdin instead of prompting
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Enter the team password once; this machine remembers it (~/.config/comind/credentials)
+    Unlock {
+        #[arg(long)]
+        stdin: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReposWhat {
+    /// Add repository folders (your clones; comind indexes their default branch)
+    Add {
+        #[arg(required = true)]
+        paths: Vec<String>,
+        /// Index this branch instead of the default
+        #[arg(long)]
+        branch: Option<String>,
+    },
+    /// Remove repositories by name or folder
+    Remove {
+        #[arg(required = true)]
+        repos: Vec<String>,
+    },
+    /// List git repositories under a folder
+    Scan {
+        dir: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+}
+
+#[derive(Subcommand)]
 enum ConventionsWhat {
     /// Add a convention
     Add {
@@ -431,7 +490,23 @@ fn main() -> ExitCode {
             std::env::set_var("AWS_PROFILE", p);
         }
     }
-    match Cli::parse().cmd {
+    let matches = Cli::command().get_matches();
+    // Commands that index, search, serve or show the UI run with the index's team settings.
+    if let Some((name, sub)) = matches.subcommand() {
+        let team = [
+            "index", "link", "serve", "ui", "app", "search", "doctor", "guide", "flow",
+        ];
+        if team.contains(&name) {
+            let flag = sub.try_get_one::<String>("index_dir").ok().flatten();
+            let root = comind::config::Config::load().index_dir(flag.map(String::as_str));
+            let _ = comind::team::apply(&root);
+        }
+    }
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => e.exit(),
+    };
+    match cli.cmd {
         Cmd::Index {
             repo,
             index_dir,
@@ -483,6 +558,17 @@ fn main() -> ExitCode {
             let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
                 return ExitCode::FAILURE;
             };
+            let repos = if repos.is_empty() {
+                match configured_checkouts(&cfg) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        comind::ui::err(&format!("{e:#}"));
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else {
+                repos
+            };
             let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
             cmd_link(
                 &repos,
@@ -525,7 +611,7 @@ fn main() -> ExitCode {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
             cmd_find(&query, index_dir.as_deref(), &repos)
         }
-        Cmd::Repos { index_dir } => cmd_repos(index_dir.as_deref()),
+        Cmd::Repos { what, index_dir } => cmd_repo_list(what, index_dir.as_deref()),
         Cmd::Stats { index_dir, repo } => {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
             cmd_stats(&repos, index_dir.as_deref())
@@ -646,6 +732,8 @@ fn main() -> ExitCode {
             open,
         } => cmd_ui(index_dir.as_deref(), web.then_some(port), open),
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
+        Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
+        Cmd::Join { index } => cmd_join(&index),
         Cmd::Erase {
             ids,
             actor,
@@ -1435,7 +1523,11 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
 fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
     use anyhow::Context as _;
     let root = comind::config::Config::load().index_dir(from);
-    let run = comind::tui::Data::load(&root).and_then(|data| match web {
+    let load = match web {
+        Some(_) => Ok(comind::tui::Data::load_or_empty(&root)),
+        None => comind::tui::Data::load(&root),
+    };
+    let run = load.and_then(|data| match web {
         Some(port) => {
             let addr = format!("127.0.0.1:{port}");
             let listener =
@@ -1451,6 +1543,291 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
         None => comind::tui::App::new(data).run(),
     });
     match run {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
+    use comind::config::RepoEntry;
+    let cfg = comind::config::Config::load();
+    let mut list = cfg.repos.clone();
+    let absolute = |p: &str| {
+        std::fs::canonicalize(comind::config::expand_tilde(p))
+            .map(|c| c.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| p.to_string())
+    };
+    let changed = match what {
+        None => {
+            let shown = cmd_repos(from);
+            comind::ui::header("Indexed by `comind link` (default branch, comind's own worktree)");
+            if list.is_empty() {
+                comind::ui::note("none yet: `comind repos add <folder>`");
+            }
+            for r in &list {
+                let p = Path::new(&r.path);
+                let branch = r
+                    .branch
+                    .clone()
+                    .or_else(|| comind::worktree::default_branch(p).ok())
+                    .unwrap_or_else(|| "?".into());
+                comind::ui::field(
+                    &comind::worktree::name(p),
+                    &format!("{}  (indexes {branch})", r.path),
+                );
+            }
+            let _ = shown;
+            return ExitCode::SUCCESS;
+        }
+        Some(ReposWhat::Scan { dir, depth }) => {
+            let listed: Vec<String> = list.iter().map(|r| absolute(&r.path)).collect();
+            for p in comind::worktree::scan(Path::new(&comind::config::expand_tilde(&dir)), depth) {
+                let abs = p.to_string_lossy().into_owned();
+                let mark = if listed.contains(&abs) { "✓" } else { " " };
+                println!("{mark} {abs}");
+            }
+            return ExitCode::SUCCESS;
+        }
+        Some(ReposWhat::Add { paths, branch }) => {
+            for p in paths {
+                let path = absolute(&p);
+                if !Path::new(&path).join(".git").exists() {
+                    comind::ui::err(&format!("{p} is not a git repository"));
+                    return ExitCode::FAILURE;
+                }
+                if !list.iter().any(|r| absolute(&r.path) == path) {
+                    list.push(RepoEntry {
+                        path,
+                        branch: branch.clone(),
+                    });
+                }
+            }
+            true
+        }
+        Some(ReposWhat::Remove { repos }) => {
+            let before = list.len();
+            list.retain(|r| {
+                let name = comind::worktree::name(Path::new(&r.path));
+                let gone = repos
+                    .iter()
+                    .any(|x| *x == name || absolute(x) == absolute(&r.path));
+                if gone {
+                    let _ = comind::worktree::remove(Path::new(&r.path));
+                }
+                !gone
+            });
+            before != list.len()
+        }
+    };
+    if changed {
+        if let Err(e) = comind::config::set_repos(&list) {
+            comind::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
+        comind::ui::ok(&format!(
+            "{} repositories; index them with `comind link`",
+            list.len()
+        ));
+    }
+    ExitCode::SUCCESS
+}
+
+/// Read a secret: the environment variable, stdin, or a hidden prompt.
+fn read_secret(env: &str, stdin: bool, prompt: &str) -> anyhow::Result<String> {
+    if let Ok(v) = std::env::var(env) {
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    let v = if stdin {
+        let mut s = String::new();
+        std::io::stdin().read_line(&mut s)?;
+        s
+    } else {
+        rpassword::prompt_password(prompt)?
+    };
+    let v = v.trim().to_string();
+    anyhow::ensure!(!v.is_empty(), "nothing entered");
+    Ok(v)
+}
+
+fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
+    let root = comind::config::Config::load().index_dir(from);
+    match team_run(what, &root) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comind::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use comind::team;
+    let rt = comind::ledger::runtime()?;
+    let stored = rt.block_on(team::load(root))?;
+    let mut s = stored.settings.clone();
+    let password = || -> anyhow::Result<String> {
+        match team::password(&stored.settings) {
+            Some(p) => Ok(p),
+            None => read_secret("COMIND_TEAM_PASSWORD", false, "Team password: "),
+        }
+    };
+    match what {
+        None => {
+            comind::ui::header(&format!("Team settings of {root}"));
+            let show = |k: &str, v: Option<String>, default: &str| {
+                let shown = v.unwrap_or_else(|| format!("{default}  (comind default)"));
+                comind::ui::field(k, &shown)
+            };
+            show("name", s.name.clone(), "none");
+            show(
+                "llm_base_url",
+                s.llm_base_url.clone(),
+                comind::llm::DEFAULT_BASE_URL,
+            );
+            show("llm_model", s.llm_model.clone(), comind::llm::DEFAULT_MODEL);
+            show(
+                "embed_model",
+                s.embed_model.clone(),
+                comind::embed::DEFAULT_MODEL,
+            );
+            for (k, v) in [("enrich", s.enrich), ("flows", s.flows), ("guide", s.guide)] {
+                show(k, v.map(|b| b.to_string()), "true");
+            }
+            let key = match &s.sealed {
+                None => "not set".to_string(),
+                Some(_) => match team::unlock(&s, team::password(&s).as_deref()) {
+                    a if a.secrets.is_some() => "set, unlocked on this machine".into(),
+                    a => format!("set, locked ({})", a.locked.unwrap_or_default()),
+                },
+            };
+            comind::ui::field("llm_api_key", &key);
+            if let (Some(by), Some(at)) = (stored.changed_by, stored.changed_at) {
+                comind::ui::note(&format!(
+                    "last changed by {by} at {}",
+                    &at[..at.len().min(16)]
+                ));
+            }
+            return Ok(());
+        }
+        Some(TeamWhat::Set { pairs }) => {
+            for p in pairs {
+                let (k, v) = p
+                    .split_once('=')
+                    .with_context(|| format!("`{p}` is not KEY=VALUE"))?;
+                let v = v.trim();
+                let text = (!v.is_empty()).then(|| v.to_string());
+                let flag = || -> anyhow::Result<Option<bool>> {
+                    Ok(if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.parse().with_context(|| format!("{k} is true or false"))?)
+                    })
+                };
+                match k.trim() {
+                    "name" => s.name = text,
+                    "llm_model" => s.llm_model = text,
+                    "llm_base_url" => s.llm_base_url = text,
+                    "embed_model" => {
+                        comind::ui::warn(
+                            "a new embedding model needs a full re-index (`comind link`)",
+                        );
+                        s.embed_model = text
+                    }
+                    "enrich" => s.enrich = flag()?,
+                    "flows" => s.flows = flag()?,
+                    "guide" => s.guide = flag()?,
+                    other => anyhow::bail!("unknown team setting `{other}`"),
+                }
+            }
+        }
+        Some(TeamWhat::SetKey { stdin }) => {
+            let (mut secrets, pw) = match &s.sealed {
+                Some(sealed) => {
+                    let pw = password()?;
+                    (team::open(sealed, &pw)?, pw)
+                }
+                // A password from the environment (CI, scripts) is used as is; otherwise one is generated.
+                None => match std::env::var("COMIND_TEAM_PASSWORD")
+                    .ok()
+                    .filter(|p| !p.is_empty())
+                {
+                    Some(p) => (team::Secrets::default(), p),
+                    None => (team::Secrets::default(), team::passphrase()?),
+                },
+            };
+            let from_env = std::env::var_os("COMIND_TEAM_PASSWORD").is_some();
+            anyhow::ensure!(
+                s.name.as_deref().is_some_and(|n| !n.trim().is_empty()),
+                "give the team a name first: `comind team set name=…`"
+            );
+            let key = read_secret("COMIND_NEW_LLM_KEY", stdin, "Team LLM API key: ")?;
+            secrets.llm_api_key = Some(key);
+            let first = s.sealed.is_none();
+            s.sealed = Some(team::seal(&secrets, &pw)?);
+            rt.block_on(team::save(root, &s, stored.version))?;
+            if !from_env {
+                team::remember_password(&s, &pw)?;
+            }
+            comind::ui::ok("team LLM key saved, encrypted");
+            if first && !from_env {
+                print_new_password(&pw);
+            }
+            return Ok(());
+        }
+        Some(TeamWhat::Unlock { stdin }) => {
+            let sealed = s
+                .sealed
+                .as_ref()
+                .context("this team has no encrypted settings yet")?;
+            let pw = read_secret("COMIND_TEAM_PASSWORD", stdin, "Team password: ")?;
+            team::open(sealed, &pw)?;
+            team::remember_password(&s, &pw)?;
+            comind::ui::ok("unlocked; this machine remembers the team password");
+            return Ok(());
+        }
+    }
+    rt.block_on(team::save(root, &s, stored.version))?;
+    comind::ui::ok("team settings saved; everyone using this index gets them");
+    Ok(())
+}
+
+fn print_new_password(pw: &str) {
+    comind::ui::header("Team password (shown once)");
+    println!("  {pw}");
+    comind::ui::note(
+        "Share it out of band, e.g. in your password manager; CI uses COMIND_TEAM_PASSWORD.",
+    );
+}
+
+fn cmd_join(index: &str) -> ExitCode {
+    let root = comind::config::expand_tilde(index.trim());
+    let run = || -> anyhow::Result<()> {
+        let rt = comind::ledger::runtime()?;
+        let graph = format!("{}/_graph", root.trim_end_matches('/'));
+        let versions = rt.block_on(comind::index::graph_versions(&graph))?;
+        anyhow::ensure!(!versions.is_empty(), "no index at {root}");
+        let stored = rt.block_on(comind::team::load(&root))?;
+        comind::config::update(&[("index_dir", comind::config::Setting::Text(root.clone()))])?;
+        let name = stored.settings.name.clone().unwrap_or_else(|| root.clone());
+        comind::ui::ok(&format!("joined {name}"));
+        if let Some(sealed) = &stored.settings.sealed {
+            if comind::team::password(&stored.settings).is_none() {
+                let pw = read_secret("COMIND_TEAM_PASSWORD", false, "Team password: ")?;
+                comind::team::open(sealed, &pw)?;
+                comind::team::remember_password(&stored.settings, &pw)?;
+                comind::ui::ok("team key unlocked on this machine");
+            }
+        }
+        comind::ui::note("connect your agent: `comind app` → Connect, or `claude mcp add --scope user comind -- comind serve`");
+        Ok(())
+    };
+    match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             comind::ui::err(&format!("{e:#}"));
@@ -2096,6 +2473,36 @@ fn repo_name(path: &str) -> String {
             .and_then(|c| c.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "repo".to_string()),
     }
+}
+
+/// The configured repositories, each fetched and checked out at its default branch in comind's
+/// worktree (never in your folder).
+fn configured_checkouts(cfg: &comind::config::Config) -> anyhow::Result<Vec<String>> {
+    if cfg.repos.is_empty() {
+        anyhow::bail!(
+            "no repositories: pass folders, or add them with `comind repos add <folder>`"
+        );
+    }
+    comind::ui::header(&format!("Checking out {} repo(s)", cfg.repos.len()));
+    let mut out = Vec::new();
+    for r in &cfg.repos {
+        let path = comind::config::expand_tilde(&r.path);
+        let c = comind::worktree::prepare(Path::new(&path), r.branch.as_deref())
+            .map_err(|e| anyhow::anyhow!("{path}: {e:#}"))?;
+        comind::ui::ok(&format!(
+            "{} @ {} {}",
+            comind::worktree::name(Path::new(&path)),
+            c.target,
+            c.commit
+        ));
+        if let Some(why) = &c.stale {
+            comind::ui::warn(&format!(
+                "could not fetch, indexing the last fetched state: {why}"
+            ));
+        }
+        out.push(c.dir.to_string_lossy().into_owned());
+    }
+    Ok(out)
 }
 
 /// Parse several repos, resolve references across them, and report the cross-repo graph

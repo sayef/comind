@@ -258,7 +258,7 @@ fn normalize(ecosystem: &str, name: &str) -> String {
     }
 }
 
-/// `cobrainer[pgsql] >= 0.11.33 ; python_version > "3"` → (`cobrainer`, `>= 0.11.33`).
+/// `acme[pgsql] >= 0.11.33 ; python_version > "3"` → (`acme`, `>= 0.11.33`).
 fn pep508(spec: &str) -> Option<(String, Option<String>)> {
     let spec = spec.split(';').next()?.trim();
     let end = spec
@@ -381,8 +381,8 @@ mod tests {
     #[test]
     fn pep508_specs() {
         assert_eq!(
-            pep508("cobrainer[fastapi,llm, pgsql] >= 0.12.5"),
-            Some(("cobrainer".into(), Some(">=0.12.5".into())))
+            pep508("acme[fastapi,llm, pgsql] >= 0.12.5"),
+            Some(("acme".into(), Some(">=0.12.5".into())))
         );
         assert_eq!(pep508("httpx"), Some(("httpx".into(), None)));
         assert_eq!(

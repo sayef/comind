@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Plug, Ruler, Search, Sun } from "lucide-react";
+import { BookMarked, Boxes, FolderGit2, LayoutDashboard, Moon, Network, Package, Plug, Ruler, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
+import { AwsBanner } from "@/components/aws-banner";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,9 @@ const NAV = [
   { to: "/ledger", label: "Ledger", icon: BookMarked },
   { to: "/conventions", label: "Conventions", icon: Ruler },
   { to: "/packages", label: "Packages", icon: Package },
+  { to: "/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/setup", label: "Connect", icon: Plug },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Layout() {
@@ -132,6 +135,7 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+        <AwsBanner remote={!!overview.data?.root?.startsWith("s3://")} />
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8">
             <Outlet />

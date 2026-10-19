@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/sayef/comind/actions/workflows/ci.yml"><img src="https://github.com/sayef/comind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A34A" alt="MIT license"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.94.1%2B-16A34A" alt="Rust 1.94.1+"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.95%2B-16A34A" alt="Rust 1.95+"></a>
   <!-- After `cargo publish`, add: <a href="https://crates.io/crates/comind"><img src="https://img.shields.io/crates/v/comind.svg" alt="crates.io"></a> -->
 </p>
 
@@ -62,7 +62,7 @@ Prebuilt binaries (macOS arm64/x64, Linux x64/arm64) are published to
 curl -LsSf https://raw.githubusercontent.com/sayef/comind/main/scripts/install.sh | sh
 ```
 
-Or from source (needs Rust 1.94.1 or newer, plus `protoc` and `cmake`):
+Or from source (needs Rust 1.95 or newer, plus `protoc` and `cmake`):
 
 ```bash
 git clone https://github.com/sayef/comind && cd comind
@@ -144,7 +144,11 @@ Results are handed to the agent as **markdown by default** (structured JSON is a
 | `comind doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
-| `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
+| `comind repos [add <folders…> [--branch b] \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comind link` indexes when given no folders |
+| `comind app [--index-dir <dir>]` | The UI in its own window (macOS) |
+| `comind team [set k=v… \| set-key \| unlock]` | Team settings stored with the index: LLM, key (encrypted with the team password), embedding model |
+| `comind join <index>` | Use a team's index on this machine and unlock its key |
+| `comind ui [--web [--port 7878] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for the full flags of any subcommand.

@@ -26,7 +26,11 @@
 | `comind doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
 | `comind hook claude <event>` / `comind init-hooks claude` | Claude Code hook adapter / config snippet |
 | `comind eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
-| `comind ui [--web [--port 7878]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
+| `comind repos [add <folders…> [--branch b] \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comind link` indexes when given no folders |
+| `comind app [--index-dir <dir>]` | The UI in its own window (macOS) |
+| `comind team [set k=v… \| set-key \| unlock]` | Team settings stored with the index: LLM, key (encrypted with the team password), embedding model |
+| `comind join <index>` | Use a team's index on this machine and unlock its key |
+| `comind ui [--web [--port 7878] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comind config <path\|init>` | Show or scaffold the config file |
 
 Run `comind <command> --help` for every flag. `--index-dir` is a local directory or an `s3://…` path and

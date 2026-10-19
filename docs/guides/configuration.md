@@ -21,12 +21,17 @@ guide       = true
 # signing_key = "~/.ssh/id_ed25519.pub"          # sign ledger records (default: git user.signingkey)
 # allowed_signers = "~/.config/git/allowed_signers"
 # aws_profile = "team-dev"                       # S3: AWS profile when AWS_PROFILE is unset
+# sso_auto_login = true                          # app: start `aws sso login` when the session expires
+# auto_index = true                              # app: re-index when a default branch moves
 # author_name = "Ada Lovelace"                  # name on ledger records (default: git user.name)
 # record_names = false                          # keep names off new records
 ```
 
 Environment: `COMIND_INDEX_DIR`, `COMIND_LLM_MODEL`, `COMIND_EMBED_MODEL`, `COMIND_LLM_BASE_URL`,
 `COMIND_FORMAT`, `COMIND_SIGNING_KEY`, `COMIND_ALLOWED_SIGNERS`, `COMIND_AUTHOR_NAME`, `COMIND_AGENT`.
+
+Settings everyone on an index must share (LLM, its key, the embedding model) are team settings stored
+with the index and win over this file; see [Team setup](team-setup.md#team-settings).
 
 Secrets stay out of the file: `OPENAI_API_KEY` for the LLM in the environment, and S3 access through the
 standard AWS chain ([S3 and compatible storage](storage.md)).

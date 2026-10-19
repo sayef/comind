@@ -353,7 +353,7 @@ struct ContractsParam {
     /// Only contracts missing a provider or consumer (calls to nothing, unused routes).
     #[serde(default)]
     dangling: Option<bool>,
-    /// Substring filter on the contract key, e.g. `/skills` or `orders`.
+    /// Substring filter on the contract key, e.g. `/courses` or `orders`.
     #[serde(default)]
     query: Option<String>,
 }

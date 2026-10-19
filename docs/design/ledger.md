@@ -469,7 +469,7 @@ Later: the same views as MCP Apps inside agent clients.
   relations about them, compacts, rewrites the snapshot and prunes all old versions, and leaves
   id-only tombstones (`_ledger/erased/<id>`) so `harvest` does not re-create harvested records.
   Run it while no other compaction is in progress (pruning skips the in-flight safety window).
-  **Confirm the retention/erasure design with legal@cobrainer.com before release** (this plan is
+  **Confirm the retention/erasure design with legal counsel before release** (this plan is
   not legal advice).
 - **Works Council / EU AI Act**: the ledger describes code, not people. No per-person counts,
   rankings, or "who causes most failed attempts" views — enforced by not storing linkable

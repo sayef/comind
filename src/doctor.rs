@@ -75,7 +75,9 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
         "Claude Code hooks not found: `comind init-hooks claude`",
     );
     check(
-        set("OPENAI_API_KEY") || cfg.llm_base_url().is_some(),
+        set("OPENAI_API_KEY")
+            || cfg.llm_base_url().is_some()
+            || crate::team::current().is_some_and(|t| t.settings.sealed.is_some()),
         true,
         &format!("LLM configured (model {})", cfg.llm_model()),
         "no LLM key: enrichment and flows are off (indexing works without)",

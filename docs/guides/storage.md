@@ -39,7 +39,10 @@ an `sso-session` share one sign-in, and several sessions can be signed in at onc
 
 A profile that names an `sso_session` must not also set `sso_start_url` or `sso_region`: the AWS SDK
 rejects that mix (the `aws` CLI tolerates it). Keep those two in the `[sso-session]` block only.
-`comind doctor` reports when credentials do not resolve or a sign-in is needed.
+`comind doctor` reports when credentials do not resolve or a sign-in is needed. In the app, a banner
+says when the session for an S3 index has expired and **Sign in** runs `aws sso login` for the
+profile (it needs the AWS CLI); the index loads as soon as the sign-in completes. With
+`sso_auto_login = true` (Settings → Storage access) the app starts the sign-in on its own.
 
 ## MinIO, R2 and other S3-compatible stores
 

@@ -45,6 +45,46 @@ pub struct Config {
     pub author_name: Option<String>,
     /// `false` keeps names off new ledger records (only the pseudonymous actor id is stored).
     pub record_names: Option<bool>,
+    /// Re-index from the app when a listed repository's default branch moves on the remote.
+    pub auto_index: Option<bool>,
+    /// When the AWS SSO session has expired, start `aws sso login` (you still approve it).
+    pub sso_auto_login: Option<bool>,
+    /// Repositories `comind link` indexes when given none: comind checks out each one's default
+    /// branch in its own worktree.
+    #[serde(default)]
+    pub repos: Vec<RepoEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+pub struct RepoEntry {
+    /// Your local clone.
+    pub path: String,
+    /// Branch to index (default: the remote's default branch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+/// Replace the repository list in `config.toml`.
+pub fn set_repos(list: &[RepoEntry]) -> Result<()> {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().context("parse config.toml")?;
+    let mut tables = toml_edit::ArrayOfTables::new();
+    for r in list {
+        let mut t = toml_edit::Table::new();
+        t["path"] = toml_edit::value(r.path.as_str());
+        if let Some(b) = &r.branch {
+            t["branch"] = toml_edit::value(b.as_str());
+        }
+        tables.push(t);
+    }
+    if list.is_empty() {
+        doc.remove("repos");
+    } else {
+        doc["repos"] = toml_edit::Item::ArrayOfTables(tables);
+    }
+    std::fs::create_dir_all(path.parent().context("config dir")?)?;
+    std::fs::write(&path, doc.to_string()).with_context(|| format!("write {}", path.display()))
 }
 
 impl Config {
@@ -92,21 +132,25 @@ impl Config {
 
     /// Resolve the LLM model: `COMIND_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
     pub fn llm_model(&self) -> String {
-        non_empty_env("COMIND_LLM_MODEL")
+        team(|t| t.llm_model.clone())
+            .or_else(|| non_empty_env("COMIND_LLM_MODEL"))
             .or_else(|| self.llm_model.clone())
             .unwrap_or_else(|| crate::llm::DEFAULT_MODEL.to_string())
     }
 
     /// Resolve the embedding model: `COMIND_EMBED_MODEL` → file → `crate::embed::DEFAULT_MODEL`.
     pub fn embed_model(&self) -> String {
-        non_empty_env("COMIND_EMBED_MODEL")
+        team(|t| t.embed_model.clone())
+            .or_else(|| non_empty_env("COMIND_EMBED_MODEL"))
             .or_else(|| self.embed_model.clone())
             .unwrap_or_else(|| crate::embed::DEFAULT_MODEL.to_string())
     }
 
     /// Resolve an OpenAI-compatible base URL: `COMIND_LLM_BASE_URL` → file → none.
     pub fn llm_base_url(&self) -> Option<String> {
-        non_empty_env("COMIND_LLM_BASE_URL").or_else(|| self.llm_base_url.clone())
+        team(|t| t.llm_base_url.clone())
+            .or_else(|| non_empty_env("COMIND_LLM_BASE_URL"))
+            .or_else(|| self.llm_base_url.clone())
     }
 
     /// Cap on enriched symbols (`max_enrich` in the file); `usize::MAX` = no cap.
@@ -132,13 +176,13 @@ impl Config {
         self.embed.unwrap_or(true)
     }
     pub fn enrich(&self) -> bool {
-        self.enrich.unwrap_or(true)
+        team(|t| t.enrich).or(self.enrich).unwrap_or(true)
     }
     pub fn flows(&self) -> bool {
-        self.flows.unwrap_or(true)
+        team(|t| t.flows).or(self.flows).unwrap_or(true)
     }
     pub fn guide(&self) -> bool {
-        self.guide.unwrap_or(true)
+        team(|t| t.guide).or(self.guide).unwrap_or(true)
     }
 
     /// SCIP mode: `COMIND_SCIP` → file → `auto`.
@@ -153,6 +197,38 @@ impl Config {
 /// `$XDG_CONFIG_HOME/comind/config.toml`, else `~/.config/comind/config.toml`.
 pub fn config_path() -> PathBuf {
     config_home().join("comind").join("config.toml")
+}
+
+/// A setting to write: a string, a flag or a number; `Remove` deletes the key.
+pub enum Setting {
+    Text(String),
+    Flag(bool),
+    Number(i64),
+    Remove,
+}
+
+/// Write `changes` into `config.toml`, keeping its comments and layout.
+pub fn update(changes: &[(&str, Setting)]) -> Result<()> {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().context("parse config.toml")?;
+    for (key, value) in changes {
+        match value {
+            Setting::Text(v) => doc[key] = toml_edit::value(v.as_str()),
+            Setting::Flag(v) => doc[key] = toml_edit::value(*v),
+            Setting::Number(v) => doc[key] = toml_edit::value(*v),
+            Setting::Remove => {
+                doc.remove(key);
+            }
+        }
+    }
+    std::fs::create_dir_all(path.parent().context("config dir")?)?;
+    std::fs::write(&path, doc.to_string()).with_context(|| format!("write {}", path.display()))
+}
+
+/// A team setting, which wins over personal ones so everyone on an index runs the same.
+fn team<T>(pick: impl Fn(&crate::team::TeamSettings) -> Option<T>) -> Option<T> {
+    crate::team::current().and_then(|a| pick(&a.settings))
 }
 
 /// The web UI's access token for browsers: created once, so bookmarks keep working.
@@ -243,7 +319,7 @@ fn data_home() -> PathBuf {
 }
 
 /// Expand a leading `~` to `$HOME`; leave URIs (`s3://…`) and absolute paths untouched.
-fn expand_tilde(s: &str) -> String {
+pub fn expand_tilde(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
         return home().join(rest).to_string_lossy().into_owned();
     }

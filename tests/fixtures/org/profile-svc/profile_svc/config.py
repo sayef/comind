@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    skills_api_url: str = "http://skills-svc"
+    courses_api_url: str = "http://courses-svc"
     exports_bucket: str = "acme-profile-exports"
 
 

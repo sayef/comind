@@ -511,12 +511,12 @@ kind = "calls"
 src = "rs-app:src/util.rs::helper"
 dst = "rs-app:src/main.rs::banner"
 
-# ---- skills-svc / profile-svc: code edges ----
+# ---- courses-svc / profile-svc: code edges ----
 [[edge]]
 case = "same-repo-call"
 kind = "calls"
-src = "skills-svc:skills_svc/api.py::update_skill"
-dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+src = "courses-svc:courses_svc/api.py::update_course"
+dst = "courses-svc:courses_svc/events.py::publish_course_updated"
 
 [[edge]]
 case = "same-repo-import"
@@ -533,26 +533,26 @@ dst = "profile-svc:profile_svc/config.py::settings"
 [[edge]]
 case = "same-repo-import"
 kind = "imports"
-src = "skills-svc:skills_svc/api.py"
-dst = "skills-svc:skills_svc/db.py::SessionLocal"
+src = "courses-svc:courses_svc/api.py"
+dst = "courses-svc:courses_svc/db.py::SessionLocal"
 
 [[edge]]
 case = "same-repo-import"
 kind = "imports"
-src = "skills-svc:skills_svc/api.py"
-dst = "skills-svc:skills_svc/db.py::Skill"
+src = "courses-svc:courses_svc/api.py"
+dst = "courses-svc:courses_svc/db.py::Course"
 
 [[edge]]
 case = "same-repo-import"
 kind = "imports"
-src = "skills-svc:skills_svc/api.py"
-dst = "skills-svc:skills_svc/events.py::publish_skill_updated"
+src = "courses-svc:courses_svc/api.py"
+dst = "courses-svc:courses_svc/events.py::publish_course_updated"
 
 [[edge]]
 case = "module-import"
 kind = "imports"
-src = "skills-svc:skills_svc/main.py"
-dst = "skills-svc:skills_svc/api.py"
+src = "courses-svc:courses_svc/main.py"
+dst = "courses-svc:courses_svc/api.py"
 
 [[edge]]
 case = "instantiate"
@@ -563,71 +563,71 @@ dst = "profile-svc:profile_svc/config.py::Settings"
 [[edge]]
 case = "instantiate"
 kind = "instantiates"
-src = "skills-svc:skills_svc/api.py::update_skill"
-dst = "skills-svc:skills_svc/db.py::Skill"
+src = "courses-svc:courses_svc/api.py::update_course"
+dst = "courses-svc:courses_svc/db.py::Course"
 
 # ---- contracts: HTTP (FastAPI ↔ httpx, cross-repo via router prefix + include_router) ----
 [[edge]]
 case = "contract-http-serve"
 kind = "serves"
-src = "skills-svc:skills_svc/api.py::get_skill"
-dst = "contract:http:GET /v1/skills/{}"
+src = "courses-svc:courses_svc/api.py::get_course"
+dst = "contract:http:GET /v1/courses/{}"
 
 [[edge]]
 case = "contract-http-serve"
 kind = "serves"
-src = "skills-svc:skills_svc/api.py::update_skill"
-dst = "contract:http:POST /v1/skills/{}"
+src = "courses-svc:courses_svc/api.py::update_course"
+dst = "contract:http:POST /v1/courses/{}"
 
 [[edge]]
 case = "contract-http-consume"
 kind = "consumes"
-src = "profile-svc:profile_svc/clients.py::SkillsClient.fetch"
-dst = "contract:http:GET /v1/skills/{}"
+src = "profile-svc:profile_svc/clients.py::CoursesClient.fetch"
+dst = "contract:http:GET /v1/courses/{}"
 
 [[edge]]
 case = "contract-http-consume"
 kind = "consumes"
-src = "profile-svc:profile_svc/clients.py::SkillsClient.rename"
-dst = "contract:http:POST /v1/skills/{}"
+src = "profile-svc:profile_svc/clients.py::CoursesClient.rename"
+dst = "contract:http:POST /v1/courses/{}"
 
 # ---- contracts: tables (SQLAlchemy model, session ops, raw SQL from another repo) ----
 [[edge]]
 case = "contract-table"
 kind = "defines"
-src = "skills-svc:skills_svc/db.py::Skill"
-dst = "contract:table:skills"
+src = "courses-svc:courses_svc/db.py::Course"
+dst = "contract:table:courses"
 
 [[edge]]
 case = "contract-table"
 kind = "reads"
-src = "skills-svc:skills_svc/api.py::get_skill"
-dst = "contract:table:skills"
+src = "courses-svc:courses_svc/api.py::get_course"
+dst = "contract:table:courses"
 
 [[edge]]
 case = "contract-table"
 kind = "writes"
-src = "skills-svc:skills_svc/api.py::update_skill"
-dst = "contract:table:skills"
+src = "courses-svc:courses_svc/api.py::update_course"
+dst = "contract:table:courses"
 
 [[edge]]
 case = "contract-table-raw-sql"
 kind = "reads"
-src = "profile-svc:profile_svc/reports.py::count_skills"
-dst = "contract:table:skills"
+src = "profile-svc:profile_svc/reports.py::count_courses"
+dst = "contract:table:courses"
 
 # ---- contracts: AWS (values via env var, module constant, pydantic settings default) ----
 [[edge]]
 case = "contract-sns-env"
 kind = "publishes"
-src = "skills-svc:skills_svc/events.py::publish_skill_updated"
-dst = "contract:sns:{env:SKILL_EVENTS_TOPIC_ARN}"
+src = "courses-svc:courses_svc/events.py::publish_course_updated"
+dst = "contract:sns:{env:COURSE_EVENTS_TOPIC_ARN}"
 
 [[edge]]
 case = "contract-sqs-const"
 kind = "subscribes"
 src = "profile-svc:profile_svc/worker.py::poll"
-dst = "contract:sqs:skill-updates"
+dst = "contract:sqs:course-updates"
 
 [[edge]]
 case = "contract-s3-settings"
@@ -700,7 +700,7 @@ dst = "web-app:src/lib/http.ts::request"
 [[edge]]
 case = "interface-call"
 kind = "calls"
-src = "web-app:src/jobs.ts::loadSkill"
+src = "web-app:src/jobs.ts::loadCourse"
 dst = "web-app:src/lib/http.ts::ServiceClient.get"
 
 [[edge]]
@@ -718,27 +718,27 @@ dst = "contract:http:GET /api/jobs/{}"
 [[edge]]
 case = "contract-ts-wrapper"
 kind = "consumes"
-src = "web-app:src/jobs.ts::loadSkill"
-dst = "contract:http:GET /v1/skills/{}"
+src = "web-app:src/jobs.ts::loadCourse"
+dst = "contract:http:GET /v1/courses/{}"
 
 # ---- pypika: Table set on a base class in __init__, used by a subclass ----
 [[edge]]
 case = "inherits"
 kind = "inherits"
-src = "profile-svc:profile_svc/queries.py::SkillQueries"
+src = "profile-svc:profile_svc/queries.py::CourseQueries"
 dst = "profile-svc:profile_svc/queries.py::QueryBase"
 
 [[edge]]
 case = "contract-table-pypika"
 kind = "reads"
-src = "profile-svc:profile_svc/queries.py::SkillQueries.list_skills"
-dst = "contract:table:skills"
+src = "profile-svc:profile_svc/queries.py::CourseQueries.list_courses"
+dst = "contract:table:courses"
 
 [[edge]]
 case = "contract-table-pypika"
 kind = "writes"
-src = "profile-svc:profile_svc/queries.py::SkillQueries.rename"
-dst = "contract:table:skills"
+src = "profile-svc:profile_svc/queries.py::CourseQueries.rename"
+dst = "contract:table:courses"
 
 # ---- Spring MVC / Feign / RestTemplate (Java + Kotlin) and Go net/http ----
 [[edge]]

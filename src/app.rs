@@ -15,6 +15,8 @@ enum Msg {
     Ready(String),
     Failed(String),
     Menu(MenuId),
+    /// The page asked for a folder (Repositories: add or scan).
+    PickFolder,
 }
 
 /// Open the window and serve the index at `root` into it; returns when the window closes.
@@ -88,8 +90,16 @@ pub fn run(root: String) -> anyhow::Result<()> {
         .with_inner_size(LogicalSize::new(1320.0, 860.0))
         .with_min_inner_size(LogicalSize::new(880.0, 560.0))
         .build(&event_loop)?;
+    let ask = std::sync::Mutex::new(proxy.clone());
     let webview = WebViewBuilder::new()
         .with_html(LOADING)
+        .with_ipc_handler(move |req| {
+            if req.body() == "pick-folder" {
+                if let Ok(p) = ask.lock() {
+                    let _ = p.send_event(Msg::PickFolder);
+                }
+            }
+        })
         .with_navigation_handler(|url| {
             let local = ["http://127.0.0.1:", "about:", "data:"]
                 .iter()
@@ -107,7 +117,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
 
     std::thread::spawn(move || {
         let started = (|| {
-            let data = crate::tui::Data::load(&root)?;
+            let data = crate::tui::Data::load_or_empty(&root);
             let listener = TcpListener::bind("127.0.0.1:0")?;
             let port = listener.local_addr()?.port();
             let token = crate::web::new_token();
@@ -127,6 +137,15 @@ pub fn run(root: String) -> anyhow::Result<()> {
         match event {
             Event::UserEvent(Msg::Ready(url)) => {
                 let _ = webview.load_url(&url);
+            }
+            Event::UserEvent(Msg::PickFolder) => {
+                let picked = rfd::FileDialog::new()
+                    .pick_folder()
+                    .map(|p| p.to_string_lossy().into_owned());
+                let arg = serde_json::to_string(&picked).unwrap_or_else(|_| "null".into());
+                let _ = webview.evaluate_script(&format!(
+                    "window.__comindPicked && window.__comindPicked({arg})"
+                ));
             }
             Event::UserEvent(Msg::Failed(e)) => {
                 let _ = webview.load_html(&failed(&e, &root_hint()));

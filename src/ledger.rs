@@ -705,7 +705,7 @@ pub fn all_blocking(index_root: &str) -> Result<Vec<Record>> {
     runtime()?.block_on(ledger.all())
 }
 
-pub(crate) fn runtime() -> Result<tokio::runtime::Runtime> {
+pub fn runtime() -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

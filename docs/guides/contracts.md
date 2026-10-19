@@ -25,5 +25,5 @@ contracts describe production topology.
 Paths, queue URLs, topic ARNs and bucket names are evaluated statically: literals, constants, string
 templates, `Path` joins, settings defaults, environment variables, function parameters passed by callers
 (up to four calls deep), constructor arguments stored on `self`, and finally the repository's YAML config
-(`config*`, `settings*`, `application*.yml`). Deployment tiers are normalised (`skills-dev-jobs` and
-`skills-${var.tier}-jobs` are the same queue), so dev config, Terraform templates and other tiers meet.
+(`config*`, `settings*`, `application*.yml`). Deployment tiers are normalised (`courses-dev-jobs` and
+`courses-${var.tier}-jobs` are the same queue), so dev config, Terraform templates and other tiers meet.

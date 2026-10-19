@@ -24,6 +24,13 @@ All notable changes to this project are documented here. The format follows
   who wrote and reviewed them, and can be confirmed, archived, invalidated or deleted.
 - `comind preflight` for uncommitted changes and MR pipelines; Claude Code and generic agent hooks with a
   local mirror for remote indexes; `comind doctor`.
+- Repositories and Settings in the app: scan a folder and pick repositories, clone, index with progress
+  (each repository's default branch in comind's own worktree), and settings for the index location, AWS
+  profile and name; `comind repos` and `comind link` with no folders.
+- Team settings stored with the index (LLM, embedding model, LLM steps and an API key encrypted with a
+  generated team password), which win over personal ones; `comind team`, `comind join` and a Join flow in
+  the app.
+- S3 through the standard AWS chain (profiles, SSO, `credential_process`, custom endpoints such as MinIO).
 - A desktop app on macOS (`comind app`: the web UI in a native WebKit window), the local web UI
   (`comind ui --web [--open]`, guarded by an access token) and the terminal UI (`comind ui`): a React app embedded in the binary,
   with dependency graphs for the org and each symbol (React Flow), a version slider, contracts, ledger review and a command palette.

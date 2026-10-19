@@ -31,6 +31,17 @@ new one.
   measured ones (hidden ones can be restored). `/conventions?repo=<name>` opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
+- **Repositories**: what comind indexes. Add a folder, scan a folder and tick the repositories you
+  want (untick to drop one), or clone one with your own git access. **Index now** fetches each
+  repository's default branch into comind's own worktree (`~/.cache/comind/worktrees`), so your
+  folders and branches are never touched, rebuilds the index and shows its progress; every page
+  then shows the new index. LLM summaries are opt-in per run. With **Re-index automatically** on
+  (`auto_index`), the app checks every freshness interval whether a default branch moved on the
+  remote (`git ls-remote`, nothing is downloaded) and re-indexes without LLM steps when one did. For
+  a shared index built by CI, change the list there.
+- **Settings**: the index location (with a connection test), the team settings (shared LLM, key and
+  embedding model), the AWS profile for S3, your name on ledger records, and how often to check for a
+  new index version. Changing the index location switches the UI without a restart.
 - **Connect**: checks of this setup (as `comind doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.

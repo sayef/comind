@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, Boxes, GitBranch, History, Network, Workflow } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { GraphView } from "@/components/graph-view";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
@@ -47,6 +49,32 @@ function linkDiff(then: OrgMap, now: OrgMap) {
   return { added: [...b].filter((k) => !a.has(k)), gone: [...a].filter((k) => !b.has(k)) };
 }
 
+/** First run: use the team's index (its location and, if it has a key, the team password). */
+function JoinTeam() {
+  const qc = useQueryClient();
+  const [index, setIndex] = useState("");
+  const [password, setPassword] = useState("");
+  const join = useMutation({ mutationFn: () => api.join(index, password), onSuccess: () => qc.invalidateQueries() });
+  return (
+    <Card className="w-full p-4 text-left">
+      <div className="text-sm font-medium">Join a team</div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        The team's index location, and the team password if the team keeps an LLM key. An S3 index uses your AWS profile (Settings).
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comind or a folder" className="font-mono text-xs" />
+        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Team password (optional)" />
+        <div>
+          <Button variant="brand" disabled={!index.trim() || join.isPending} onClick={() => join.mutate()}>
+            Join
+          </Button>
+        </div>
+        {join.error && <p className="text-xs text-warning">{join.error.message}</p>}
+      </div>
+    </Card>
+  );
+}
+
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
@@ -75,6 +103,33 @@ export function OverviewPage() {
   );
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
+
+  if (o?.problem) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
+        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
+        <h1 className="text-xl font-semibold">No index here yet</h1>
+        <p className="text-sm text-muted-foreground">
+          comind looked in <span className="font-mono">{o.root}</span>. Join your team's index, or add repositories and build one.
+        </p>
+        <JoinTeam />
+        <p className="text-xs text-muted-foreground">or start your own</p>
+        <div className="flex gap-2">
+          <Button variant="brand" asChild>
+            <Link to="/repositories">Add repositories</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/settings">Settings</Link>
+          </Button>
+        </div>
+        <details className="text-left text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Details</summary>
+          <pre className="mt-2 whitespace-pre-wrap">{o.problem}</pre>
+        </details>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">

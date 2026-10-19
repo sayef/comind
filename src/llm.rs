@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
-use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{AssistantContent, Completion};
+use rig::completion::CompletionRequest;
 use rig::providers::openai;
 
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
 pub const DEFAULT_MODEL: &str = "gpt-4o-mini";
+
+/// Where requests go without an endpoint setting: OpenAI.
+pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// Max concurrent in-flight enrichment requests.
 const CONCURRENCY: usize = 8;
@@ -25,7 +27,7 @@ const CONCURRENCY: usize = 8;
 pub struct LlmClient {
     // Chat Completions API (works with OpenAI *and* any OpenAI-compatible endpoint), not the
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
-    client: openai::CompletionsClient,
+    client: openai::OpenAI,
     model: String,
     // OpenAI's own API takes `max_completion_tokens` (required by newer models); compatible
     // servers (Ollama, vLLM, LiteLLM) expect `max_tokens`.
@@ -47,6 +49,20 @@ impl LlmClient {
     /// [`crate::config`] (env → `config.toml` → default); the key stays env-only
     /// (`OPENAI_API_KEY`).
     pub fn from_env() -> Result<Self> {
+        // The team's key wins; `OPENAI_API_KEY` from the environment only without a team key.
+        let team = crate::team::current();
+        if let Some(t) = &team {
+            if t.settings.sealed.is_some() && t.secrets.is_none() {
+                anyhow::bail!(
+                    "the team's LLM key is locked: {} (`comind team unlock`)",
+                    t.locked.as_deref().unwrap_or("enter the team password")
+                );
+            }
+        }
+        let team_key = team.and_then(|t| t.secrets).and_then(|s| s.llm_api_key);
+        if let Some(k) = team_key {
+            std::env::set_var("OPENAI_API_KEY", k);
+        }
         let cfg = crate::config::Config::load();
         let model = cfg.llm_model();
         // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
@@ -57,14 +73,10 @@ impl LlmClient {
             Some(base) => {
                 let key =
                     std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "sk-noauth".to_string());
-                openai::CompletionsClient::builder()
-                    .api_key(&key)
-                    .base_url(&base)
-                    .build()
-                    .map_err(|e| anyhow::anyhow!("LLM client (COMIND_LLM_BASE_URL): {e}"))?
+                openai::OpenAIConfig::new(key).with_base_url(base).client()
             }
             // Rig's from_env reads OPENAI_API_KEY (and honours OPENAI_BASE_URL too).
-            None => openai::CompletionsClient::from_env().map_err(|e| {
+            None => openai::OpenAI::from_env().map_err(|e| {
                 anyhow::anyhow!(
                     "OpenAI client (set OPENAI_API_KEY, or COMIND_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
                 )
@@ -88,39 +100,27 @@ impl LlmClient {
     }
 
     async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String> {
-        // A Rig "agent" with a preamble is just a system-prompted completion — no tools/RAG.
-        // Use the completion API (not `prompt()`) so we get token `usage` back from the provider.
-        let builder = self.client.agent(&self.model).preamble(system);
+        // Chat Completions (not the Responses API): what OpenAI-compatible servers implement.
+        let req = CompletionRequest::new(user.to_string()).preamble(system);
         // Reasoning models spend part of the completion budget thinking, hence the headroom.
-        let agent = if self.openai_native {
-            builder
-                .additional_params(serde_json::json!({
-                    "max_completion_tokens": (max_tokens as u64 * 4).max(4000)
-                }))
-                .build()
+        let req = if self.openai_native {
+            req.additional_params(serde_json::json!({
+                "max_completion_tokens": (max_tokens as u64 * 4).max(4000)
+            }))
         } else {
-            builder.max_tokens(max_tokens as u64).build()
+            req.max_tokens(max_tokens as u64)
         };
-        let resp = agent
-            .completion(user, Vec::<rig::completion::Message>::new())
-            .await
-            .context("LLM request")?
-            .send()
+        let resp = self
+            .client
+            .chat(&self.model)
+            .call(req)
             .await
             .context("LLM completion")?;
         self.input_tokens
-            .fetch_add(resp.usage.input_tokens, Ordering::Relaxed);
+            .fetch_add(resp.usage.input_tokens.unwrap_or(0), Ordering::Relaxed);
         self.output_tokens
-            .fetch_add(resp.usage.output_tokens, Ordering::Relaxed);
-        let text: String = resp
-            .choice
-            .iter()
-            .filter_map(|c| match c {
-                AssistantContent::Text(t) => Some(t.text.as_str()),
-                _ => None,
-            })
-            .collect();
-        Ok(text.trim().to_string())
+            .fetch_add(resp.usage.output_tokens.unwrap_or(0), Ordering::Relaxed);
+        Ok(resp.text().trim().to_string())
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.

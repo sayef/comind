@@ -101,7 +101,7 @@ pub struct ValueFact {
 pub struct Args {
     pub positional: Vec<Option<ValueExpr>>,
     pub keywords: Vec<(String, ValueExpr)>,
-    /// Positional arguments that are calls, by callee path (`Skill(...)`).
+    /// Positional arguments that are calls, by callee path (`Course(...)`).
     pub calls: Vec<(usize, Vec<String>)>,
 }
 

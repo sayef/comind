@@ -1469,7 +1469,7 @@ fn join_path(parts: &[String]) -> String {
     out
 }
 
-/// `/v1/skills/{skill_id}?x=1` → `/v1/skills/{}`; scheme and host dropped.
+/// `/v1/courses/{course_id}?x=1` → `/v1/courses/{}`; scheme and host dropped.
 pub fn http_path(url: &str) -> String {
     let mut p = url;
     for scheme in ["https://", "http://"] {
@@ -1683,17 +1683,17 @@ mod tests {
     #[test]
     fn tiers_are_not_identity() {
         assert_eq!(
-            untier("skills-dev-api-tasks-queue"),
-            "skills-{}-api-tasks-queue"
+            untier("courses-dev-api-tasks-queue"),
+            "courses-{}-api-tasks-queue"
         );
         assert_eq!(
-            untier("skills-{}-api-tasks-queue"),
-            "skills-{}-api-tasks-queue"
+            untier("courses-{}-api-tasks-queue"),
+            "courses-{}-api-tasks-queue"
         );
         assert_eq!(untier("acme_prod.events.fifo"), "acme_{}.events.fifo");
         assert_eq!(untier("developers-feed"), "developers-feed");
         assert_eq!(
-            name_tokens("skills-{}-x-analysis-events-queue")
+            name_tokens("courses-{}-x-analysis-events-queue")
                 .last()
                 .map(String::as_str),
             Some("events")
@@ -1727,10 +1727,10 @@ mod tests {
 
     #[test]
     fn http_paths_normalize() {
-        assert_eq!(http_path("/v1/skills/{skill_id}"), "/v1/skills/{}");
+        assert_eq!(http_path("/v1/courses/{course_id}"), "/v1/courses/{}");
         assert_eq!(
-            http_path("http://skills-svc/v1/skills/{}?x=1"),
-            "/v1/skills/{}"
+            http_path("http://courses-svc/v1/courses/{}?x=1"),
+            "/v1/courses/{}"
         );
         assert_eq!(http_path("{}/v1/a//b/"), "/v1/a/b");
         assert_eq!(http_path("{env:BASE}/x"), "/x");
@@ -1740,20 +1740,20 @@ mod tests {
     #[test]
     fn sql_tables_by_statement() {
         assert_eq!(
-            sql_tables("SELECT count(*) FROM skills"),
-            vec![("skills".into(), false)]
+            sql_tables("SELECT count(*) FROM courses"),
+            vec![("courses".into(), false)]
         );
         assert_eq!(
             sql_tables("SELECT * FROM a JOIN b ON a.id = b.id"),
             vec![("a".into(), false), ("b".into(), false)]
         );
         assert_eq!(
-            sql_tables("INSERT INTO skills (id) VALUES (1)"),
-            vec![("skills".into(), true)]
+            sql_tables("INSERT INTO courses (id) VALUES (1)"),
+            vec![("courses".into(), true)]
         );
         assert_eq!(
-            sql_tables("UPDATE x.skills SET a = 1"),
-            vec![("skills".into(), true)]
+            sql_tables("UPDATE x.courses SET a = 1"),
+            vec![("courses".into(), true)]
         );
     }
 }

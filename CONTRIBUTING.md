@@ -11,7 +11,7 @@ code are all welcome.
 
 ## Development setup
 
-You need Rust 1.94.1 or newer (the minimum supported version, checked in CI), plus `protoc` and `cmake`:
+You need Rust 1.95 or newer (the minimum supported version, checked in CI), plus `protoc` and `cmake`:
 
 ```sh
 brew install protobuf cmake                          # macOS
