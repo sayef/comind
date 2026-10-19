@@ -94,8 +94,11 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
+      # Debian 11's security archive is retired; the build tools come from the main archive.
       - if: runner.os == 'Linux'
-        run: apt-get update && apt-get install -y protobuf-compiler cmake perl
+        run: |
+          sed -i '/bullseye-security/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          apt-get update && apt-get install -y protobuf-compiler cmake perl
       - if: runner.os == 'macOS'
         run: brew install protobuf cmake
       - run: rustup target add ${{ matrix.target }}
