@@ -4,9 +4,9 @@
 #   curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
 #
 # Env:
-#   COMINDLY_VERSION   tag to install (default: latest)
-#   COMINDLY_BIN_DIR   install dir (default: $HOME/.local/bin)
-#   GITHUB_TOKEN     optional (higher GitHub API rate limits, or installing from a private fork)
+#   COMINDLY_VERSION  tag to install (default: latest)
+#   COMINDLY_BIN_DIR  install dir (default: $HOME/.local/bin)
+#   GITHUB_TOKEN      optional (higher GitHub API rate limits, or installing from a private fork)
 set -eu
 
 REPO="sayef/comindly"
@@ -45,6 +45,18 @@ trap 'rm -rf "$tmp"' EXIT
 
 # shellcheck disable=SC2086
 eval curl -LsSf $auth "$url" -o "$tmp/$asset"
+# shellcheck disable=SC2086
+eval curl -LsSf $auth "$url.sha256" -o "$tmp/$asset.sha256"
+want="$(cut -d' ' -f1 "$tmp/$asset.sha256")"
+if command -v sha256sum >/dev/null 2>&1; then
+  got="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"
+else
+  got="$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)"
+fi
+if [ "$want" != "$got" ]; then
+  echo "comindly: checksum mismatch for $asset" >&2
+  exit 1
+fi
 tar -C "$tmp" -xzf "$tmp/$asset"
 
 mkdir -p "$BIN_DIR"

@@ -127,4 +127,12 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
-          files: dist/*
+          files: dist/comindly-*
+
+  # Installs the published release the way users do; fails the release if that breaks.
+  verify-install:
+    needs: [tag, publish]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/install-check.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
