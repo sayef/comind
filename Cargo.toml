@@ -1,0 +1,102 @@
+[package]
+name = "comindly"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/sayef/comindly"
+authors = ["Saiful Islam"]
+description = "Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary."
+readme = "README.md"
+homepage = "https://github.com/sayef/comindly"
+documentation = "https://docs.rs/comindly"
+keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
+categories = ["development-tools", "command-line-utilities"]
+# An allowlist, so the git-ignored `ui/dist` (built before publishing) ships in the crate.
+include = ["/src/**", "/build.rs", "/ui/dist/**", "/benches/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/CHANGELOG.md"]
+
+# Library (the engine, one module per stage) + the `comindly` binary. main.rs uses the lib as `comindly::`.
+[lib]
+name = "comindly"
+path = "src/lib.rs"
+
+[[bin]]
+name = "comindly"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
+console = "0.16" # styled status lines + TTY detection
+comfy-table = "7" # unicode result tables
+anyhow = "1"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util"] }
+futures = "0.3"
+# S3 access through the standard AWS chain (profiles, SSO, credential_process); lance uses it too.
+aws-config = "1"
+aws-credential-types = "1"
+async-trait = "0.1"
+toml_edit = "0.25"
+rpassword = "7"
+rayon = "1"
+ignore = "0.4"
+petgraph = "0.8.3"
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+tree-sitter = "0.27"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+model2vec-rs = "0.3"
+# Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
+lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
+lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
+# LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
+rig = { package = "rig-core", version = "0.44", features = ["reqwest"] }
+rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
+blake3 = "1"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-rust = "0.24"
+scip = "0.10"
+protobuf = "=3.7.2"
+sqlparser = "0.63"
+object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
+uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
+crossterm = "0.29"
+globset = "0.4"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+yaml-rust2 = "0.13"
+hcl-rs = "0.19"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Keep target/ small on a tight disk: no debug-info for third-party deps
+# (our own code keeps line tables for usable backtraces).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# `comindly app`: a native window around the web UI (macOS, like Ollama's desktop app).
+[target.'cfg(target_os = "macos")'.dependencies]
+wry = "0.57"
+tao = "0.37"
+muda = "0.21"
+rfd = { version = "0.17", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "graph"
+harness = false

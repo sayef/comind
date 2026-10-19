@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # Patch and minor updates arrive together; each major version gets its own pull request.
+    groups:
+      rust:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Pinned: 0.38–0.40 need the heavy `remote` feature to compile.
+      - dependency-name: lancedb
+      - dependency-name: lance-index
+      # Must match the version lancedb uses.
+      - dependency-name: object_store
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      ui:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # Its ref is the Rust version (MSRV job, `@stable`), not an action release.
+      - dependency-name: dtolnay/rust-toolchain

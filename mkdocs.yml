@@ -1,0 +1,125 @@
+site_name: comindly
+site_description: "Cross-repo code intelligence for coding agents: one versioned graph in your own storage."
+site_url: https://comindly.pages.dev/
+repo_url: https://github.com/sayef/comindly
+repo_name: sayef/comindly
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; Saiful Islam. Released under the MIT License.
+
+theme:
+  name: material
+  logo: assets/wordmark-dark.svg
+  favicon: assets/icon.svg
+  font:
+    text: Source Sans 3
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.blocks.caption
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+hooks:
+  - docs/hooks.py
+
+exclude_docs: |
+  hooks.py
+  __pycache__/
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts: concepts.md
+  - Guides:
+      - Using comindly with agents: guides/agents.md
+      - Team setup: guides/team-setup.md
+      - S3 and compatible storage: guides/storage.md
+      - Service contracts: guides/contracts.md
+      - The ledger: guides/ledger.md
+      - Preflight and checks: guides/preflight.md
+      - Desktop, web and terminal UI: guides/ui.md
+      - CI and merge requests: guides/ci.md
+      - Configuration: guides/configuration.md
+  - Reference:
+      - Command line: reference/cli.md
+      - MCP tools: reference/mcp.md
+  - Architecture: architecture.md
+  - Design:
+      - Roadmap: design/roadmap.md
+      - Ledger design: design/ledger.md
+  - About:
+      - FAQ: faq.md
+      - Changelog: changelog.md
+      - Contributing: contributing.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sayef/comindly

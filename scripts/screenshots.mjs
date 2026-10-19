@@ -1,0 +1,85 @@
+// Captures the web UI's pages in light and dark: node scripts/screenshots.mjs <ui url with token> <out dir>
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const [url, out] = process.argv.slice(2);
+const base = new URL(url).origin;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const browser = [
+  process.env.CHROME,
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium",
+].find((p) => p && existsSync(p));
+if (!browser) throw new Error("no Chrome or Edge found; set CHROME");
+
+const profile = mkdtempSync(join(tmpdir(), "comindly-shots-"));
+const port = 9300 + Math.floor(Math.random() * 600);
+// A mock keychain keeps macOS from asking where to store the browser's secrets.
+const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--use-mock-keychain", "--password-store=basic", "--no-first-run"];
+const proc = spawn(browser, [...flags, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], {
+  stdio: "ignore",
+  env: { ...process.env, HOME: process.env.REAL_HOME ?? process.env.HOME },
+});
+
+let targets;
+for (let i = 0; i < 40 && !targets; i++) {
+  try {
+    targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  } catch {
+    await sleep(250);
+  }
+}
+const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+await new Promise((r) => (ws.onopen = r));
+let seq = 0;
+const pending = new Map();
+ws.onmessage = (m) => {
+  const d = JSON.parse(m.data);
+  pending.get(d.id)?.(d.result ?? d.error);
+  pending.delete(d.id);
+};
+const send = (method, params = {}) => new Promise((r) => (pending.set(++seq, r), ws.send(JSON.stringify({ id: seq, method, params }))));
+const evaluate = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
+const go = async (path, wait = 2500) => (await send("Page.navigate", { url: base + path }), await sleep(wait));
+const shot = async (name) => {
+  const { data } = await send("Page.captureScreenshot", { format: "webp", quality: 90 });
+  writeFileSync(join(out, `${name}.webp`), Buffer.from(data, "base64"));
+  console.log(`  ${name}.webp`);
+};
+
+await send("Page.enable");
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
+await send("Page.navigate", { url });
+await sleep(2000);
+const focus = await evaluate(`fetch("/api/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
+
+for (const theme of ["light", "dark"]) {
+  await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
+  const suffix = theme === "dark" ? "-dark" : "";
+  await go("/");
+  await shot(`overview${suffix}`);
+  if (focus) {
+    await go(`/explorer?focus=${encodeURIComponent(focus)}`, 3500);
+    await shot(`explorer${suffix}`);
+  }
+  for (const page of ["contracts", "ledger", "packages", "conventions", "repositories", "setup"]) {
+    await go(`/${page}`);
+    await shot(`${page}${suffix}`);
+  }
+  await go("/");
+  await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: true, bubbles: true }))`);
+  await sleep(500);
+  await send("Input.insertText", { text: "charge an order" });
+  await sleep(2000);
+  await shot(`palette${suffix}`);
+}
+
+ws.close();
+proc.kill();
+await sleep(300);
+rmSync(profile, { recursive: true, force: true });

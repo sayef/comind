@@ -1,0 +1,6 @@
+[project]
+name = "acme-common"
+version = "1.4.0"
+description = "Shared money, events and HTTP helpers for Acme services"
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27", "boto3>=1.34"]

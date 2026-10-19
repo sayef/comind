@@ -1,0 +1,96 @@
+# Comindly org index — clones the repos you list, builds the cross-repo graph + embeddings
+# (+ optional LLM enrichment), writes a versioned LanceDB dataset to a LOCAL path, and uploads
+# it as a downloadable artifact. No S3 / AWS. No repo names committed here — they live in a
+# repository variable, so this file stays generic and public-safe.
+#
+# ── To enable ────────────────────────────────────────────────────────────────────────────
+#   • Variable  COMINDLY_INDEX_ENABLED = true          (lets the nightly schedule run)
+#   • Variable  COMINDLY_REPOS = "owner/pkg  owner/svc" (space/newline list of repos to index)
+#   • Secret    COMINDLY_REPO_TOKEN                     (fine-grained PAT, Contents: read)
+#                                                     — omit for public repos
+#   • Secret    OPENAI_API_KEY  (optional)            — turns on --enrich
+# ──────────────────────────────────────────────────────────────────────────────────────────
+name: comindly-index
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 02:00 UTC nightly
+  workflow_dispatch:
+
+concurrency:
+  group: comindly-index
+  cancel-in-progress: true
+
+jobs:
+  index:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.COMINDLY_INDEX_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout comindly (the engine)
+        uses: actions/checkout@v7
+        with:
+          path: comindly
+
+      - name: Clone the repos to index
+        env:
+          GH_TOKEN: ${{ secrets.COMINDLY_REPO_TOKEN }}
+          REPOS: ${{ vars.COMINDLY_REPOS }}
+        run: |
+          if [ -z "$REPOS" ]; then
+            echo "::error::COMINDLY_REPOS is empty. Add it under Settings → Secrets and variables → Actions → the VARIABLES tab (not Secrets), name COMINDLY_REPOS, value e.g. 'owner/repo-a owner/repo-b'."
+            exit 1
+          fi
+          mkdir -p repos
+          for slug in $REPOS; do
+            name="${slug##*/}"
+            if [ -n "$GH_TOKEN" ]; then
+              url="https://x-access-token:${GH_TOKEN}@github.com/${slug}.git"
+            else
+              url="https://github.com/${slug}.git"
+            fi
+            echo "cloning $slug"
+            git clone --quiet "$url" "repos/${name}"   # full history → --incremental can diff
+          done
+
+      - name: Prereqs
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: comindly
+
+      - name: Restore previous index (enables incremental)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/comindly-index/org
+          key: comindly-index-${{ github.run_id }}
+          restore-keys: comindly-index-
+
+      - name: Build comindly
+        working-directory: comindly
+        run: cargo build --release
+
+      - name: Build the index (local LanceDB path — no S3)
+        env:
+          INDEX_DIR: ${{ runner.temp }}/comindly-index/org
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # optional; enables --enrich when set
+        run: |
+          BIN=comindly/target/release/comindly
+          ENRICH=""
+          [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich"
+          COMINDLY_MAX_ENRICH=200 "$BIN" link repos/*/ --index-dir "$INDEX_DIR" --embed --incremental $ENRICH
+          "$BIN" ledger --compact --index-dir "$INDEX_DIR"
+
+      - name: Upload index artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: comindly-index
+          # Upload the index dir (contains _graph) so consumers point --index-dir at it.
+          path: ${{ runner.temp }}/comindly-index/org
+          retention-days: 7
+          if-no-files-found: error
+
+# Consume it: `gh run download -R <owner>/comindly -n comindly-index` then
+#   comindly serve  --index-dir .      (MCP)
+#   comindly search "…" --index-dir .

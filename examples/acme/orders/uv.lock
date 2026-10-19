@@ -1,0 +1,13 @@
+version = 1
+
+[[package]]
+name = "acme-common"
+version = "1.4.0"
+
+[[package]]
+name = "fastapi"
+version = "0.115.6"
+
+[[package]]
+name = "sqlalchemy"
+version = "2.0.36"

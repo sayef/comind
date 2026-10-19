@@ -1,0 +1,6 @@
+# rustfmt defaults are good; we only pin the edition. `cargo fmt` already sorts imports.
+# For std/external/crate import grouping (isort-style), uncomment the two nightly options
+# below and format with `cargo +nightly fmt`.
+edition = "2021"
+# group_imports = "StdExternalCrate"   # nightly-only
+# imports_granularity = "Crate"        # nightly-only

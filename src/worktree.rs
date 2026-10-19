@@ -1,0 +1,386 @@
+//! comindly's own checkout of each repository's default branch: a detached git worktree under
+//! `~/.cache/comindly/worktrees`, so indexing never touches your working folder or branches. Uses the
+//! `git` command, so your SSH keys and credential helpers apply.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{bail, Context, Result};
+
+/// A checkout ready to index.
+pub struct Checkout {
+    pub dir: PathBuf,
+    /// What was checked out, e.g. `origin/main`.
+    pub target: String,
+    pub commit: String,
+    /// Set when fetching failed and the last fetched state was used instead.
+    pub stale: Option<String>,
+}
+
+/// An HTTPS username and access token, handed to git for one command only.
+#[derive(Clone)]
+pub struct Auth {
+    pub username: String,
+    pub token: String,
+}
+
+/// Returned when an HTTPS remote needs a token that neither git's credential helper nor the environment has.
+#[derive(Debug)]
+pub struct NeedsToken {
+    pub host: String,
+    pub username: String,
+}
+
+impl std::fmt::Display for NeedsToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} needs an access token", self.host)
+    }
+}
+
+impl std::error::Error for NeedsToken {}
+
+fn https_host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let authority = rest.split('/').next()?;
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    (!host.is_empty()).then(|| host.to_lowercase())
+}
+
+/// The username a host expects with an access token.
+fn token_user(host: &str) -> &'static str {
+    if host == "github.com" {
+        "x-access-token"
+    } else {
+        "oauth2"
+    }
+}
+
+/// A token for `url`'s host from the environment: `GH_TOKEN`/`GITHUB_TOKEN` for GitHub, `GITLAB_TOKEN` for GitLab.
+pub fn env_auth(url: &str) -> Option<Auth> {
+    let host = https_host(url)?;
+    let vars: &[&str] = if host == "github.com" {
+        &["GH_TOKEN", "GITHUB_TOKEN"]
+    } else if host.contains("gitlab") {
+        &["GITLAB_TOKEN"]
+    } else {
+        &[]
+    };
+    let token = vars
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|t| !t.is_empty()))?;
+    Some(Auth {
+        username: token_user(&host).into(),
+        token,
+    })
+}
+
+fn auth_failed(stderr: &str) -> bool {
+    [
+        "could not read Username",
+        "could not read Password",
+        "Authentication failed",
+        "Access denied",
+        "HTTP Basic",
+        "returned error: 401",
+        "returned error: 403",
+    ]
+    .iter()
+    .any(|m| stderr.contains(m))
+}
+
+fn git(dir: &Path, args: &[&str]) -> Result<String> {
+    git_auth(dir, args, None)
+}
+
+/// Run git; with `auth`, a credential helper that answers with it is tried after your own helpers.
+fn git_auth(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Result<String> {
+    let mut cmd = Command::new("git");
+    if let Some(a) = auth {
+        cmd.arg("-c")
+            .arg(r#"credential.helper=!f() { test "$1" = get && printf 'username=%s\npassword=%s\n' "$COMINDLY_GIT_USER" "$COMINDLY_GIT_TOKEN"; }; f"#)
+            .env("COMINDLY_GIT_USER", &a.username)
+            .env("COMINDLY_GIT_TOKEN", &a.token);
+    }
+    let out = cmd
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // Give up on a stalled fetch instead of waiting on a struggling server.
+        .env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+        .env("GIT_HTTP_LOW_SPEED_TIME", "20")
+        .output()
+        .context("run git (is it installed?)")?;
+    if !out.status.success() {
+        bail!(
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The repository's name: its folder's name.
+pub fn name(repo: &Path) -> String {
+    repo.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "repo".into())
+}
+
+fn has_origin(repo: &Path) -> bool {
+    git(repo, &["remote", "get-url", "origin"]).is_ok()
+}
+
+/// The branch to index: `origin`'s default (from `origin/HEAD`), else `main` or `master`.
+pub fn default_branch(repo: &Path) -> Result<String> {
+    if let Ok(head) = git(
+        repo,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    ) {
+        if let Some(b) = head.strip_prefix("origin/") {
+            return Ok(b.to_string());
+        }
+    }
+    let prefix = if has_origin(repo) {
+        "refs/remotes/origin/"
+    } else {
+        "refs/heads/"
+    };
+    for b in ["main", "master"] {
+        if git(
+            repo,
+            &["rev-parse", "--verify", "--quiet", &format!("{prefix}{b}")],
+        )
+        .is_ok()
+        {
+            return Ok(b.to_string());
+        }
+    }
+    bail!("no main or master branch in {}", repo.display())
+}
+
+/// The commit `branch` points to on the remote, without fetching.
+pub fn remote_head(repo: &Path, branch: &str) -> Result<String> {
+    let out = git(
+        repo,
+        &["ls-remote", "origin", &format!("refs/heads/{branch}")],
+    )?;
+    out.split_whitespace()
+        .next()
+        .map(str::to_string)
+        .with_context(|| format!("origin has no branch {branch}"))
+}
+
+/// The branch checked out in your own folder (for display).
+pub fn current_branch(repo: &Path) -> Option<String> {
+    git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()
+}
+
+pub fn remote_url(repo: &Path) -> Option<String> {
+    git(repo, &["remote", "get-url", "origin"]).ok()
+}
+
+fn worktree_dir(repo: &Path) -> Result<PathBuf> {
+    let abs = std::fs::canonicalize(repo).with_context(|| format!("{}", repo.display()))?;
+    let key = blake3::hash(abs.to_string_lossy().as_bytes()).to_hex();
+    let home = std::env::var_os("HOME").context("HOME")?;
+    Ok(PathBuf::from(home)
+        .join(".cache/comindly/worktrees")
+        .join(&key[..12])
+        .join(name(repo)))
+}
+
+/// Fetch `branch` (default: the repository's default branch) and check it out in comindly's
+/// worktree, detached, so `branch` stays free to check out in your folder.
+pub fn prepare(repo: &Path, branch: Option<&str>) -> Result<Checkout> {
+    if !repo.join(".git").exists() {
+        bail!("{} is not a git repository", repo.display());
+    }
+    let branch = match branch {
+        Some(b) => b.to_string(),
+        None => default_branch(repo)?,
+    };
+    let mut stale = None;
+    let target = if has_origin(repo) {
+        let target = format!("origin/{branch}");
+        let auth = git(repo, &["remote", "get-url", "origin"])
+            .ok()
+            .and_then(|u| env_auth(&u));
+        if let Err(e) = git_auth(
+            repo,
+            &["fetch", "--quiet", "origin", &branch],
+            auth.as_ref(),
+        ) {
+            let why = format!("{e:#}");
+            git(repo, &["rev-parse", "--verify", "--quiet", &target])
+                .map_err(|_| e.context("and no earlier fetch to fall back to"))?;
+            stale = Some(why);
+        }
+        target
+    } else {
+        branch.clone()
+    };
+    let dir = worktree_dir(repo)?;
+    let _ = git(repo, &["worktree", "prune"]);
+    if dir.join(".git").exists() {
+        git(
+            &dir,
+            &["checkout", "--quiet", "--detach", "--force", &target],
+        )?;
+        git(&dir, &["clean", "-fdq"])?;
+    } else {
+        std::fs::create_dir_all(dir.parent().context("worktree parent")?)?;
+        let d = dir.to_string_lossy();
+        git(
+            repo,
+            &[
+                "worktree", "add", "--quiet", "--detach", "--force", &d, &target,
+            ],
+        )?;
+    }
+    let commit = git(&dir, &["rev-parse", "--short", "HEAD"])?;
+    Ok(Checkout {
+        dir,
+        target,
+        commit,
+        stale,
+    })
+}
+
+/// Remove comindly's worktree for `repo` (your folder is untouched).
+pub fn remove(repo: &Path) -> Result<()> {
+    let dir = worktree_dir(repo)?;
+    if dir.exists() {
+        let d = dir.to_string_lossy();
+        git(repo, &["worktree", "remove", "--force", &d])?;
+    }
+    Ok(())
+}
+
+/// Git repositories under `dir`, up to `depth` levels down (not inside other repositories).
+pub fn scan(dir: &Path, depth: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    let mut entries: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    entries.sort();
+    for path in entries.into_iter().filter(|p| p.is_dir()) {
+        let hidden = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        if hidden || path.ends_with("node_modules") {
+            continue;
+        }
+        if path.join(".git").exists() {
+            out.push(path);
+        } else if depth > 1 {
+            out.extend(scan(&path, depth - 1));
+        }
+    }
+    out
+}
+
+/// Clone `url` into `parent/<name>` with your git credentials; returns the new folder.
+/// Clone `url` into `parent`. HTTPS uses your credential helper, then `auth` or a token from the
+/// environment; without access it fails with [`NeedsToken`].
+pub fn clone(url: &str, parent: &Path, auth: Option<Auth>) -> Result<PathBuf> {
+    let name = url
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()
+        .map(|n| n.trim_end_matches(".git"))
+        .filter(|n| !n.is_empty())
+        .context("cannot tell the repository's name from the URL")?;
+    let dest = parent.join(name);
+    if dest.exists() {
+        bail!("{} already exists", dest.display());
+    }
+    std::fs::create_dir_all(parent)?;
+    let auth = auth.or_else(|| env_auth(url));
+    if let Err(e) = git_auth(parent, &["clone", "--quiet", url, name], auth.as_ref()) {
+        let _ = std::fs::remove_dir_all(&dest);
+        if let Some(host) = https_host(url).filter(|_| auth_failed(&format!("{e:#}"))) {
+            let username = token_user(&host).into();
+            return Err(NeedsToken { host, username }.into());
+        }
+        return Err(e);
+    }
+    Ok(dest)
+}
+
+/// Whether git has a credential helper to keep tokens it was given.
+pub fn has_credential_helper() -> bool {
+    git(
+        Path::new("."),
+        &["config", "--get-all", "credential.helper"],
+    )
+    .is_ok_and(|h| !h.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosts_and_token_users() {
+        assert_eq!(
+            https_host("https://user@gitlab.example.com:8443/g/r.git").as_deref(),
+            Some("gitlab.example.com")
+        );
+        assert_eq!(https_host("git@github.com:o/r.git"), None);
+        assert_eq!(token_user("github.com"), "x-access-token");
+        assert_eq!(token_user("gitlab.com"), "oauth2");
+        assert!(auth_failed(
+            "fatal: could not read Username for 'https://gitlab.com': terminal prompts disabled"
+        ));
+        assert!(!auth_failed("fatal: repository 'x' does not exist"));
+    }
+
+    #[test]
+    fn worktree_follows_main_and_leaves_the_folder_alone() {
+        let base = std::env::temp_dir().join(format!("comindly-wt-{}", std::process::id()));
+        let origin = base.join("origin");
+        let mine = base.join("mine");
+        std::fs::create_dir_all(&origin).unwrap();
+        let g = |d: &Path, a: &[&str]| git(d, a).unwrap();
+        g(&origin, &["init", "--quiet", "-b", "main"]);
+        g(&origin, &["config", "user.email", "t@t"]);
+        g(&origin, &["config", "user.name", "t"]);
+        std::fs::write(origin.join("a.py"), "x = 1\n").unwrap();
+        g(&origin, &["add", "."]);
+        g(&origin, &["commit", "--quiet", "-m", "one"]);
+        g(
+            &base,
+            &["clone", "--quiet", origin.to_str().unwrap(), "mine"],
+        );
+        g(&mine, &["checkout", "--quiet", "-b", "feature"]);
+        std::fs::write(mine.join("wip.py"), "draft\n").unwrap();
+
+        std::fs::write(origin.join("b.py"), "y = 2\n").unwrap();
+        g(&origin, &["add", "."]);
+        g(&origin, &["commit", "--quiet", "-m", "two"]);
+
+        let c = prepare(&mine, None).unwrap();
+        assert_eq!(c.target, "origin/main");
+        assert!(
+            c.dir.join("b.py").exists(),
+            "the worktree has the newest main"
+        );
+        assert!(!c.dir.join("wip.py").exists());
+        assert_eq!(current_branch(&mine).as_deref(), Some("feature"));
+        assert!(mine.join("wip.py").exists(), "your folder is untouched");
+        g(&mine, &["checkout", "--quiet", "main"]);
+        assert!(
+            prepare(&mine, None).is_ok(),
+            "a second run reuses the worktree"
+        );
+        remove(&mine).unwrap();
+        assert!(!c.dir.exists());
+        assert_eq!(scan(&base, 1).len(), 2);
+        std::fs::remove_dir_all(&base).ok();
+    }
+}
