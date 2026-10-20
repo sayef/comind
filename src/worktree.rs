@@ -96,6 +96,11 @@ fn git(dir: &Path, args: &[&str]) -> Result<String> {
 
 /// Run git; with `auth`, a credential helper that answers with it is tried after your own helpers.
 fn git_auth(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Result<String> {
+    finish(args, command(dir, args, auth).output())
+}
+
+/// A git command in `dir` that never prompts and gives up on a stalled transfer.
+fn command(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Command {
     let mut cmd = Command::new("git");
     if let Some(a) = auth {
         cmd.arg("-c")
@@ -103,16 +108,18 @@ fn git_auth(dir: &Path, args: &[&str], auth: Option<&Auth>) -> Result<String> {
             .env("COMINDLY_GIT_USER", &a.username)
             .env("COMINDLY_GIT_TOKEN", &a.token);
     }
-    let out = cmd
-        .arg("-C")
+    cmd.arg("-C")
         .arg(dir)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         // Give up on a stalled fetch instead of waiting on a struggling server.
         .env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
-        .env("GIT_HTTP_LOW_SPEED_TIME", "20")
-        .output()
-        .context("run git (is it installed?)")?;
+        .env("GIT_HTTP_LOW_SPEED_TIME", "20");
+    cmd
+}
+
+fn finish(args: &[&str], out: std::io::Result<std::process::Output>) -> Result<String> {
+    let out = out.context("run git (is it installed?)")?;
     if !out.status.success() {
         bail!(
             "git {}: {}",
@@ -304,33 +311,6 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<PathBuf> {
 }
 
 /// Clone `url` into `parent/<name>` with your git credentials; returns the new folder.
-/// Clone `url` into `parent`. HTTPS uses your credential helper, then `auth` or a token from the
-/// environment; without access it fails with [`NeedsToken`].
-pub fn clone(url: &str, parent: &Path, auth: Option<Auth>) -> Result<PathBuf> {
-    let name = url
-        .trim_end_matches('/')
-        .rsplit(['/', ':'])
-        .next()
-        .map(|n| n.trim_end_matches(".git"))
-        .filter(|n| !n.is_empty())
-        .context("cannot tell the repository's name from the URL")?;
-    let dest = parent.join(name);
-    if dest.exists() {
-        bail!("{} already exists", dest.display());
-    }
-    std::fs::create_dir_all(parent)?;
-    let auth = auth.or_else(|| env_auth(url));
-    if let Err(e) = git_auth(parent, &["clone", "--quiet", url, name], auth.as_ref()) {
-        let _ = std::fs::remove_dir_all(&dest);
-        if let Some(host) = https_host(url).filter(|_| auth_failed(&format!("{e:#}"))) {
-            let username = token_user(&host).into();
-            return Err(NeedsToken { host, username }.into());
-        }
-        return Err(e);
-    }
-    Ok(dest)
-}
-
 /// comindly's own copy of `url` at `dest`: cloned once, without a checkout (indexing uses its worktree)
 /// and without file contents until needed; later runs only fetch.
 pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
@@ -404,15 +384,6 @@ fn credential(action: &str, input: &str) -> Option<String> {
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// Whether git has a credential helper to keep tokens it was given.
-pub fn has_credential_helper() -> bool {
-    git(
-        Path::new("."),
-        &["config", "--get-all", "credential.helper"],
-    )
-    .is_ok_and(|h| !h.is_empty())
 }
 
 #[cfg(test)]

@@ -185,10 +185,10 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/settings/test", post(settings::test))
         .route("/api/repos", get(repos::list).post(repos::change))
         .route("/api/repos/scan", post(repos::scan))
-        .route("/api/repos/clone", post(repos::clone))
         .route("/api/repos/remote/list", post(repos::remote_list))
         .route("/api/repos/remote/add", post(repos::remote_add))
         .route("/api/index", get(repos::job).post(repos::start))
+        .route("/api/index/cancel", post(repos::cancel))
         .route("/api/index/watch", get(repos::watch_state))
         .route("/api/team", get(team::get).post(team::save))
         .route("/api/team/key", post(team::key))
@@ -196,6 +196,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/team/create", post(team::create))
         .route("/api/aws", get(aws::status))
         .route("/api/aws/login", post(aws::start))
+        .route("/api/aws/login/cancel", post(aws::cancel))
         .fallback(get(asset))
         .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
         .layer(axum::middleware::from_fn(local_only))
@@ -366,6 +367,20 @@ async fn overview(Cur(s): Cur) -> Json<Value> {
 struct AtQ {
     /// Index into `/api/versions` (oldest first); absent = the loaded (latest) graph.
     at: Option<usize>,
+}
+
+/// Start `cmd` in a process group of its own, so cancelling stops everything it runs.
+pub(crate) fn own_group(cmd: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    cmd.process_group(0);
+}
+
+/// Stop the process group `pid` leads (a cancelled indexer or sign-in, with its children).
+pub(crate) fn stop_group(pid: u32) {
+    #[cfg(unix)]
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", "--", &format!("-{pid}")])
+        .status();
 }
 
 /// An error for the UI: short, with S3 replies explained and credentials removed.

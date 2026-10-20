@@ -22,6 +22,7 @@ function useChange() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (c: ConventionChange) => api.changeConvention(c),
+    meta: { inline: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conventions"] }),
   });
 }
@@ -41,7 +42,7 @@ function Rule({ c, writable }: { c: Convention; writable: boolean }) {
           <Button
             size="sm"
             variant="brand"
-            disabled={!text.trim() || change.isPending}
+            disabled={!text.trim()} loading={change.isPending}
             onClick={() => change.mutate({ action: "edit", id: c.id, rule: text }, { onSuccess: () => setEditing(false) })}
           >
             Save
@@ -79,13 +80,13 @@ function Rule({ c, writable }: { c: Convention; writable: boolean }) {
             </Tooltip>
             {c.origin === "edited" && (
               <Tooltip content="Back to the measured rule">
-                <Button size="icon" variant="ghost" className="size-7" onClick={() => change.mutate({ action: "restore", id: c.id })} aria-label="Restore">
+                <Button size="icon" variant="ghost" className="size-7" disabled={change.isPending} onClick={() => change.mutate({ action: "restore", id: c.id })} aria-label="Restore">
                   <RotateCcw />
                 </Button>
               </Tooltip>
             )}
             <Tooltip content={c.origin === "manual" ? "Delete" : "Hide (can be restored)"}>
-              <Button size="icon" variant="ghost" className="size-7" onClick={() => change.mutate({ action: "hide", id: c.id })} aria-label="Remove">
+              <Button size="icon" variant="ghost" className="size-7" disabled={change.isPending} onClick={() => change.mutate({ action: "hide", id: c.id })} aria-label="Remove">
                 <Trash2 />
               </Button>
             </Tooltip>
@@ -159,7 +160,7 @@ function AddDialog({ open, onOpenChange, scopes, scope, dimensions }: { open: bo
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button variant="brand" disabled={!rule.trim() || change.isPending} onClick={submit}>
+            <Button variant="brand" disabled={!rule.trim()} loading={change.isPending} onClick={submit}>
               Add
             </Button>
           </div>
@@ -246,7 +247,7 @@ export function ConventionsPage() {
                 <Badge variant="outline">{h.dimension}</Badge>
                 <span className="flex-1 line-through decoration-muted-foreground/50">{h.rule}</span>
                 {writable && (
-                  <Button size="sm" variant="outline" onClick={() => change.mutate({ action: "restore", id: h.id })}>
+                  <Button size="sm" variant="outline" loading={change.isPending && (change.variables as { id?: string } | undefined)?.id === h.id} onClick={() => change.mutate({ action: "restore", id: h.id })}>
                     <RotateCcw /> Restore
                   </Button>
                 )}

@@ -16,6 +16,7 @@ function useSave() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (c: SettingsChange) => api.saveSettings(c),
+    meta: { inline: true },
     onSuccess: () => qc.invalidateQueries(),
   });
 }
@@ -42,7 +43,7 @@ export function SettingsPage() {
   const saveYou = useSave();
   const saveLlm = useSave();
   const saveFresh = useSave();
-  const test = useMutation({ mutationFn: (dir: string) => api.testIndex(dir) });
+  const test = useMutation({ mutationFn: (dir: string) => api.testIndex(dir), meta: { inline: true, quiet: true } });
 
   const [index, setIndex] = useState("");
   const [profile, setProfile] = useState("");
@@ -66,7 +67,7 @@ export function SettingsPage() {
 
   if (settings.isLoading || !s) return <Skeleton className="h-96 rounded-xl" />;
   const result = (m: typeof saveIndex) =>
-    m.error ? <Notice ok={false} message={m.error.message} /> : m.data ? <Notice ok message={m.data.message} /> : null;
+    m.error ? <Notice ok={false} message={m.error.message} /> : null;
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
@@ -83,10 +84,10 @@ export function SettingsPage() {
           <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="~/comindly-index or s3://bucket/comindly" />
         </label>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled={!index.trim() || test.isPending} onClick={() => test.mutate(index)}>
+          <Button variant="outline" size="sm" disabled={!index.trim()} loading={test.isPending} onClick={() => test.mutate(index)}>
             Test
           </Button>
-          <Button variant="brand" size="sm" disabled={!index.trim() || saveIndex.isPending} onClick={() => saveIndex.mutate({ index_dir: index })}>
+          <Button variant="brand" size="sm" disabled={!index.trim()} loading={saveIndex.isPending} onClick={() => saveIndex.mutate({ index_dir: index })}>
             Use this index
           </Button>
         </div>
@@ -123,7 +124,7 @@ export function SettingsPage() {
           When the SSO session expires, start the sign-in automatically (you still approve it in the browser)
         </label>
         <div>
-          <Button variant="outline" size="sm" disabled={saveAws.isPending} onClick={() => saveAws.mutate({ aws_profile: profile, sso_auto_login: ssoAuto })}>
+          <Button variant="outline" size="sm" loading={saveAws.isPending} onClick={() => saveAws.mutate({ aws_profile: profile, sso_auto_login: ssoAuto })}>
             Save
           </Button>
         </div>
@@ -140,7 +141,7 @@ export function SettingsPage() {
           Put my name on new records (off: only a pseudonymous id)
         </label>
         <div>
-          <Button variant="outline" size="sm" disabled={saveYou.isPending} onClick={() => saveYou.mutate({ author_name: name, record_names: names })}>
+          <Button variant="outline" size="sm" loading={saveYou.isPending} onClick={() => saveYou.mutate({ author_name: name, record_names: names })}>
             Save
           </Button>
         </div>
@@ -171,7 +172,7 @@ export function SettingsPage() {
           </label>
         </div>
         <div>
-          <Button variant="outline" size="sm" disabled={saveLlm.isPending} onClick={() => saveLlm.mutate({ llm_base_url: base, llm_model: model })}>
+          <Button variant="outline" size="sm" loading={saveLlm.isPending} onClick={() => saveLlm.mutate({ llm_base_url: base, llm_model: model })}>
             Save
           </Button>
         </div>
@@ -186,7 +187,7 @@ export function SettingsPage() {
           <Input type="number" min={30} className="max-w-40" value={ttl} onChange={(e) => setTtl(Number(e.target.value))} />
         </label>
         <div>
-          <Button variant="outline" size="sm" disabled={saveFresh.isPending} onClick={() => saveFresh.mutate({ cache_ttl_secs: ttl })}>
+          <Button variant="outline" size="sm" loading={saveFresh.isPending} onClick={() => saveFresh.mutate({ cache_ttl_secs: ttl })}>
             Save
           </Button>
         </div>

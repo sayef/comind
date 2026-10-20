@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
+import { Activity } from "@/components/activity";
 import { AwsBanner } from "@/components/aws-banner";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
@@ -123,6 +124,7 @@ export function Layout() {
             <kbd className="hidden rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
           </button>
           <div className="flex shrink-0 items-center justify-end gap-2">
+            <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun /> : <Moon />}

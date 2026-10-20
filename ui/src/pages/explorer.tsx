@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
+import { toast } from "sonner";
 import { sentence } from "@/lib/utils";
 
 function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof Layers; nodes: Node[] }) {
@@ -35,18 +36,28 @@ function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof La
 /** Copies the context pack (what to read before changing this) as markdown for an agent. */
 function CopyContext({ focus }: { focus: string }) {
   const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
   return (
     <Button
       size="sm"
       variant="outline"
       title="What to read before changing this, plus what the team recorded, as markdown"
+      loading={busy}
       onClick={async () => {
-        await navigator.clipboard?.writeText(await api.context(focus));
-        setDone(true);
-        setTimeout(() => setDone(false), 1500);
+        setBusy(true);
+        try {
+          await navigator.clipboard?.writeText(await api.context(focus));
+          setDone(true);
+          toast.success("Context copied; paste it into your agent");
+          setTimeout(() => setDone(false), 1500);
+        } catch (e) {
+          toast.error(sentence((e as Error).message));
+        } finally {
+          setBusy(false);
+        }
       }}
     >
-      {done ? <Check /> : <ClipboardCopy />} {done ? "Copied" : "Copy context for an agent"}
+      {!busy && (done ? <Check /> : <ClipboardCopy />)} {done ? "Copied" : "Copy context for an agent"}
     </Button>
   );
 }

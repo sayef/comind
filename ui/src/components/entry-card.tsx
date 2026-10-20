@@ -137,7 +137,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           {asking ? (
             <>
               <Input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={PROMPT[asking][1]} className="h-8 max-w-sm text-xs" />
-              <Button size="sm" variant="outline" disabled={!reason.trim() || review.isPending} onClick={() => review.mutate({ action: asking, why: reason })}>
+              <Button size="sm" variant="outline" disabled={!reason.trim()} loading={review.isPending} onClick={() => review.mutate({ action: asking, why: reason })}>
                 {PROMPT[asking][0]}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>
@@ -148,7 +148,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
             <>
               {!retired && (
                 <>
-                  <Button size="sm" variant="brand" onClick={() => review.mutate({ action: "confirm" })} disabled={review.isPending} title="Still true">
+                  <Button size="sm" variant="brand" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title="Still true">
                     <Check /> Confirm
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setAsking("archive")} title="Was true, no longer applies; kept as history">
@@ -178,7 +178,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
             <Button variant="ghost" onClick={() => setDeleting(false)}>
               Cancel
             </Button>
-            <Button className="bg-danger text-white hover:bg-danger/90" disabled={erase.isPending} onClick={() => erase.mutate()}>
+            <Button className="bg-danger text-white hover:bg-danger/90" loading={erase.isPending} onClick={() => erase.mutate()}>
               <Trash2 /> Delete
             </Button>
           </div>

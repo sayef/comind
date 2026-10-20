@@ -82,6 +82,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
     if (open) setOn(about);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = useMutation({
+    meta: { inline: true },
     mutationFn: () =>
       api.remember({
         kind,
@@ -170,7 +171,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button variant="brand" disabled={!ready || save.isPending} onClick={() => save.mutate()}>
+            <Button variant="brand" disabled={!ready} loading={save.isPending} onClick={() => save.mutate()}>
               <Plus /> Add
             </Button>
           </div>

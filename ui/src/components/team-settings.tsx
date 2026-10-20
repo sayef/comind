@@ -27,6 +27,7 @@ export function ApiKey() {
   const [key, setKey] = useState("");
   const save = useMutation({
     mutationFn: () => api.saveKey(key),
+    meta: { inline: true },
     onSuccess: () => (setKey(""), qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["settings"] })),
   });
   return (
@@ -40,7 +41,7 @@ export function ApiKey() {
       </p>
       <div className="flex flex-wrap gap-2">
         <Input type="password" className="max-w-sm" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your API key" />
-        <Button variant="outline" size="sm" disabled={!key.trim() || save.isPending} onClick={() => save.mutate()}>
+        <Button variant="outline" size="sm" disabled={!key.trim()} loading={save.isPending} onClick={() => save.mutate()}>
           Save key
         </Button>
       </div>
@@ -62,7 +63,7 @@ export function TeamSection() {
     qc.invalidateQueries({ queryKey: ["team"] });
     qc.invalidateQueries({ queryKey: ["settings"] });
   };
-  const save = useMutation({ mutationFn: () => api.saveTeam(form, t?.version ?? null), onSuccess: refresh });
+  const save = useMutation({ mutationFn: () => api.saveTeam(form, t?.version ?? null), meta: { inline: true }, onSuccess: refresh });
   const set = (k: keyof TeamSettings, v: string | boolean | undefined) => setForm((f) => ({ ...f, [k]: v }));
   const steps: [keyof TeamSettings, string][] = [
     ["enrich", "Summaries"],
@@ -117,7 +118,7 @@ export function TeamSection() {
           ))}
         </div>
         <div>
-          <Button variant="outline" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button variant="outline" size="sm" loading={save.isPending} onClick={() => save.mutate()}>
             Save for the team
           </Button>
         </div>

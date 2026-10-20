@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Building2, CheckCircle2, FolderOpen, FolderSearch, GitBranch, GitFork, Loader2, Play, Plus, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, FolderOpen, FolderSearch, GitBranch, Loader2, Play, Plus, Trash2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Outcome } from "@/components/notice";
+import { useAbort } from "@/lib/abort";
 import { ApiError, api, type NeedsToken, pickFolder, type ScanHit } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
@@ -42,6 +43,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   const [path, setPath] = useState("");
   const add = useMutation({
     mutationFn: () => api.changeRepos({ add: [path] }),
+    meta: { inline: true },
     onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), setPath(""), onOpenChange(false)),
   });
   return (
@@ -59,7 +61,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button variant="brand" disabled={!path.trim() || add.isPending} onClick={() => add.mutate()}>
+            <Button variant="brand" disabled={!path.trim()} loading={add.isPending} onClick={() => add.mutate()}>
               Add
             </Button>
           </div>
@@ -75,11 +77,15 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
   const [found, setFound] = useState<ScanHit[] | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
+  const abort = useAbort();
   const scan = useMutation({
-    mutationFn: () => api.scanRepos(dir),
+    mutationFn: () => api.scanRepos(dir, abort.next()),
+    meta: { inline: true, quiet: true },
     onSuccess: (r) => (setFound(r.found), setChecked(new Set(r.found.filter((f) => f.listed || indexed.includes(f.name)).map((f) => f.path)))),
   });
+  const close = (o: boolean) => (o || (abort.abort(), scan.reset()), onOpenChange(o));
   const apply = useMutation({
+    meta: { inline: true },
     mutationFn: () =>
       api.changeRepos({
         add: (found ?? []).filter((f) => checked.has(f.path) && !f.listed).map((f) => f.path),
@@ -99,7 +105,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
   const drops = (found ?? []).filter((f) => !checked.has(f.path) && f.listed).length;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={close}>
       <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
         <DialogTitle className="text-base font-semibold">Scan a folder for repositories</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">Tick the ones comindly should index; untick to drop one from the list.</p>
@@ -108,10 +114,15 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
             Folder
             <FolderInput value={dir} onChange={setDir} placeholder="~/dev" />
           </label>
-          <div>
-            <Button variant="outline" size="sm" disabled={!dir.trim() || scan.isPending} onClick={() => scan.mutate()}>
-              <FolderSearch /> Scan
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={!dir.trim()} loading={scan.isPending} onClick={() => scan.mutate()}>
+              {!scan.isPending && <FolderSearch />} {scan.isPending ? "Scanning…" : "Scan"}
             </Button>
+            {scan.isPending && (
+              <Button variant="ghost" size="sm" onClick={() => (abort.abort(), scan.reset())}>
+                Cancel
+              </Button>
+            )}
           </div>
           <Message error={scan.error} />
           {found && (
@@ -141,87 +152,15 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                 <span className="mr-auto text-xs text-muted-foreground">
                   {adds} to add, {drops} to remove
                 </span>
-                <Button variant="ghost" onClick={() => onOpenChange(false)}>
+                <Button variant="ghost" onClick={() => close(false)}>
                   Cancel
                 </Button>
-                <Button variant="brand" disabled={adds + drops === 0 || apply.isPending} onClick={() => apply.mutate()}>
+                <Button variant="brand" disabled={adds + drops === 0} loading={apply.isPending} onClick={() => apply.mutate()}>
                   Apply
                 </Button>
               </div>
             </>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function CloneDialog({ open, onOpenChange, initialUrl }: { open: boolean; onOpenChange: (o: boolean) => void; initialUrl?: string }) {
-  const qc = useQueryClient();
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    if (open && initialUrl) setUrl(initialUrl);
-  }, [open, initialUrl]);
-  const [dir, setDir] = useState("");
-  const [username, setUsername] = useState("");
-  const [token, setToken] = useState("");
-  const [asked, setAsked] = useState<NeedsToken | null>(null);
-  const clone = useMutation({
-    mutationFn: () => api.cloneRepo(url, dir, asked && token.trim() ? { username, token } : undefined),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), setUrl(""), setToken(""), setAsked(null), onOpenChange(false)),
-    onError: (e) => {
-      const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
-      if (need) (setAsked(need), setUsername((u) => u || need.username));
-    },
-  });
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="p-5">
-        <DialogTitle className="text-base font-semibold">Clone a repository</DialogTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          HTTPS or SSH. comindly uses the git access this machine already has: your SSH key, your git credential helper, or
-          GITLAB_TOKEN / GITHUB_TOKEN. If none works it asks for a token.
-        </p>
-        <div className="mt-4 flex flex-col gap-3">
-          <label className={field}>
-            Clone URL
-            <Input
-              value={url}
-              onChange={(e) => (setUrl(e.target.value), setAsked(null))}
-              placeholder="https://gitlab.com/group/service.git"
-              className="font-mono text-xs"
-            />
-          </label>
-          <label className={field}>
-            Into folder
-            <FolderInput value={dir} onChange={setDir} placeholder="~/dev" />
-          </label>
-          {asked && (
-            <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
-              <p className="text-xs text-muted-foreground">
-                {asked.host} needs an access token with read access to the repository. Your git credential helper (on macOS the
-                keychain) keeps it after a successful clone.
-              </p>
-              <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="text-xs" />
-                <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Access token" autoFocus />
-              </div>
-            </div>
-          )}
-          {!asked && <Message error={clone.error} />}
-          {asked && clone.error && token && <Message error={clone.error} />}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="brand"
-              disabled={!url.trim() || !dir.trim() || (!!asked && !token.trim()) || clone.isPending}
-              onClick={() => clone.mutate()}
-            >
-              {clone.isPending && <Loader2 className="animate-spin" />} {asked ? "Clone with token" : "Clone and add"}
-            </Button>
-          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -234,7 +173,8 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const [drop, setDrop] = useState(false);
   const [full, setFull] = useState(false);
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
-  const start = useMutation({ mutationFn: () => api.startIndex(llm, drop), onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
+  const start = useMutation({ mutationFn: () => api.startIndex(llm, drop), meta: { inline: true }, onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
+  const stop = useMutation({ mutationFn: api.cancelIndex, meta: { quiet: true }, onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
   const j = job.data;
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => {
@@ -263,9 +203,16 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           </CardDescription>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <Button variant="brand" disabled={j?.running || start.isPending || (unlisted.length > 0 && !drop)} onClick={() => start.mutate()}>
-            {j?.running ? <Loader2 className="animate-spin" /> : <Play />} {j?.running ? "Indexing…" : "Index now"}
-          </Button>
+          <div className="flex gap-2">
+            {j?.running && (
+              <Button variant="outline" loading={stop.isPending} onClick={() => stop.mutate()}>
+                Cancel
+              </Button>
+            )}
+            <Button variant="brand" disabled={(unlisted.length > 0 && !drop) || j?.running} loading={start.isPending || j?.running} onClick={() => start.mutate()}>
+              {!(start.isPending || j?.running) && <Play />} {j?.running ? "Indexing…" : "Index now"}
+            </Button>
+          </div>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
             LLM summaries (sends code to the LLM)
@@ -297,7 +244,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
         {j && !j.running && j.ok !== null && (
           <p className={`flex items-center gap-1.5 text-sm ${j.ok ? "" : "text-warning"}`}>
             {j.ok ? <CheckCircle2 className="size-4 text-brand" /> : <AlertTriangle className="size-4" />}
-            {j.ok ? "Indexed; every page shows the new index." : "Indexing failed; see the log."}
+            {j.ok ? "Indexed; every page shows the new index." : j.cancelled ? "Indexing cancelled." : "Indexing failed; see the log."}
             {j.finished && <span className="text-xs text-muted-foreground">{new Date(j.finished).toLocaleString()}</span>}
           </p>
         )}
@@ -328,17 +275,21 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [share, setShare] = useState(true);
+  const abort = useAbort();
   const list = useMutation({
-    mutationFn: () => api.remoteRepos(url, asked && token.trim() ? { username, token } : undefined),
+    mutationFn: () => api.remoteRepos(url, asked && token.trim() ? { username, token } : undefined, abort.next()),
+    meta: { inline: true, quiet: true },
     onSuccess: (r) => (setAsked(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
     onError: (e) => {
       const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
       if (need) (setAsked(need), setUsername((u) => u || need.username));
     },
   });
+  const close = (o: boolean) => (o || (abort.abort(), list.reset()), onOpenChange(o));
   const add = useMutation({
     mutationFn: () => api.addRemoteRepos([...checked], hasTeam && share),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), onOpenChange(false), list.reset()),
+    meta: { inline: true },
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), close(false)),
   });
   const found = list.data?.repos ?? [];
   const shown = found.filter((r) => !filter || `${r.full_path} ${r.description ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
@@ -352,24 +303,30 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   const picked = found.filter((r) => checked.has(r.clone_url) && !r.listed).length;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-w-2xl p-5">
         <DialogTitle className="text-base font-semibold">From GitHub or GitLab</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
-          An organisation or group, such as github.com/acme or gitlab.com/acme/platform. comindly keeps its own copies and always
-          indexes each repository's default branch.
+          An organisation or group (github.com/acme, gitlab.com/acme/platform), or one repository (github.com/acme/orders, or a
+          clone URL). comindly keeps its own copies and always indexes each repository's default branch.
         </p>
         <div className="mt-4 flex gap-2">
           <Input
             value={url}
             onChange={(e) => (setUrl(e.target.value), setAsked(null))}
             onKeyDown={(e) => e.key === "Enter" && url.trim() && list.mutate()}
-            placeholder="github.com/acme"
+            placeholder="github.com/acme or github.com/acme/orders"
             className="font-mono text-xs"
           />
-          <Button variant="outline" disabled={!url.trim() || list.isPending || (!!asked && !token.trim())} onClick={() => list.mutate()}>
-            {list.isPending && <Loader2 className="animate-spin" />} List
-          </Button>
+          {list.isPending ? (
+            <Button variant="outline" onClick={() => (abort.abort(), list.reset())}>
+              <Loader2 className="animate-spin" /> Cancel
+            </Button>
+          ) : (
+            <Button variant="outline" disabled={!url.trim() || (!!asked && !token.trim())} onClick={() => list.mutate()}>
+              List
+            </Button>
+          )}
         </div>
         {asked && (
           <div className="mt-3 flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
@@ -424,8 +381,8 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
               ) : (
                 <span />
               )}
-              <Button variant="brand" disabled={picked === 0 || add.isPending} onClick={() => add.mutate()}>
-                {add.isPending && <Loader2 className="animate-spin" />} Add {picked} {picked === 1 ? "repository" : "repositories"}
+              <Button variant="brand" disabled={picked === 0} loading={add.isPending} onClick={() => add.mutate()}>
+                Add {picked} {picked === 1 ? "repository" : "repositories"}
               </Button>
             </div>
             <Message error={add.error} />
@@ -439,11 +396,11 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
 export function RepositoriesPage() {
   const qc = useQueryClient();
   const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos });
-  const [dialog, setDialog] = useState<"add" | "scan" | "clone" | "org" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "scan" | "org" | null>(null);
   const teamMissing = repos.data?.team_missing ?? [];
   const addTeam = useMutation({ mutationFn: () => api.addRemoteRepos(teamMissing, false), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
-  const [cloneUrl, setCloneUrl] = useState<string>();
   const remove = useMutation({ mutationFn: (path: string) => api.changeRepos({ remove: [path] }), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
+  const addOne = useMutation({ mutationFn: (url: string) => api.addRemoteRepos([url], false), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
   const remote = useMemo(() => repos.data?.root?.includes("://"), [repos.data]);
   const unlisted = repos.data?.unlisted ?? [];
   const close = (o: boolean) => !o && setDialog(null);
@@ -468,9 +425,6 @@ export function RepositoriesPage() {
           <Button variant="outline" onClick={() => setDialog("scan")}>
             <FolderSearch /> Scan a folder
           </Button>
-          <Button variant="outline" onClick={() => setDialog("clone")}>
-            <GitFork /> Clone
-          </Button>
         </div>
       </div>
 
@@ -480,7 +434,7 @@ export function RepositoriesPage() {
           <span className="min-w-0 flex-1">
             The team has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
           </span>
-          <Button variant="outline" size="sm" disabled={addTeam.isPending} onClick={() => addTeam.mutate()}>
+          <Button variant="outline" size="sm" loading={addTeam.isPending} onClick={() => addTeam.mutate()}>
             Add {teamMissing.length === 1 ? "it" : "them"}
           </Button>
         </div>
@@ -528,8 +482,16 @@ export function RepositoriesPage() {
                 Yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
               </div>
             )}
-            <Button variant="ghost" size="icon" className="size-8" aria-label="Remove" title="Remove from the list (your folder stays)" onClick={() => remove.mutate(r.path)}>
-              <Trash2 />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Remove"
+              title="Remove from the list (your folder stays)"
+              loading={remove.isPending && remove.variables === r.path}
+              onClick={() => remove.mutate(r.path)}
+            >
+              {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
             </Button>
           </div>
         ))}
@@ -551,8 +513,15 @@ export function RepositoriesPage() {
               <Button variant="outline" size="sm" onClick={() => setDialog("add")}>
                 <FolderOpen /> Locate
               </Button>
-              <Button variant="outline" size="sm" onClick={() => (setCloneUrl(r.remote ?? undefined), setDialog("clone"))}>
-                <GitFork /> Clone
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!r.remote}
+                title={r.remote ? "comindly clones it into its own folder when indexing" : "The index has no clone URL for it"}
+                loading={addOne.isPending && addOne.variables === r.remote}
+                onClick={() => r.remote && addOne.mutate(r.remote)}
+              >
+                <Plus /> Add
               </Button>
             </div>
           </div>
@@ -564,7 +533,6 @@ export function RepositoriesPage() {
       <AddDialog open={dialog === "add"} onOpenChange={close} />
       <ScanDialog open={dialog === "scan"} onOpenChange={close} indexed={unlisted.map((r) => r.name)} />
       <OrgDialog open={dialog === "org"} onOpenChange={close} />
-      <CloneDialog open={dialog === "clone"} onOpenChange={(o) => (close(o), !o && setCloneUrl(undefined))} initialUrl={cloneUrl} />
     </div>
   );
 }

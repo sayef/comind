@@ -103,6 +103,10 @@ Search: describe what you are looking for
 Connect: register the MCP server with your agent
 ///
 
+What is running shows in the header's corner (indexing with its current step, waiting for the AWS sign-in,
+or any action in progress), with **Cancel** where it can be stopped; indexing and the sign-in stop with
+every process they started. Finished actions appear as toasts in the bottom-right corner.
+
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`
 tool. Graphs scroll with the page; pinch or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> and scroll to zoom, drag to

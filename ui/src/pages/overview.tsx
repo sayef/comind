@@ -76,7 +76,7 @@ function JoinTeam() {
   const [index, setIndex] = useState("");
   const [profile, setProfile] = useState("");
   const s3 = index.trim().startsWith("s3://");
-  const join = useMutation({ mutationFn: () => api.join(index, s3 ? profile : ""), onSuccess: () => qc.invalidateQueries() });
+  const join = useMutation({ mutationFn: () => api.join(index, s3 ? profile : ""), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
     <Card className="flex flex-col p-4 text-left">
       <div className="text-sm font-medium">Join a team</div>
@@ -86,7 +86,7 @@ function JoinTeam() {
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
         <div className="mt-auto">
-          <Button variant="brand" disabled={!index.trim() || join.isPending} onClick={() => join.mutate()}>
+          <Button variant="brand" disabled={!index.trim()} loading={join.isPending} onClick={() => join.mutate()}>
             Join
           </Button>
         </div>
@@ -106,6 +106,7 @@ function CreateTeam() {
   const s3 = index.trim().startsWith("s3://");
   const create = useMutation({
     mutationFn: () => api.createTeam(name, index, s3 ? profile : ""),
+    meta: { inline: true },
     onSuccess: () => (qc.invalidateQueries(), navigate("/settings/repositories")),
   });
   return (
@@ -118,7 +119,7 @@ function CreateTeam() {
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" />
         <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
         <div className="mt-auto">
-          <Button variant="brand" disabled={!name.trim() || !index.trim() || create.isPending} onClick={() => create.mutate()}>
+          <Button variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending} onClick={() => create.mutate()}>
             Create team
           </Button>
         </div>

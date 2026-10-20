@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows
   in one click.
 - **Create a team** on the first screen, next to **Join a team**; joining works before the first index.
 - comindly's icon in the macOS Dock and app switcher for `comindly app`.
+- Activity in the app's header (indexing, AWS sign-in, any action in progress) with **Cancel**, and toasts
+  when actions finish; indexing and the sign-in stop with everything they started, and a cancelled request
+  stops its work on the server.
 - `install.sh` verifies the download's SHA-256, and every release is installed on Linux and macOS and with
   `cargo install` before it counts.
 
@@ -22,7 +25,8 @@ All notable changes to this project are documented here. The format follows
 
 - Indexing always uses each repository's current default branch, asked from the remote; the per-repository
   branch setting and `repos add --branch` are gone.
-- Connect is now **Get started**, and Repositories moved under **Settings**.
+- Connect is now **Get started**, and Repositories moved under **Settings**. The separate Clone dialog is
+  gone: **From GitHub or GitLab** takes an organisation, a group or a single repository.
 - Messages read as sentences, long commands wrap, and AWS credential errors are one line.
 
 ## [0.1.0](https://github.com/sayef/comindly/releases/tag/v0.1.0) - 2026-10-19

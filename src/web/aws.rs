@@ -14,6 +14,8 @@ use crate::config::Config;
 #[derive(Default, Clone, serde::Serialize)]
 pub(super) struct SignIn {
     running: bool,
+    pid: Option<u32>,
+    cancelled: bool,
     ok: Option<bool>,
     message: String,
     started: Option<String>,
@@ -76,6 +78,19 @@ pub(super) async fn start(State(app): State<Shared>) -> impl IntoResponse {
     }
 }
 
+/// Stop a sign-in that is waiting for approval.
+pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
+    let mut s = app.signin.lock().await;
+    if let Some(pid) = s.pid.filter(|_| s.running) {
+        s.cancelled = true;
+        super::stop_group(pid);
+    }
+    (
+        StatusCode::OK,
+        Json(json!({"ok": true, "message": "sign-in cancelled"})),
+    )
+}
+
 /// Run `aws sso login` for the active profile in the background.
 async fn login(app: &Shared) -> anyhow::Result<()> {
     {
@@ -95,6 +110,7 @@ async fn login(app: &Shared) -> anyhow::Result<()> {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    super::own_group(&mut cmd);
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -105,6 +121,7 @@ async fn login(app: &Shared) -> anyhow::Result<()> {
             anyhow::bail!("the AWS CLI (`aws`) is needed to sign in: {e}");
         }
     };
+    app.signin.lock().await.pid = child.id();
     let app = app.clone();
     tokio::spawn(async move {
         let out = child.wait_with_output().await;
@@ -118,6 +135,12 @@ async fn login(app: &Shared) -> anyhow::Result<()> {
         }
         let mut s = app.signin.lock().await;
         s.running = false;
+        s.pid = None;
+        if s.cancelled {
+            s.ok = Some(false);
+            s.message = "sign-in cancelled".into();
+            return;
+        }
         match out {
             Ok(o) if o.status.success() => {
                 s.ok = Some(true);

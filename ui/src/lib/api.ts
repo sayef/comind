@@ -227,8 +227,8 @@ export class ApiError extends Error {
   }
 }
 
-async function post<T = { ok: boolean; message: string }>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+async function post<T = { ok: boolean; message: string }>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
   const out = await r.json();
   if (out && out.ok === false) throw new ApiError(out.message ?? `${path}: ${r.status}`, out);
   return out as T;
@@ -285,6 +285,7 @@ export interface ScanHit {
 
 export interface IndexJob {
   running: boolean;
+  cancelled: boolean;
   ok: boolean | null;
   lines: string[];
   started: string | null;
@@ -347,14 +348,15 @@ export const api = {
   setup: () => get<Setup>("/api/setup"),
   settings: () => get<Settings>("/api/settings"),
   repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/repos"),
-  remoteRepos: (url: string, auth?: { username: string; token: string }) =>
-    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[] }>("/api/repos/remote/list", { url, ...auth }),
+  remoteRepos: (url: string, auth?: { username: string; token: string }, signal?: AbortSignal) =>
+    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[] }>("/api/repos/remote/list", { url, ...auth }, signal),
   addRemoteRepos: (urls: string[], share: boolean) => post("/api/repos/remote/add", { urls, share }),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
-  scanRepos: (dir: string) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }),
+  scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }, signal),
   cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),
   indexJob: () => get<IndexJob>("/api/index"),
   startIndex: (llm: boolean, drop_unlisted = false) => post("/api/index", { llm, drop_unlisted }),
+  cancelIndex: () => post("/api/index/cancel", {}),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),
   aws: () => get<AwsStatus>("/api/aws"),
   team: () => get<Team>("/api/team"),
@@ -363,6 +365,7 @@ export const api = {
   join: (index: string, aws_profile: string) => post("/api/join", { index, aws_profile }),
   createTeam: (name: string, index: string, aws_profile: string) => post("/api/team/create", { name, index, aws_profile }),
   awsLogin: () => post("/api/aws/login", {}),
+  cancelAwsLogin: () => post("/api/aws/login/cancel", {}),
   saveSettings: (c: SettingsChange) => post("/api/settings", c),
   testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),
   context: async (focus: string) => {

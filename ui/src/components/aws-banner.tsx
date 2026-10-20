@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, LogIn } from "lucide-react";
+import { AlertTriangle, LogIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -16,6 +16,7 @@ export function AwsBanner({ remote }: { remote: boolean }) {
     refetchOnWindowFocus: true,
   });
   const login = useMutation({ mutationFn: api.awsLogin, onSuccess: () => qc.invalidateQueries({ queryKey: ["aws"] }) });
+  const stop = useMutation({ mutationFn: api.cancelAwsLogin, onSuccess: () => qc.invalidateQueries({ queryKey: ["aws"] }) });
   const a = aws.data;
   const wasBad = useRef(false);
   useEffect(() => {
@@ -39,9 +40,14 @@ export function AwsBanner({ remote }: { remote: boolean }) {
             : sentence(a.message ?? "")}
         {!waiting && a.run?.ok === false && a.run.message && <span className="text-muted-foreground"> Last attempt: {sentence(a.run.message)}</span>}
       </span>
+      {a.signin && waiting && (
+        <Button size="sm" variant="ghost" loading={stop.isPending} onClick={() => stop.mutate()}>
+          Cancel
+        </Button>
+      )}
       {a.signin && (
-        <Button size="sm" variant="outline" disabled={waiting || login.isPending} onClick={() => login.mutate()}>
-          {waiting ? <Loader2 className="animate-spin" /> : <LogIn />} {waiting ? "Waiting…" : "Sign in"}
+        <Button size="sm" variant="outline" disabled={waiting} loading={login.isPending || waiting} onClick={() => login.mutate()}>
+          {!(login.isPending || waiting) && <LogIn />} {waiting ? "Waiting…" : "Sign in"}
         </Button>
       )}
     </div>

@@ -11,8 +11,10 @@ use crate::worktree::{Auth, NeedsToken};
 pub struct Source {
     pub provider: Provider,
     pub host: String,
-    /// Organisation or user on GitHub; group path (`team/platform`) on GitLab.
+    /// Organisation or user on GitHub; group or project path (`team/platform`) on GitLab.
     pub owner: String,
+    /// The repository, when the URL names one (`github.com/acme/orders`, `….git`, `git@…`).
+    pub repo: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -40,19 +42,22 @@ pub struct RemoteRepo {
 
 /// Read `https://github.com/acme`, `gitlab.com/acme/platform` or `https://git.example.com/group`.
 pub fn parse(url: &str) -> Result<Source> {
+    let url = url.trim().trim_end_matches('/');
+    let clone_url = url.ends_with(".git") || url.starts_with("git@") || url.starts_with("ssh://");
     let rest = url
-        .trim()
-        .trim_end_matches('/')
         .trim_start_matches("https://")
-        .trim_start_matches("http://");
+        .trim_start_matches("http://")
+        .trim_start_matches("ssh://")
+        .trim_start_matches("git@");
     let rest = rest.split(['?', '#']).next().unwrap_or_default();
     let (host, path) = rest
-        .split_once('/')
-        .context("give the organisation or group, e.g. github.com/acme")?;
+        .split_once(['/', ':'])
+        .context("give the organisation, group or repository, e.g. github.com/acme")?;
     let path = path.trim_end_matches(".git").trim_matches('/');
+    let path = path.split("/-/").next().unwrap_or(path);
     anyhow::ensure!(
         !path.is_empty(),
-        "give the organisation or group after the host"
+        "give the organisation, group or repository after the host"
     );
     let host = host.to_lowercase();
     let provider = if host == "github.com" || host.contains("github") {
@@ -60,27 +65,28 @@ pub fn parse(url: &str) -> Result<Source> {
     } else {
         Provider::GitLab
     };
-    let owner = match provider {
-        // github.com/orgs/acme/repositories and github.com/acme/repo both mean acme.
-        Provider::GitHub => {
-            let mut parts = path.split('/').filter(|p| !p.is_empty());
-            let first = parts.next().unwrap_or_default();
-            if first == "orgs" {
-                parts.next().unwrap_or_default().to_string()
-            } else {
-                first.to_string()
-            }
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let (owner, repo) = match provider {
+        // github.com/orgs/acme/repositories is the organisation; github.com/acme/orders a repository.
+        Provider::GitHub if parts.first() == Some(&"orgs") => {
+            (parts.get(1).unwrap_or(&"").to_string(), None)
         }
-        Provider::GitLab => path.split("/-/").next().unwrap_or(path).to_string(),
+        Provider::GitHub => (parts[0].to_string(), parts.get(1).map(|r| r.to_string())),
+        Provider::GitLab if clone_url && parts.len() >= 2 => {
+            let (group, name) = path.rsplit_once('/').unwrap_or_default();
+            (group.to_string(), Some(name.to_string()))
+        }
+        Provider::GitLab => (path.to_string(), None),
     };
     anyhow::ensure!(
         !owner.is_empty(),
-        "give the organisation or group after the host"
+        "give the organisation, group or repository after the host"
     );
     Ok(Source {
         provider,
         host,
         owner,
+        repo,
     })
 }
 
@@ -90,11 +96,81 @@ pub async fn list(source: &Source, auth: Option<&Auth>) -> Result<Vec<RemoteRepo
         .user_agent(concat!("comindly/", env!("CARGO_PKG_VERSION")))
         .build()?;
     let mut repos = match source.provider {
-        Provider::GitHub => github(&client, source, auth).await?,
-        Provider::GitLab => gitlab(&client, source, auth).await?,
+        Provider::GitHub => match &source.repo {
+            Some(name) => {
+                let api = github_api(&source.host);
+                let url = format!("{api}/repos/{}/{name}", source.owner);
+                let one = one(&client, &url, auth, false, &source.host)
+                    .await?
+                    .with_context(|| {
+                        format!("no repository {}/{name} on {}", source.owner, source.host)
+                    })?;
+                github_repo(&one).into_iter().collect()
+            }
+            None => github(&client, source, auth).await?,
+        },
+        Provider::GitLab => {
+            // `a/b` is a project or a subgroup; ask for the project first.
+            let path = match &source.repo {
+                Some(name) => format!("{}/{name}", source.owner),
+                None => source.owner.clone(),
+            };
+            let url = format!(
+                "https://{}/api/v4/projects/{}",
+                source.host,
+                path.replace('/', "%2F")
+            );
+            let project = if path.contains('/') {
+                one(&client, &url, auth, true, &source.host).await?
+            } else {
+                None
+            };
+            match project {
+                Some(p) => gitlab_repo(&p).into_iter().collect(),
+                None if source.repo.is_some() => bail!("no repository {path} on {}", source.host),
+                None => gitlab(&client, source, auth).await?,
+            }
+        }
     };
     repos.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
     Ok(repos)
+}
+
+/// One object, or `None` when it is not found.
+async fn one(
+    client: &reqwest::Client,
+    url: &str,
+    auth: Option<&Auth>,
+    gitlab: bool,
+    host: &str,
+) -> Result<Option<serde_json::Value>> {
+    let mut req = client.get(url);
+    if let Some(a) = auth {
+        req = if gitlab {
+            req.header("PRIVATE-TOKEN", &a.token)
+        } else {
+            req.bearer_auth(&a.token)
+        };
+    }
+    let resp = req.send().await.with_context(|| format!("reach {host}"))?;
+    match resp.status().as_u16() {
+        404 => Ok(None),
+        401 | 403 => Err(NeedsToken {
+            host: host.to_string(),
+            username: crate::worktree::token_user(host).into(),
+        }
+        .into()),
+        s if !resp.status().is_success() => bail!("{host} answered {s}"),
+        _ => Ok(Some(resp.json().await?)),
+    }
+}
+
+fn github_api(host: &str) -> String {
+    if host == "github.com" {
+        "https://api.github.com".to_string()
+    } else {
+        format!("https://{host}/api/v3")
+    }
 }
 
 /// Fetch every page of a listing; `None` when the first page is not found.
@@ -146,11 +222,7 @@ async fn github(
     s: &Source,
     auth: Option<&Auth>,
 ) -> Result<Vec<RemoteRepo>> {
-    let api = if s.host == "github.com" {
-        "https://api.github.com".to_string()
-    } else {
-        format!("https://{}/api/v3", s.host)
-    };
+    let api = github_api(&s.host);
     let org = format!("{api}/orgs/{}/repos?type=all", s.owner);
     let items = match pages(client, &org, auth, false, &s.host).await? {
         Some(items) => items,
@@ -290,6 +362,17 @@ mod tests {
             (Provider::GitLab, "git.example.com", "team")
         );
         assert!(parse("github.com").is_err());
+        let r = parse("https://github.com/acme/orders").unwrap();
+        assert_eq!(
+            (r.owner.as_str(), r.repo.as_deref()),
+            ("acme", Some("orders"))
+        );
+        let ssh = parse("git@gitlab.com:acme/platform/payments.git").unwrap();
+        assert_eq!(
+            (ssh.host.as_str(), ssh.owner.as_str(), ssh.repo.as_deref()),
+            ("gitlab.com", "acme/platform", Some("payments"))
+        );
+        assert_eq!(parse("gitlab.com/acme/platform").unwrap().repo, None);
     }
 
     #[test]

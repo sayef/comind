@@ -25,7 +25,8 @@ export function Notice({ ok, message, className }: { ok: boolean; message: strin
 }
 
 /** The outcome of a mutation: its error, or its success message. */
-export function Outcome({ error, message }: { error?: Error | null; message?: string }) {
-  if (error) return <Notice ok={false} message={error.message} />;
-  return message ? <Notice ok message={message} /> : null;
+/** An action's error, shown where the action is; successes appear as toasts. */
+export function Outcome({ error }: { error?: Error | null; message?: string }) {
+  if (!error || error.name === "AbortError") return null;
+  return <Notice ok={false} message={error.message} />;
 }

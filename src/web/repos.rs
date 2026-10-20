@@ -19,6 +19,9 @@ use crate::worktree;
 #[derive(Default)]
 pub(super) struct Job {
     running: bool,
+    /// The indexer's process group, to stop it.
+    pid: Option<u32>,
+    cancelled: bool,
     ok: Option<bool>,
     lines: Vec<String>,
     started: Option<String>,
@@ -208,52 +211,22 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
     }
 }
 
-#[derive(Deserialize)]
-pub(super) struct CloneQ {
-    url: String,
-    dir: String,
-    #[serde(default)]
-    username: Option<String>,
-    #[serde(default)]
-    token: Option<String>,
-}
-
-/// Clone a repository with your git credentials and add it.
-pub(super) async fn clone(Json(q): Json<CloneQ>) -> impl IntoResponse {
-    let run = tokio::task::spawn_blocking(move || {
-        let auth = q.token.filter(|t| !t.trim().is_empty()).map(|t| worktree::Auth {
-            username: q.username.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| "oauth2".into()),
-            token: t.trim().to_string(),
-        });
-        let given = auth.is_some();
-        let dest = worktree::clone(q.url.trim(), Path::new(&absolute(&q.dir)), auth)?;
-        let mut list = Config::load().repos;
-        list.push(RepoEntry {
-            path: dest.to_string_lossy().into_owned(),
-            remote: None,
-        });
-        crate::config::set_repos(&list)?;
-        let note = if given && !worktree::has_credential_helper() {
-            "; no git credential helper is set up, so the token was not saved and fetching later will need it again"
-        } else if given {
-            "; the token was saved by your git credential helper"
-        } else {
-            ""
-        };
-        anyhow::Ok(format!("cloned into {}{note}", dest.display()))
-    })
-    .await;
-    match run.map_err(anyhow::Error::from).and_then(|r| r) {
-        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
-        Err(e) => match e.downcast_ref::<worktree::NeedsToken>() {
-            Some(n) => (
-                StatusCode::UNAUTHORIZED,
-                Json(
-                    json!({"ok": false, "message": e.to_string(), "needs_token": {"host": n.host, "username": n.username}}),
-                ),
-            ),
-            None => fail(e),
-        },
+/// Stop the running indexer and everything it started.
+pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
+    let mut j = app.job.lock().await;
+    match j.pid.filter(|_| j.running) {
+        Some(pid) => {
+            j.cancelled = true;
+            super::stop_group(pid);
+            (
+                StatusCode::OK,
+                Json(json!({"ok": true, "message": "indexing cancelled"})),
+            )
+        }
+        None => (
+            StatusCode::OK,
+            Json(json!({"ok": true, "message": "nothing is indexing"})),
+        ),
     }
 }
 
@@ -262,6 +235,7 @@ pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
     let from = j.lines.len().saturating_sub(400);
     Json(json!({
         "running": j.running,
+        "cancelled": j.cancelled,
         "ok": j.ok,
         "lines": &j.lines[from..],
         "started": j.started,
@@ -335,6 +309,7 @@ pub(super) async fn begin(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    super::own_group(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -342,6 +317,7 @@ pub(super) async fn begin(
             return Err(e.into());
         }
     };
+    app.job.lock().await.pid = child.id();
     let app2 = app.clone();
     tokio::spawn(async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
@@ -362,7 +338,12 @@ pub(super) async fn begin(
         let out = child.stdout.take().map(|s| Box::new(s) as Pipe);
         let err = child.stderr.take().map(|s| Box::new(s) as Pipe);
         tokio::join!(follow(out), follow(err));
-        let ok = child.wait().await.map(|s| s.success()).unwrap_or(false);
+        let cancelled = app2.job.lock().await.cancelled;
+        let ok = !cancelled && child.wait().await.map(|s| s.success()).unwrap_or(false);
+        if cancelled {
+            let _ = child.wait().await;
+            app2.job.lock().await.lines.push("Cancelled.".into());
+        }
         if ok {
             if let Err(e) = app2.reload(&root).await {
                 let msg = format!("reload failed: {e:#}");
@@ -371,6 +352,7 @@ pub(super) async fn begin(
         }
         let mut j = app2.job.lock().await;
         j.running = false;
+        j.pid = None;
         j.ok = Some(ok);
         j.finished = Some(chrono::Utc::now().to_rfc3339());
     });
