@@ -156,6 +156,33 @@ export function OverviewPage() {
   );
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
+  const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
+  const teamName = team.data?.version != null ? (team.data.settings.name ?? "your team") : null;
+  const [switching, setSwitching] = useState(false);
+
+  if (o?.problem && teamName && !switching) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
+        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
+        <h1 className="text-xl font-semibold">You're in {teamName}</h1>
+        <p className="text-sm text-muted-foreground">
+          Nothing is indexed yet. Add the team's repositories and index them; everyone in {teamName} then sees the same graph.
+        </p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button variant="brand" asChild>
+            <Link to="/settings/repositories">Add repositories</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/settings">Team settings</Link>
+          </Button>
+        </div>
+        <button className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setSwitching(true)}>
+          Join or create a different team
+        </button>
+      </div>
+    );
+  }
 
   if (o?.problem) {
     return (

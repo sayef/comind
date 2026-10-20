@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun } from "lucide-react";
+import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { AwsBanner } from "@/components/aws-banner";
@@ -24,6 +24,8 @@ export function Layout() {
   const { theme, toggle } = useTheme();
   const [palette, setPalette] = useState(false);
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
+  const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -87,9 +89,16 @@ export function Layout() {
         </nav>
         <div className="border-t px-5 py-4 text-xs text-muted-foreground">
           {overview.data ? (
-            <div className="flex items-center gap-2">
-              <Boxes className="size-3.5" />
-              {overview.data.repos.length} repos · {overview.data.symbols.toLocaleString()} symbols
+            <div className="flex flex-col gap-1">
+              {teamName && (
+                <div className="flex items-center gap-2 font-medium text-foreground" title="The team whose index this is">
+                  <Users className="size-3.5" /> {teamName}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Boxes className="size-3.5" />
+                {overview.data.repos.length} repos · {overview.data.symbols.toLocaleString()} symbols
+              </div>
             </div>
           ) : (
             "Loading index…"
