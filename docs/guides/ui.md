@@ -31,7 +31,7 @@ new one.
   measured ones (hidden ones can be restored). `/conventions?repo=<name>` opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
-- **Repositories**: what is in the index, and where each repository lives on this machine. The index
+- **Settings → Repositories**: what is in the index, and where each repository lives on this machine. The index
   records each repository's remote URL, so one indexed elsewhere shows **no folder here** with
   **Locate** (point at your copy) and **Clone** (URL filled in); **Scan a folder** ticks the ones it
   finds. comindly indexes all repositories together so cross-repo links stay complete, so **Index now**
@@ -49,7 +49,7 @@ new one.
 - **Settings**: the index location (with a connection test), the team settings (shared LLM and
   embedding model), your own API key, the AWS profile for S3, your name on ledger records, and how often to check for a
   new index version. Changing the index location switches the UI without a restart.
-- **Connect**: checks of this setup (as `comindly doctor`), how to register the MCP server with
+- **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.
 - **Symbol view**, opened from search, a link or a graph node: the dependency graph (dependents

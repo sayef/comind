@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, sentence } from "@/lib/utils";
 
 /** Wraps long unbroken text (URLs, paths, ids) inside its box. */
 export const wrap = "min-w-0 [overflow-wrap:anywhere]";
@@ -13,7 +13,7 @@ export function Notice({ ok, message, className }: { ok: boolean; message: strin
     <div className={cn("flex items-start gap-1.5 text-xs", ok ? "text-muted-foreground" : "text-warning", className)}>
       {ok ? <CheckCircle2 className="mt-px size-3.5 shrink-0 text-brand" /> : <AlertTriangle className="mt-px size-3.5 shrink-0" />}
       <div className={cn(wrap, "flex-1")}>
-        <p className={cn(long && !open && "line-clamp-3")}>{message}</p>
+        <p className={cn(long && !open && "line-clamp-3")}>{sentence(message)}</p>
         {long && (
           <button type="button" className="mt-0.5 underline underline-offset-2 opacity-80 hover:opacity-100" onClick={() => setOpen(!open)}>
             {open ? "Less" : "Show all"}

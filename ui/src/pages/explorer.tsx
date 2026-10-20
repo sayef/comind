@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
+import { sentence } from "@/lib/utils";
 
 function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof Layers; nodes: Node[] }) {
   if (nodes.length === 0) return null;
@@ -117,7 +118,7 @@ export function ExplorerPage() {
           <Radar className="size-5 text-warning" />
           <div>
             <div className="text-2xl font-semibold tabular-nums">{ripple.total}</div>
-            <div className="text-xs text-muted-foreground">dependents (blast radius)</div>
+            <div className="text-xs text-muted-foreground">Dependents (blast radius)</div>
           </div>
           <div className="flex max-w-xs flex-wrap gap-1">
             {Object.entries(ripple.repos).map(([r, n]) => (
@@ -167,7 +168,7 @@ export function ExplorerPage() {
           <CardContent className="flex flex-col gap-2">
             {zoom.contracts.map((c) => (
               <div key={c.contract.id + c.role} className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge variant="brand">{c.role}</Badge>
+                <Badge variant="brand">{sentence(c.role)}</Badge>
                 <SymbolLink node={c.contract} />
                 <span className="text-muted-foreground">↔</span>
                 {c.counterparts.length ? (

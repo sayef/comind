@@ -106,7 +106,7 @@ function CreateTeam() {
   const s3 = index.trim().startsWith("s3://");
   const create = useMutation({
     mutationFn: () => api.createTeam(name, index, s3 ? profile : ""),
-    onSuccess: () => (qc.invalidateQueries(), navigate("/repositories")),
+    onSuccess: () => (qc.invalidateQueries(), navigate("/settings/repositories")),
   });
   return (
     <Card className="flex flex-col p-4 text-left">
@@ -162,21 +162,22 @@ export function OverviewPage() {
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 py-16 text-center">
         <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
         <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
-        <h1 className="text-xl font-semibold">No index here yet</h1>
-        <p className="text-sm text-muted-foreground">
-          comindly looked in <span className="font-mono">{o.root}</span>. Join your team, start one, or index just for yourself.
-        </p>
+        <h1 className="text-xl font-semibold">Welcome to comindly</h1>
+        <p className="text-sm text-muted-foreground">Join your team, start one, or index just for yourself.</p>
         <div className="grid w-full gap-3 sm:grid-cols-2">
           <JoinTeam />
           <CreateTeam />
         </div>
         <p className="text-xs text-muted-foreground">
-          Just for yourself? <Link to="/repositories" className="underline underline-offset-2">Add repositories</Link> and index them
+          Just for yourself? <Link to="/settings/repositories" className="underline underline-offset-2">Add repositories</Link> and index them
           here, or change the location in <Link to="/settings" className="underline underline-offset-2">Settings</Link>.
         </p>
         <details className="text-left text-xs text-muted-foreground">
           <summary className="cursor-pointer">Details</summary>
-          <pre className="mt-2 whitespace-pre-wrap">{o.problem}</pre>
+          <p className="mt-2">
+            Looked in <span className="font-mono [overflow-wrap:anywhere]">{o.root}</span>
+          </p>
+          <pre className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{o.problem}</pre>
         </details>
       </div>
     );

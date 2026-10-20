@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { sentence } from "@/lib/utils";
 
 /** For an S3 index: says when AWS credentials stopped working and offers the SSO sign-in. */
 export function AwsBanner({ remote }: { remote: boolean }) {
@@ -35,8 +36,8 @@ export function AwsBanner({ remote }: { remote: boolean }) {
           ? `Waiting for you to approve the AWS sign-in in your browser${a.profile ? ` (profile ${a.profile})` : ""}…`
           : a.signin
             ? `The AWS sign-in for the S3 index has expired${a.profile ? ` (profile ${a.profile})` : ""}.`
-            : a.message}
-        {!waiting && a.run?.ok === false && a.run.message && <span className="text-muted-foreground"> Last attempt: {a.run.message}</span>}
+            : sentence(a.message ?? "")}
+        {!waiting && a.run?.ok === false && a.run.message && <span className="text-muted-foreground"> Last attempt: {sentence(a.run.message)}</span>}
       </span>
       {a.signin && (
         <Button size="sm" variant="outline" disabled={waiting || login.isPending} onClick={() => login.mutate()}>

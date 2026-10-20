@@ -27,11 +27,11 @@ function Pin({ p }: { p: Package }) {
       {p.locked}
       {behind ? (
         <Badge variant="warning" title={`The publisher's source is at ${p.published}`}>
-          behind
+          Behind
         </Badge>
       ) : (
         <Badge variant="outline" title={`Newer than the version in the publisher's source (${p.published}); it is probably set at release time`}>
-          ahead of source
+          Ahead of source
         </Badge>
       )}
     </span>

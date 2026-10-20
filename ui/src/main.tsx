@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { Layout } from "@/components/layout";
 import { ThemeProvider } from "@/components/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,7 +12,7 @@ import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
 import { PackagesPage } from "@/pages/packages";
 import { RepositoriesPage } from "@/pages/repositories";
-import { SettingsPage } from "@/pages/settings";
+import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import "./index.css";
 
@@ -33,8 +33,11 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="conventions" element={<ConventionsPage />} />
                 <Route path="packages" element={<PackagesPage />} />
                 <Route path="setup" element={<SetupPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-                <Route path="repositories" element={<RepositoriesPage />} />
+                <Route path="settings" element={<SettingsShell />}>
+                  <Route index element={<SettingsPage />} />
+                  <Route path="repositories" element={<RepositoriesPage />} />
+                </Route>
+                <Route path="repositories" element={<Navigate to="/settings/repositories" replace />} />
                 <Route path="*" element={<OverviewPage />} />
               </Route>
             </Routes>

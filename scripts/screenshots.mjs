@@ -67,8 +67,8 @@ for (const theme of ["light", "dark"]) {
     await go(`/explorer?focus=${encodeURIComponent(focus)}`, 3500);
     await shot(`explorer${suffix}`);
   }
-  for (const page of ["contracts", "ledger", "packages", "conventions", "repositories", "setup"]) {
-    await go(`/${page}`);
+  for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["setup", "setup"]]) {
+    await go(`/${path}`);
     await shot(`${page}${suffix}`);
   }
   await go("/");

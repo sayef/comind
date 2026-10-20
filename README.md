@@ -121,7 +121,7 @@ claude mcp add --scope user comindly -- comindly serve --index-dir ./comindly-in
 ```
 
 Cursor, Codex, VS Code and other MCP clients: see [Getting started](https://comindly.pages.dev/getting-started/),
-or open `comindly ui --web` → **Connect**, which fills in your index path and checks your setup.
+or open `comindly ui --web` → **Get started**, which fills in your index path and checks your setup.
 
 **MCP tools (15):**
 - **Navigate:** `search`, `find`, `zoom`, `thread`, `flow`, `repos`, `suggest`.

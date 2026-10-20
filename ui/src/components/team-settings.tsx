@@ -11,10 +11,10 @@ import { api, type KeySource, type TeamSettings } from "@/lib/api";
 const field = "flex flex-col gap-1 text-xs font-medium";
 
 const sources: Record<KeySource, string> = {
-  team: "from your credentials file, for this team",
-  default: "from your credentials file",
-  environment: "from OPENAI_API_KEY in the environment",
-  none: "not set",
+  team: "From your credentials file, for this team",
+  default: "From your credentials file",
+  environment: "From OPENAI_API_KEY in the environment",
+  none: "Not set",
 };
 
 /** Your own LLM API key, kept in your credentials file on this machine and never in the index. */

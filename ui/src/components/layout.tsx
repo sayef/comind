@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, FolderGit2, LayoutDashboard, Moon, Network, Package, Plug, Ruler, Search, Settings, Sun } from "lucide-react";
+import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { AwsBanner } from "@/components/aws-banner";
@@ -16,8 +16,7 @@ const NAV = [
   { to: "/ledger", label: "Ledger", icon: BookMarked },
   { to: "/conventions", label: "Conventions", icon: Ruler },
   { to: "/packages", label: "Packages", icon: Package },
-  { to: "/repositories", label: "Repositories", icon: FolderGit2 },
-  { to: "/setup", label: "Connect", icon: Plug },
+  { to: "/setup", label: "Get started", icon: Rocket },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -115,7 +114,7 @@ export function Layout() {
             <kbd className="hidden rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
           </button>
           <div className="flex shrink-0 items-center justify-end gap-2">
-            {overview.data && !overview.data.writable && <Badge variant="outline">read-only</Badge>}
+            {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun /> : <Moon />}
             </Button>

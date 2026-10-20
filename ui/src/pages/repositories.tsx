@@ -131,7 +131,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                   <label key={f.path} className="flex cursor-pointer items-center gap-2.5 border-b px-3 py-2 text-sm last:border-0 hover:bg-muted/50">
                     <input type="checkbox" checked={checked.has(f.path)} onChange={() => toggle(f.path)} />
                     <span className="font-medium">{f.name}</span>
-                    {f.listed && <Badge variant="outline">listed</Badge>}
+                    {f.listed && <Badge variant="outline">Listed</Badge>}
                     <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{f.remote ?? f.path}</span>
                   </label>
                 ))}
@@ -373,17 +373,17 @@ export function RepositoriesPage() {
               <div className="flex items-center gap-2">
                 <RepoDot repo={r.name} />
                 <span className="font-medium">{r.name}</span>
-                {!r.exists && <Badge variant="danger">folder missing</Badge>}
-                {r.symbols == null ? <Badge variant="outline">not indexed yet</Badge> : <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
+                {!r.exists && <Badge variant="danger">Folder missing</Badge>}
+                {r.symbols == null ? <Badge variant="outline">Not indexed yet</Badge> : <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
               </div>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{r.path}</div>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="What comindly indexes">
-              <GitBranch className="size-3.5" /> indexes <span className="font-mono text-foreground">origin/{r.branch ?? "?"}</span>
+              <GitBranch className="size-3.5" /> Indexes <span className="font-mono text-foreground">origin/{r.branch ?? "?"}</span>
               {r.indexed_commit && <span className="font-mono">@ {r.indexed_commit.slice(0, 7)}</span>}
             </div>
             <div className="text-xs text-muted-foreground" title="Your own checkout, left as it is">
-              yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
+              Yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
             </div>
             <Button variant="ghost" size="icon" className="size-8" aria-label="Remove" title="Remove from the list (your folder stays)" onClick={() => remove.mutate(r.path)}>
               <Trash2 />
@@ -396,7 +396,7 @@ export function RepositoriesPage() {
               <div className="flex items-center gap-2">
                 <RepoDot repo={r.name} />
                 <span className="font-medium">{r.name}</span>
-                <Badge variant="warning">no folder here</Badge>
+                <Badge variant="warning">No folder here</Badge>
                 {r.symbols != null && <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
               </div>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">

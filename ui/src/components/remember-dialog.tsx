@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api, type Node } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, sentence } from "@/lib/utils";
 
 const KINDS = [
   ["constraint", "Constraint", "A rule the code must keep"],
@@ -165,7 +165,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
               placeholder="commit:abc123, mr:!412, test:tests/test_x.py::test_y"
             />
           </label>
-          {save.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{save.error.message}</p>}
+          {save.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{sentence(save.error.message)}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel

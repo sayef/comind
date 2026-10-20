@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { NavLink, Outlet } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -191,6 +192,25 @@ export function SettingsPage() {
         </div>
         {result(saveFresh)}
       </Section>
+    </div>
+  );
+}
+
+/** Settings with its tabs: general settings and the repositories this machine indexes. */
+export function SettingsShell() {
+  const tab = ({ isActive }: { isActive: boolean }) =>
+    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`;
+  return (
+    <div className="flex flex-col gap-5">
+      <nav className="flex w-fit gap-1 rounded-lg bg-muted p-1">
+        <NavLink to="/settings" end className={tab}>
+          General
+        </NavLink>
+        <NavLink to="/settings/repositories" className={tab}>
+          Repositories
+        </NavLink>
+      </nav>
+      <Outlet />
     </div>
   );
 }

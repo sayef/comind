@@ -80,6 +80,14 @@ llm_api_key = "sk-..."
 
 CI sets `OPENAI_API_KEY` from its secret store.
 
+### Starting a team
+
+In the app, **Create a team** on the first screen takes a team name and an empty location everyone can
+reach: a shared folder, or `s3://bucket/prefix` with your AWS profile. comindly writes the team settings
+there (which also checks you can write to it), switches to it and opens **Settings → Repositories** to add
+and index the first repositories. It refuses a location that already has a team or an index; join that
+one instead.
+
 ### Joining
 
 A colleague needs only the index location and their own cloud access:
@@ -89,5 +97,6 @@ aws sso login --profile team-dev                        # their own access to th
 comindly join s3://bucket/comindly --profile team-dev      # remembers both
 ```
 
-or, in the app, **Join a team** on the first screen (index location, AWS profile). For LLM steps they add
+or, in the app, **Join a team** on the first screen (index location, AWS profile); this works as soon as
+the team exists, before anything is indexed. For LLM steps they add
 their own API key as above.

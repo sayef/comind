@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import { CONTRACTS } from "@/lib/utils";
+import { CONTRACTS, sentence } from "@/lib/utils";
 
 function iconFor(n: { repo: string; kind: string }) {
   if (n.repo === CONTRACTS) return Network;
@@ -85,7 +85,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                   <Sparkles className="mr-1 inline size-3" /> Code search
                 </div>
                 {code.isFetching && <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>}
-                {code.error && <div className="px-3 py-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">{code.error.message}</div>}
+                {code.error && <div className="px-3 py-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">{sentence(code.error.message)}</div>}
                 {hits.map((h) => {
                   const Icon = iconFor(h);
                   return (

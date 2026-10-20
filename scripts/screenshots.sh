@@ -9,7 +9,10 @@ OUT="$ROOT/docs/assets/screenshots"
 LLM=1
 [ "${1:-}" = "--no-llm" ] && LLM=0
 
-WORK="$(mktemp -d)"
+# A short, neutral location, because paths show up in the screenshots.
+WORK=/tmp/acme
+[ -e "$WORK" ] && { echo "$WORK already exists; remove it first" >&2; exit 1; }
+mkdir -p "$WORK"
 export REAL_HOME="$HOME"
 trap '[ -n "${SERVER:-}" ] && kill "$SERVER" 2>/dev/null; rm -rf "$WORK"' EXIT
 export HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config"

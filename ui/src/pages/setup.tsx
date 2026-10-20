@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { sentence } from "@/lib/utils";
 
 const DOCS = "https://comindly.pages.dev";
 
@@ -29,11 +30,20 @@ const ASK: Record<string, string> = {
   review: "That constraint about pinning the client library no longer applies; archive it.",
 };
 
+const TERMINAL: [string, string][] = [
+  ["Search by describing what you need", 'comindly search "where do we retry HTTP calls"'],
+  ["A symbol's neighbourhood, blast radius and context", "comindly explore OrderService.place_order"],
+  ["Routes or queues missing a side", "comindly contracts --dangling"],
+  ["What the team recorded about a symbol", "comindly why OrderService"],
+  ["Before you commit", "comindly preflight ."],
+  ["Record a constraint", 'comindly remember constraint --on OrderService --title "…"'],
+];
+
 function Code({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="group relative">
-      <pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 pr-12 font-mono text-xs leading-relaxed">{children}</pre>
+      <pre className="whitespace-pre-wrap rounded-lg border bg-muted/50 p-3 pr-12 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">{children}</pre>
       <Button
         size="icon"
         variant="ghost"
@@ -103,7 +113,7 @@ export function SetupPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Connect your agent</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Get started</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             comindly answers your coding agent's questions about the whole codebase: what calls what across repositories, which services
             talk through which routes and queues, what a change can break, and what the team recorded about the code.
@@ -134,8 +144,8 @@ export function SetupPage() {
               ) : (
                 <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
               )}
-              <span className={`min-w-0 [overflow-wrap:anywhere] ${c.ok ? "" : "text-muted-foreground"}`}>{c.message}</span>
-              {!c.ok && c.optional && <Badge variant="outline">optional</Badge>}
+              <span className={`min-w-0 [overflow-wrap:anywhere] ${c.ok ? "" : "text-muted-foreground"}`}>{sentence(c.message)}</span>
+              {!c.ok && c.optional && <Badge variant="outline">Optional</Badge>}
             </div>
           ))}
         </CardContent>
@@ -212,16 +222,17 @@ export function SetupPage() {
           <CardDescription>The same answers without an agent.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Code>
-            {[
-              `comindly search "where do we retry HTTP calls" --index-dir ${index}`,
-              `comindly explore OrderService.place_order --index-dir ${index}   # neighbourhood, blast radius, context`,
-              `comindly contracts --dangling --index-dir ${index}             # routes or queues missing a side`,
-              `comindly why OrderService --index-dir ${index}                 # what the team recorded`,
-              `comindly preflight . --index-dir ${index}                      # before you commit`,
-              `comindly remember constraint --on OrderService --title "…" --index-dir ${index}`,
-            ].join("\n")}
-          </Code>
+          <div className="flex flex-col gap-4">
+            {TERMINAL.map(([what, cmd]) => (
+              <div key={cmd} className="flex flex-col gap-1.5">
+                <span className="text-sm text-muted-foreground">{what}</span>
+                <Code>{cmd}</Code>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              These use the index in your settings; add <code>--index-dir &lt;location&gt;</code> for another one.
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -13,3 +13,9 @@ export function repoHue(repo: string): number {
 }
 
 export const CONTRACTS = "_contracts";
+
+/** A message from the server as a sentence: first letter capitalized, unless it starts with code, a path or the name. */
+export function sentence(text: string): string {
+  if (!/^[a-z]/.test(text) || /^comindly\b/.test(text)) return text;
+  return text[0].toUpperCase() + text.slice(1);
+}

@@ -30,7 +30,7 @@ git clone https://github.com/sayef/comindly && cd comindly && cargo build --rele
 
 ## 2. Index your code
 
-The quickest way is the app: `comindly app` (macOS) or `comindly ui --web --open`, then **Repositories**
+The quickest way is the app: `comindly app` (macOS) or `comindly ui --web --open`, then **Settings → Repositories**
 → Scan a folder → tick your repositories → **Index now**. The same from the terminal:
 
 ```sh
@@ -68,7 +68,7 @@ comindly ui --web --open --index-dir ~/comindly-index                   # any OS
 ```
 
 The web UI shows the org map, contracts, the ledger, conventions and internal packages; press
-<kbd>⌘K</kbd> to search by name or by describing what you are looking for. Its **Connect** page
+<kbd>⌘K</kbd> to search by name or by describing what you are looking for. Its **Get started** page
 repeats the next step with your index path filled in.
 
 ## 4. Connect your agent
@@ -146,7 +146,7 @@ comindly doctor --index-dir ~/comindly-index
 ```
 
 It checks the index, the ledger, cloud credentials, hooks, the LLM key, signing and SCIP indexers,
-and says how to fix what is missing. The web UI's Connect page shows the same checks.
+and says how to fix what is missing. The app's Get started page shows the same checks.
 
 ## Next
 
