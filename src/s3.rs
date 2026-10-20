@@ -167,6 +167,9 @@ fn expired_env_keys() -> Option<String> {
 
 /// A short, secret-free explanation of an error, with S3 error replies turned into what to do.
 pub fn explain(raw: &str) -> String {
+    if raw.contains("Failed to get AWS credentials") || raw.contains("CredentialsNotLoaded") {
+        return no_credentials();
+    }
     let code = raw
         .split("<Code>")
         .nth(1)
@@ -194,6 +197,20 @@ pub fn explain(raw: &str) -> String {
     match (hint, code) {
         (Some(h), Some(c)) => format!("{h} (S3: {c})"),
         _ => redact(raw),
+    }
+}
+
+/// Why no AWS credentials were found, and what to do about it.
+fn no_credentials() -> String {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    if home.is_some_and(|h| !h.join(".aws").is_dir()) {
+        return "No AWS credentials: this home folder has no ~/.aws; start comindly from your own account".into();
+    }
+    match std::env::var("AWS_PROFILE").ok().filter(|p| !p.is_empty()) {
+        Some(p) => format!(
+            "No AWS credentials for profile `{p}`: sign in with `aws sso login --profile {p}`, or choose another profile"
+        ),
+        None => "No AWS credentials: choose an AWS profile, or sign in with `aws sso login`".into(),
     }
 }
 
@@ -317,6 +334,12 @@ mod tests {
         );
         let path = format!("/home/{}", "long-folder-name-".repeat(6));
         assert_eq!(explain(&path), path);
+        let chain = "Failed to get AWS credentials: CredentialsNotLoaded(CredentialsNotLoaded { source: Some(ProviderChainError { attempts: [] }) })";
+        assert!(
+            explain(chain).starts_with("No AWS credentials"),
+            "{}",
+            explain(chain)
+        );
         let mixed = "/Users/Someone/Library/Caches/tmp-Ab12Cd34Ef56/index/_graph/symbols.lance";
         assert_eq!(explain(mixed), mixed);
     }
