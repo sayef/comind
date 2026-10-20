@@ -191,6 +191,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/team", get(team::get).post(team::save))
         .route("/api/team/key", post(team::key))
         .route("/api/join", post(team::join))
+        .route("/api/team/create", post(team::create))
         .route("/api/aws", get(aws::status))
         .route("/api/aws/login", post(aws::start))
         .fallback(get(asset))

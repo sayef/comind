@@ -341,6 +341,7 @@ export const api = {
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/team", { settings, version }),
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/team/key", { key }),
   join: (index: string, aws_profile: string) => post("/api/join", { index, aws_profile }),
+  createTeam: (name: string, index: string, aws_profile: string) => post("/api/team/create", { name, index, aws_profile }),
   awsLogin: () => post("/api/aws/login", {}),
   saveSettings: (c: SettingsChange) => post("/api/settings", c),
   testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),

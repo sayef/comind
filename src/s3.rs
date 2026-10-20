@@ -203,7 +203,9 @@ fn redact(s: &str) -> String {
     let mut word = String::new();
     let flush = |w: &mut String, out: &mut String| {
         let has = |f: fn(&char) -> bool| w.chars().any(|c| f(&c));
-        let secretish = w.len() >= 60
+        let path = w.starts_with('/') || w.starts_with('~');
+        let secretish = !path
+            && w.len() >= 60
             && has(char::is_ascii_uppercase)
             && has(char::is_ascii_lowercase)
             && has(char::is_ascii_digit);
@@ -315,5 +317,7 @@ mod tests {
         );
         let path = format!("/home/{}", "long-folder-name-".repeat(6));
         assert_eq!(explain(&path), path);
+        let mixed = "/Users/Someone/Library/Caches/tmp-Ab12Cd34Ef56/index/_graph/symbols.lance";
+        assert_eq!(explain(mixed), mixed);
     }
 }

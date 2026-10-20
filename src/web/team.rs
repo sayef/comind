@@ -130,25 +130,14 @@ pub(super) struct Join {
 /// Use a team's index: check it, remember it (and the AWS profile) and load it.
 pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl IntoResponse {
     let run = async {
-        let root = crate::config::expand_tilde(b.index.trim());
-        let profile = b.aws_profile.filter(|p| !p.trim().is_empty());
-        if let Some(p) = &profile {
-            crate::s3::use_profile(p.trim());
-        }
-        let graph = format!("{}/_graph", root.trim_end_matches('/'));
-        let versions = crate::index::graph_versions(&graph).await?;
-        anyhow::ensure!(!versions.is_empty(), "no index at {root}");
+        let (root, profile) = location(&b.index, b.aws_profile);
+        let indexed = has_index(&root).await?;
         let stored = team::load(&root).await?;
-        let mut personal = vec![("index_dir", crate::config::Setting::Text(root.clone()))];
-        if let Some(p) = profile {
-            personal.push((
-                "aws_profile",
-                crate::config::Setting::Text(p.trim().to_string()),
-            ));
-        }
-        crate::config::update(&personal)?;
-        team::set_current(stored.settings.clone());
-        app.reload(&root).await?;
+        anyhow::ensure!(
+            indexed || stored.version.is_some(),
+            "no team or index at {root}"
+        );
+        use_location(&app, &root, profile, stored.settings.clone()).await?;
         anyhow::Ok(stored.settings.name.unwrap_or(root))
     };
     match run.await {
@@ -158,4 +147,84 @@ pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl
         ),
         Err(e) => fail(e),
     }
+}
+
+#[derive(Deserialize)]
+pub(super) struct Create {
+    name: String,
+    index: String,
+    #[serde(default)]
+    aws_profile: Option<String>,
+}
+
+/// Start a team at an empty location: write its settings there and switch to it.
+pub(super) async fn create(State(app): State<Shared>, Json(b): Json<Create>) -> impl IntoResponse {
+    let run = async {
+        let name = b.name.trim().to_string();
+        anyhow::ensure!(!name.is_empty(), "give the team a name");
+        let (root, profile) = location(&b.index, b.aws_profile);
+        anyhow::ensure!(!root.is_empty(), "choose where the team's index lives");
+        if !root.contains("://") {
+            std::fs::create_dir_all(&root)?;
+        }
+        anyhow::ensure!(
+            !has_index(&root).await?,
+            "{root} already has an index; join it instead"
+        );
+        anyhow::ensure!(
+            team::load(&root).await?.version.is_none(),
+            "{root} already has a team; join it instead"
+        );
+        let settings = TeamSettings {
+            name: Some(name.clone()),
+            ..Default::default()
+        };
+        team::save(&root, &settings, None).await?;
+        use_location(&app, &root, profile, settings).await?;
+        anyhow::Ok(name)
+    };
+    match run.await {
+        Ok(name) => (
+            StatusCode::OK,
+            Json(json!({"ok": true, "message": format!("created {name}")})),
+        ),
+        Err(e) => fail(e),
+    }
+}
+
+/// The index location with `~` expanded, and the AWS profile to use for it (applied now).
+fn location(index: &str, profile: Option<String>) -> (String, Option<String>) {
+    let root = crate::config::expand_tilde(index.trim());
+    let profile = profile
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    if let Some(p) = &profile {
+        crate::s3::use_profile(p);
+    }
+    (root, profile)
+}
+
+async fn has_index(root: &str) -> anyhow::Result<bool> {
+    let graph = format!("{}/_graph", root.trim_end_matches('/'));
+    match crate::index::graph_versions(&graph).await {
+        Ok(v) => Ok(!v.is_empty()),
+        Err(e) if format!("{e:#}").contains("was not found") => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Remember `root` (and the profile) in the personal config and load it with its team settings.
+async fn use_location(
+    app: &Shared,
+    root: &str,
+    profile: Option<String>,
+    settings: TeamSettings,
+) -> anyhow::Result<()> {
+    let mut personal = vec![("index_dir", crate::config::Setting::Text(root.to_string()))];
+    if let Some(p) = profile {
+        personal.push(("aws_profile", crate::config::Setting::Text(p)));
+    }
+    crate::config::update(&personal)?;
+    team::set_current(settings);
+    app.reload(root).await
 }

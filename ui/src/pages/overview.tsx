@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, Boxes, GitBranch, History, Network, Workflow } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { GraphView } from "@/components/graph-view";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
@@ -50,39 +50,79 @@ function linkDiff(then: OrgMap, now: OrgMap) {
   return { added: [...b].filter((k) => !a.has(k)), gone: [...a].filter((k) => !b.has(k)) };
 }
 
+/** Where a team's index lives: a folder or an S3 location, with the AWS profile for S3. */
+function Location({ index, setIndex, profile, setProfile }: { index: string; setIndex: (v: string) => void; profile: string; setProfile: (v: string) => void }) {
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  return (
+    <>
+      <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comindly or a folder" className="font-mono text-xs" />
+      {index.trim().startsWith("s3://") && (
+        <select className="h-9 rounded-md border bg-card px-2 text-sm" value={profile} onChange={(e) => setProfile(e.target.value)}>
+          <option value="">AWS profile: default</option>
+          {settings.data?.aws_profiles.map((p) => (
+            <option key={p} value={p}>
+              AWS profile: {p}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
+  );
+}
+
 /** First run: use the team's index. */
 function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
   const [profile, setProfile] = useState("");
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const s3 = index.trim().startsWith("s3://");
   const join = useMutation({ mutationFn: () => api.join(index, s3 ? profile : ""), onSuccess: () => qc.invalidateQueries() });
   return (
-    <Card className="w-full p-4 text-left">
+    <Card className="flex flex-col p-4 text-left">
       <div className="text-sm font-medium">Join a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        The team's index location and, for an S3 index, the AWS profile (sign in with `aws sso login` first). Your LLM key stays
-        on this machine, in Settings.
+        Where your team's index lives and, for S3, your AWS profile (sign in with <code>aws sso login</code> first).
       </p>
-      <div className="mt-3 flex flex-col gap-2">
-        <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comindly or a folder" className="font-mono text-xs" />
-        {s3 && (
-          <select className="h-9 rounded-md border bg-card px-2 text-sm" value={profile} onChange={(e) => setProfile(e.target.value)}>
-            <option value="">AWS profile: default</option>
-            {settings.data?.aws_profiles.map((p) => (
-              <option key={p} value={p}>
-                AWS profile: {p}
-              </option>
-            ))}
-          </select>
-        )}
-        <div>
+      <div className="mt-3 flex flex-1 flex-col gap-2">
+        <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
+        <div className="mt-auto">
           <Button variant="brand" disabled={!index.trim() || join.isPending} onClick={() => join.mutate()}>
             Join
           </Button>
         </div>
         <Outcome error={join.error} />
+      </div>
+    </Card>
+  );
+}
+
+/** First run: start a team at an empty folder or S3 location; colleagues then join it. */
+function CreateTeam() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [index, setIndex] = useState("");
+  const [profile, setProfile] = useState("");
+  const s3 = index.trim().startsWith("s3://");
+  const create = useMutation({
+    mutationFn: () => api.createTeam(name, index, s3 ? profile : ""),
+    onSuccess: () => (qc.invalidateQueries(), navigate("/repositories")),
+  });
+  return (
+    <Card className="flex flex-col p-4 text-left">
+      <div className="text-sm font-medium">Create a team</div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Pick an empty folder or S3 location everyone can reach. You add repositories next; colleagues join with the same location.
+      </p>
+      <div className="mt-3 flex flex-1 flex-col gap-2">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" />
+        <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
+        <div className="mt-auto">
+          <Button variant="brand" disabled={!name.trim() || !index.trim() || create.isPending} onClick={() => create.mutate()}>
+            Create team
+          </Button>
+        </div>
+        <Outcome error={create.error} />
       </div>
     </Card>
   );
@@ -119,23 +159,21 @@ export function OverviewPage() {
 
   if (o?.problem) {
     return (
-      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+      <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 py-16 text-center">
         <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
         <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
         <h1 className="text-xl font-semibold">No index here yet</h1>
         <p className="text-sm text-muted-foreground">
-          comindly looked in <span className="font-mono">{o.root}</span>. Join your team's index, or add repositories and build one.
+          comindly looked in <span className="font-mono">{o.root}</span>. Join your team, start one, or index just for yourself.
         </p>
-        <JoinTeam />
-        <p className="text-xs text-muted-foreground">or start your own</p>
-        <div className="flex gap-2">
-          <Button variant="brand" asChild>
-            <Link to="/repositories">Add repositories</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/settings">Settings</Link>
-          </Button>
+        <div className="grid w-full gap-3 sm:grid-cols-2">
+          <JoinTeam />
+          <CreateTeam />
         </div>
+        <p className="text-xs text-muted-foreground">
+          Just for yourself? <Link to="/repositories" className="underline underline-offset-2">Add repositories</Link> and index them
+          here, or change the location in <Link to="/settings" className="underline underline-offset-2">Settings</Link>.
+        </p>
         <details className="text-left text-xs text-muted-foreground">
           <summary className="cursor-pointer">Details</summary>
           <pre className="mt-2 whitespace-pre-wrap">{o.problem}</pre>
