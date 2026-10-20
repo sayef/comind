@@ -35,6 +35,7 @@ The quickest way is the app: `comindly app` (macOS) or `comindly ui --web --open
 
 ```sh
 comindly repos add ../shared-lib ../orders ../payments   # remembered in config.toml
+comindly repos add https://github.com/acme/billing.git    # a clone URL: comindly clones it itself
 comindly link --index-dir ~/comindly-index                 # each repo's default branch, never your folders
 ```
 

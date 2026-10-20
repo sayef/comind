@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Repositories → **From GitHub or GitLab**: list an organisation or group (github.com, GitHub
+  Enterprise, gitlab.com, self-hosted GitLab with subgroups), pick repositories, and comindly clones and
+  keeps them itself; `comindly repos add <clone URL>` does the same from the terminal.
+- A team's repository list in its settings: colleagues see the repositories they are missing and add them
+  in one click.
+- **Create a team** on the first screen, next to **Join a team**; joining works before the first index.
+- comindly's icon in the macOS Dock and app switcher for `comindly app`.
+- `install.sh` verifies the download's SHA-256, and every release is installed on Linux and macOS and with
+  `cargo install` before it counts.
+
+### Changed
+
+- Indexing always uses each repository's current default branch, asked from the remote; the per-repository
+  branch setting and `repos add --branch` are gone.
+- Connect is now **Get started**, and Repositories moved under **Settings**.
+- Messages read as sentences, long commands wrap, and AWS credential errors are one line.
+
 ## [0.1.0](https://github.com/sayef/comindly/releases/tag/v0.1.0) - 2026-10-19
 
 First release of comindly: cross-repo code intelligence for coding agents, in one binary and your own

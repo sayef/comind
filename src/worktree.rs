@@ -49,7 +49,7 @@ fn https_host(url: &str) -> Option<String> {
 }
 
 /// The username a host expects with an access token.
-fn token_user(host: &str) -> &'static str {
+pub fn token_user(host: &str) -> &'static str {
     if host == "github.com" {
         "x-access-token"
     } else {
@@ -162,16 +162,28 @@ pub fn default_branch(repo: &Path) -> Result<String> {
     bail!("no main or master branch in {}", repo.display())
 }
 
-/// The commit `branch` points to on the remote, without fetching.
-pub fn remote_head(repo: &Path, branch: &str) -> Result<String> {
-    let out = git(
+/// The remote's default branch and its commit, asked from the remote; also records it as `origin/HEAD`.
+pub fn remote_default(repo: &Path) -> Result<(String, String)> {
+    let auth = remote_url(repo).and_then(|u| env_auth(&u));
+    let out = git_auth(
         repo,
-        &["ls-remote", "origin", &format!("refs/heads/{branch}")],
+        &["ls-remote", "--symref", "origin", "HEAD"],
+        auth.as_ref(),
     )?;
-    out.split_whitespace()
-        .next()
-        .map(str::to_string)
-        .with_context(|| format!("origin has no branch {branch}"))
+    let branch = out
+        .lines()
+        .find_map(|l| l.strip_prefix("ref: refs/heads/"))
+        .and_then(|l| l.split_whitespace().next())
+        .context("the remote does not say which branch is its default")?
+        .to_string();
+    let commit = out
+        .lines()
+        .find(|l| !l.starts_with("ref:") && l.ends_with("HEAD"))
+        .and_then(|l| l.split_whitespace().next())
+        .context("the remote's default branch has no commit")?
+        .to_string();
+    let _ = git(repo, &["remote", "set-head", "origin", &branch]);
+    Ok((branch, commit))
 }
 
 /// The branch checked out in your own folder (for display).
@@ -193,17 +205,24 @@ fn worktree_dir(repo: &Path) -> Result<PathBuf> {
         .join(name(repo)))
 }
 
-/// Fetch `branch` (default: the repository's default branch) and check it out in comindly's
-/// worktree, detached, so `branch` stays free to check out in your folder.
-pub fn prepare(repo: &Path, branch: Option<&str>) -> Result<Checkout> {
+/// Fetch the remote's default branch and check it out in comindly's worktree, detached, so your
+/// folder and branches are never touched. Offline, the last known default branch is used.
+pub fn prepare(repo: &Path) -> Result<Checkout> {
     if !repo.join(".git").exists() {
         bail!("{} is not a git repository", repo.display());
     }
-    let branch = match branch {
-        Some(b) => b.to_string(),
-        None => default_branch(repo)?,
-    };
     let mut stale = None;
+    let branch = if has_origin(repo) {
+        match remote_default(repo) {
+            Ok((b, _)) => b,
+            Err(e) => {
+                stale = Some(format!("{e:#}"));
+                default_branch(repo)?
+            }
+        }
+    } else {
+        default_branch(repo)?
+    };
     let target = if has_origin(repo) {
         let target = format!("origin/{branch}");
         let auth = git(repo, &["remote", "get-url", "origin"])
@@ -312,6 +331,81 @@ pub fn clone(url: &str, parent: &Path, auth: Option<Auth>) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// comindly's own copy of `url` at `dest`: cloned once, without a checkout (indexing uses its worktree)
+/// and without file contents until needed; later runs only fetch.
+pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
+    if dest.join(".git").exists() || dest.join("HEAD").exists() {
+        return Ok(());
+    }
+    let parent = dest.parent().context("clone folder")?;
+    std::fs::create_dir_all(parent)?;
+    let auth = env_auth(url);
+    let d = dest.to_string_lossy();
+    let args = [
+        "clone",
+        "--quiet",
+        "--filter=blob:none",
+        "--no-checkout",
+        url,
+        &d,
+    ];
+    if let Err(e) = git_auth(parent, &args, auth.as_ref()) {
+        let _ = std::fs::remove_dir_all(dest);
+        if let Some(host) = https_host(url).filter(|_| auth_failed(&format!("{e:#}"))) {
+            let username = token_user(&host).into();
+            return Err(NeedsToken { host, username }.into());
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// A token for `host` from the environment or your git credential helper (on macOS the keychain).
+pub fn stored_auth(host: &str) -> Option<Auth> {
+    if let Some(a) = env_auth(&format!("https://{host}/")) {
+        return Some(a);
+    }
+    let input = format!("protocol=https\nhost={host}\n\n");
+    let out = credential("fill", &input)?;
+    let field = |k: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix(&format!("{k}=")))
+            .map(str::to_string)
+    };
+    Some(Auth {
+        username: field("username").unwrap_or_else(|| token_user(host).into()),
+        token: field("password")?,
+    })
+}
+
+/// Hand a token that worked to your git credential helper, as git does after a successful login.
+pub fn approve(host: &str, auth: &Auth) {
+    let input = format!(
+        "protocol=https\nhost={host}\nusername={}\npassword={}\n\n",
+        auth.username, auth.token
+    );
+    let _ = credential("approve", &input);
+}
+
+fn credential(action: &str, input: &str) -> Option<String> {
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .args(["credential", action])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // Only read what is stored; Git Credential Manager would otherwise open a login window.
+        .env("GCM_INTERACTIVE", "never")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.take()?.write_all(input.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// Whether git has a credential helper to keep tokens it was given.
 pub fn has_credential_helper() -> bool {
     git(
@@ -364,7 +458,7 @@ mod tests {
         g(&origin, &["add", "."]);
         g(&origin, &["commit", "--quiet", "-m", "two"]);
 
-        let c = prepare(&mine, None).unwrap();
+        let c = prepare(&mine).unwrap();
         assert_eq!(c.target, "origin/main");
         assert!(
             c.dir.join("b.py").exists(),
@@ -374,13 +468,36 @@ mod tests {
         assert_eq!(current_branch(&mine).as_deref(), Some("feature"));
         assert!(mine.join("wip.py").exists(), "your folder is untouched");
         g(&mine, &["checkout", "--quiet", "main"]);
-        assert!(
-            prepare(&mine, None).is_ok(),
-            "a second run reuses the worktree"
-        );
+        assert!(prepare(&mine).is_ok(), "a second run reuses the worktree");
         remove(&mine).unwrap();
         assert!(!c.dir.exists());
         assert_eq!(scan(&base, 1).len(), 2);
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn indexes_the_remotes_default_branch_whatever_its_name() {
+        let base = std::env::temp_dir().join(format!("comindly-trunk-{}", std::process::id()));
+        let origin = base.join("origin");
+        std::fs::create_dir_all(&origin).unwrap();
+        let g = |d: &Path, a: &[&str]| git(d, a).unwrap();
+        g(&origin, &["init", "--quiet", "-b", "trunk"]);
+        g(&origin, &["config", "user.email", "t@t"]);
+        g(&origin, &["config", "user.name", "t"]);
+        std::fs::write(origin.join("a.py"), "x = 1\n").unwrap();
+        g(&origin, &["add", "."]);
+        g(&origin, &["commit", "--quiet", "-m", "one"]);
+        let url = format!("file://{}", origin.display());
+        let mine = base.join("managed").join("origin");
+        ensure_clone(&url, &mine).unwrap();
+        ensure_clone(&url, &mine).unwrap();
+        let (branch, commit) = remote_default(&mine).unwrap();
+        assert_eq!(branch, "trunk");
+        let c = prepare(&mine).unwrap();
+        assert_eq!(c.target, "origin/trunk");
+        assert_eq!(c.commit, commit[..c.commit.len()]);
+        assert!(c.dir.join("a.py").exists());
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::remove_dir_all(c.dir.parent().unwrap()).ok();
     }
 }

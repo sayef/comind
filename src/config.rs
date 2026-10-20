@@ -57,11 +57,11 @@ pub struct Config {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
 pub struct RepoEntry {
-    /// Your local clone.
+    /// The clone comindly indexes: yours, or its own under the data folder.
     pub path: String,
-    /// Branch to index (default: the remote's default branch).
+    /// Clone URL for a repository comindly keeps itself; cloned into `path` when missing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
+    pub remote: Option<String>,
 }
 
 /// Replace the repository list in `config.toml`.
@@ -73,8 +73,8 @@ pub fn set_repos(list: &[RepoEntry]) -> Result<()> {
     for r in list {
         let mut t = toml_edit::Table::new();
         t["path"] = toml_edit::value(r.path.as_str());
-        if let Some(b) = &r.branch {
-            t["branch"] = toml_edit::value(b.as_str());
+        if let Some(u) = &r.remote {
+            t["remote"] = toml_edit::value(u.as_str());
         }
         tables.push(t);
     }
@@ -255,9 +255,14 @@ pub fn ui_token() -> Result<String> {
     Ok(token)
 }
 
-/// `$XDG_DATA_HOME/comindly`, else `~/.local/share/comindly`.
-pub fn default_index_dir() -> String {
+/// `$XDG_DATA_HOME/comindly`, else `~/.local/share/comindly`: the default index and managed clones.
+pub fn data_dir() -> String {
     data_home().join("comindly").to_string_lossy().into_owned()
+}
+
+/// The default index location: the data folder itself.
+pub fn default_index_dir() -> String {
+    data_dir()
 }
 
 /// Write a commented `config.toml` with the resolved defaults. Without `force`, errors if one

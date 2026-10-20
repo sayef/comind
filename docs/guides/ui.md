@@ -31,21 +31,21 @@ new one.
   measured ones (hidden ones can be restored). `/conventions?repo=<name>` opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
-- **Settings → Repositories**: what is in the index, and where each repository lives on this machine. The index
-  records each repository's remote URL, so one indexed elsewhere shows **no folder here** with
-  **Locate** (point at your copy) and **Clone** (URL filled in); **Scan a folder** ticks the ones it
-  finds. comindly indexes all repositories together so cross-repo links stay complete, so **Index now**
-  waits until every indexed repository has a folder here, unless you choose to drop the missing ones.
-  Add a folder, scan a folder and tick the repositories you want (untick to drop one), or clone one by HTTPS or SSH URL with your own git access: your SSH key,
-  your git credential helper, or `GITLAB_TOKEN` / `GITHUB_TOKEN`. When none of these gives access to an
-  HTTPS repository, the app asks for an access token and hands it to git for that clone only; your
-  credential helper (on macOS the keychain) keeps it for later fetches. **Index now** fetches each
-  repository's default branch into comindly's own worktree (`~/.cache/comindly/worktrees`), so your
-  folders and branches are never touched, rebuilds the index and shows its progress; every page
-  then shows the new index. LLM summaries are opt-in per run. With **Re-index automatically** on
-  (`auto_index`), the app checks every freshness interval whether a default branch moved on the
-  remote (`git ls-remote`, nothing is downloaded) and re-indexes without LLM steps when one did. For
-  a shared index built by CI, change the list there.
+- **Settings → Repositories**: what is in the index, and where each repository lives on this machine.
+  **From GitHub or GitLab** lists the repositories of an organisation or group (github.com, GitHub
+  Enterprise, gitlab.com or a self-hosted GitLab, subgroups included) with your existing git login, a
+  `GITHUB_TOKEN` / `GITLAB_TOKEN`, or a token it asks for once (kept by your git credential helper). Tick
+  the ones you want: comindly keeps its own copies under `~/.local/share/comindly/repos` (cloned on the
+  first **Index now**, without file contents until needed), so you choose no folder. With **Share with the
+  team**, the list is stored in the team settings, and a colleague sees "The team has N repositories you
+  don't have here" with **Add them**. You can also add a folder, scan a folder, or clone a single
+  repository by URL. Every repository is always indexed at its remote's current default branch, whatever
+  it is called (main, master, trunk…), asked from the remote on each run. The index records each
+  repository's remote URL, so one indexed elsewhere shows **No folder here** with **Locate** and **Clone**.
+  comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
+  until every indexed repository has a folder here, unless you choose to drop the missing ones. With
+  **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
+  branch moved on the remote and re-indexes without LLM steps when one did.
 - **Settings**: the index location (with a connection test), the team settings (shared LLM and
   embedding model), your own API key, the AWS profile for S3, your name on ledger records, and how often to check for a
   new index version. Changing the index location switches the UI without a restart.

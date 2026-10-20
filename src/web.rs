@@ -186,6 +186,8 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/repos", get(repos::list).post(repos::change))
         .route("/api/repos/scan", post(repos::scan))
         .route("/api/repos/clone", post(repos::clone))
+        .route("/api/repos/remote/list", post(repos::remote_list))
+        .route("/api/repos/remote/add", post(repos::remote_add))
         .route("/api/index", get(repos::job).post(repos::start))
         .route("/api/index/watch", get(repos::watch_state))
         .route("/api/team", get(team::get).post(team::save))

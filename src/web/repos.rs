@@ -64,9 +64,11 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
                     "path": r.path,
                     "name": name,
                     "exists": p.join(".git").exists(),
-                    "branch": r.branch.clone().or_else(|| worktree::default_branch(p).ok()),
+                    "branch": worktree::default_branch(p).ok(),
+                    "managed": r.remote.is_some(),
+                    "cloned": p.exists(),
                     "your_branch": worktree::current_branch(p),
-                    "remote": worktree::remote_url(p),
+                    "remote": r.remote.clone().or_else(|| worktree::remote_url(p)),
                     "symbols": symbols.get(&name),
                     "indexed_commit": commits.get(&name),
                 })
@@ -79,9 +81,26 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
         .iter()
         .filter_map(|r| r["name"].as_str().map(str::to_string))
         .collect();
+    let mine: Vec<String> = Config::load()
+        .repos
+        .iter()
+        .filter_map(|r| {
+            r.remote
+                .clone()
+                .or_else(|| worktree::remote_url(Path::new(&r.path)))
+        })
+        .map(|u| same_repo(&u))
+        .collect();
+    let team_missing: Vec<String> = crate::team::current()
+        .map(|t| t.repos)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|u| !mine.contains(&same_repo(u)))
+        .collect();
     Json(json!({
         "repos": rows,
         "unlisted": unlisted(&indexed, &meta, &listed),
+        "team_missing": team_missing,
         "root": s.data.root,
     }))
 }
@@ -165,7 +184,7 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
                 "{path} is not a git repository"
             );
             if !list.iter().any(|r| absolute(&r.path) == path) {
-                list.push(RepoEntry { path, branch: None });
+                list.push(RepoEntry { path, remote: None });
             }
         }
         let gone: Vec<String> = c.remove.iter().map(|p| absolute(p)).collect();
@@ -211,7 +230,7 @@ pub(super) async fn clone(Json(q): Json<CloneQ>) -> impl IntoResponse {
         let mut list = Config::load().repos;
         list.push(RepoEntry {
             path: dest.to_string_lossy().into_owned(),
-            branch: None,
+            remote: None,
         });
         crate::config::set_repos(&list)?;
         let note = if given && !worktree::has_credential_helper() {
@@ -404,11 +423,11 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
         for r in &repos {
             let p = Path::new(&r.path);
             let name = worktree::name(p);
-            let branch = match &r.branch {
-                Some(b) => b.clone(),
-                None => worktree::default_branch(p)?,
-            };
-            let head = worktree::remote_head(p, &branch)?;
+            if !p.exists() {
+                out.push(name);
+                continue;
+            }
+            let (_, head) = worktree::remote_default(p)?;
             if indexed
                 .get(&name)
                 .is_none_or(|c| !head.starts_with(c.as_str()) && !c.starts_with(&head))
@@ -446,4 +465,142 @@ fn strip_ansi(s: &str) -> String {
         }
     }
     out
+}
+
+/// A clone URL reduced to host and path, so HTTPS and SSH forms of one repository compare equal.
+fn same_repo(url: &str) -> String {
+    crate::hosting::managed_path(url)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| url.to_string())
+}
+
+#[derive(Deserialize)]
+pub(super) struct RemoteListQ {
+    url: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// The repositories of a GitHub organisation or GitLab group, with the ones already here marked.
+pub(super) async fn remote_list(Json(q): Json<RemoteListQ>) -> impl IntoResponse {
+    let run = async {
+        let source = crate::hosting::parse(&q.url)?;
+        let given = q
+            .token
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| worktree::Auth {
+                username: q
+                    .username
+                    .filter(|u| !u.trim().is_empty())
+                    .unwrap_or_else(|| worktree::token_user(&source.host).into()),
+                token: t.trim().to_string(),
+            });
+        let host = source.host.clone();
+        let auth = match given.clone() {
+            Some(a) => Some(a),
+            None => tokio::task::spawn_blocking(move || worktree::stored_auth(&host)).await?,
+        };
+        let repos = crate::hosting::list(&source, auth.as_ref()).await?;
+        if let Some(a) = given {
+            let host = source.host.clone();
+            tokio::task::spawn_blocking(move || worktree::approve(&host, &a)).await?;
+        }
+        let here: Vec<String> = Config::load()
+            .repos
+            .iter()
+            .filter_map(|r| {
+                r.remote
+                    .clone()
+                    .or_else(|| worktree::remote_url(Path::new(&r.path)))
+            })
+            .map(|u| same_repo(&u))
+            .collect();
+        let rows: Vec<Value> = repos
+            .iter()
+            .map(|r| {
+                let mut v = json!(r);
+                v["listed"] = json!(here.contains(&same_repo(&r.clone_url)));
+                v
+            })
+            .collect();
+        anyhow::Ok(json!({
+            "ok": true,
+            "provider": source.provider,
+            "host": source.host,
+            "owner": source.owner,
+            "repos": rows,
+        }))
+    };
+    match run.await {
+        Ok(v) => (StatusCode::OK, Json(v)),
+        Err(e) => match e.downcast_ref::<worktree::NeedsToken>() {
+            Some(n) => (
+                StatusCode::UNAUTHORIZED,
+                Json(
+                    json!({"ok": false, "message": e.to_string(), "needs_token": {"host": n.host, "username": n.username}}),
+                ),
+            ),
+            None => fail(e),
+        },
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct RemoteAddQ {
+    urls: Vec<String>,
+    #[serde(default)]
+    share: bool,
+}
+
+/// Add repositories by clone URL; comindly clones them into its own folder when indexing.
+pub(super) async fn remote_add(Cur(s): Cur, Json(q): Json<RemoteAddQ>) -> impl IntoResponse {
+    let run = async {
+        let mut list = Config::load().repos;
+        let mut added = 0;
+        for url in &q.urls {
+            let path = crate::hosting::managed_path(url)?
+                .to_string_lossy()
+                .into_owned();
+            if !list.iter().any(|r| r.path == path) {
+                list.push(RepoEntry {
+                    path,
+                    remote: Some(url.clone()),
+                });
+                added += 1;
+            }
+        }
+        crate::config::set_repos(&list)?;
+        let mut shared = 0;
+        if q.share {
+            let root = s.data.root.clone().context("no index to share with")?;
+            let stored = crate::team::load(&root).await?;
+            let mut settings = stored.settings;
+            for url in &q.urls {
+                if !settings
+                    .repos
+                    .iter()
+                    .any(|u| same_repo(u) == same_repo(url))
+                {
+                    settings.repos.push(url.clone());
+                    shared += 1;
+                }
+            }
+            if shared > 0 {
+                crate::team::save(&root, &settings, stored.version).await?;
+                crate::team::set_current(settings);
+            }
+        }
+        anyhow::Ok(match (added, q.share) {
+            (_, true) => format!(
+                "added {added}; {shared} new for the team. Index now clones and indexes them"
+            ),
+            _ => format!("added {added}. Index now clones and indexes them"),
+        })
+    };
+    match run.await {
+        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
+        Err(e) => fail(e),
+    }
 }

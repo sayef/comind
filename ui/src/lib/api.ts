@@ -247,8 +247,25 @@ export interface RepoRow {
   branch: string | null;
   your_branch: string | null;
   remote: string | null;
+  /** A repository comindly clones and keeps itself. */
+  managed: boolean;
+  cloned: boolean;
   symbols: number | null;
   indexed_commit: string | null;
+}
+
+/** A repository listed by GitHub or GitLab. */
+export interface RemoteRepo {
+  name: string;
+  full_path: string;
+  clone_url: string;
+  description: string | null;
+  default_branch: string | null;
+  archived: boolean;
+  fork: boolean;
+  last_activity: string | null;
+  size_kib: number | null;
+  listed: boolean;
 }
 
 /** A repository in the index with no folder in your list. */
@@ -329,7 +346,10 @@ export const api = {
   packages: () => get<Package[]>("/api/packages"),
   setup: () => get<Setup>("/api/setup"),
   settings: () => get<Settings>("/api/settings"),
-  repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; root: string | null }>("/api/repos"),
+  repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/repos"),
+  remoteRepos: (url: string, auth?: { username: string; token: string }) =>
+    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[] }>("/api/repos/remote/list", { url, ...auth }),
+  addRemoteRepos: (urls: string[], share: boolean) => post("/api/repos/remote/add", { urls, share }),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }),
   cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),

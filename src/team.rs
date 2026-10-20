@@ -30,6 +30,9 @@ pub struct TeamSettings {
     pub flows: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guide: Option<bool>,
+    /// Clone URLs of the team's repositories, so everyone can get the same set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repos: Vec<String>,
 }
 
 /// The stored settings with the table version they came from and who saved them.

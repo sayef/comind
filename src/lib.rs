@@ -19,6 +19,7 @@ pub mod doctor;
 pub mod credentials;
 pub mod facts;
 pub mod git;
+pub mod hosting;
 pub mod lang;
 pub mod manifests;
 pub mod packages;

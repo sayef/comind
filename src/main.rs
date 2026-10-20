@@ -410,9 +410,6 @@ enum ReposWhat {
     Add {
         #[arg(required = true)]
         paths: Vec<String>,
-        /// Index this branch instead of the default
-        #[arg(long)]
-        branch: Option<String>,
     },
     /// Remove repositories by name or folder
     Remove {
@@ -1577,11 +1574,7 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
             }
             for r in &list {
                 let p = Path::new(&r.path);
-                let branch = r
-                    .branch
-                    .clone()
-                    .or_else(|| comindly::worktree::default_branch(p).ok())
-                    .unwrap_or_else(|| "?".into());
+                let branch = comindly::worktree::default_branch(p).unwrap_or_else(|_| "?".into());
                 comindly::ui::field(
                     &comindly::worktree::name(p),
                     &format!("{}  (indexes {branch})", r.path),
@@ -1601,18 +1594,32 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
             }
             return ExitCode::SUCCESS;
         }
-        Some(ReposWhat::Add { paths, branch }) => {
+        Some(ReposWhat::Add { paths }) => {
             for p in paths {
-                let path = absolute(&p);
-                if !Path::new(&path).join(".git").exists() {
-                    comindly::ui::err(&format!("{p} is not a git repository"));
-                    return ExitCode::FAILURE;
-                }
-                if !list.iter().any(|r| absolute(&r.path) == path) {
-                    list.push(RepoEntry {
-                        path,
-                        branch: branch.clone(),
-                    });
+                let entry = if p.contains("://") || p.starts_with("git@") {
+                    match comindly::hosting::managed_path(&p) {
+                        Ok(dest) => RepoEntry {
+                            path: dest.to_string_lossy().into_owned(),
+                            remote: Some(p.clone()),
+                        },
+                        Err(e) => {
+                            comindly::ui::err(&format!("{e:#}"));
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                } else {
+                    let path = absolute(&p);
+                    if !Path::new(&path).join(".git").exists() {
+                        comindly::ui::err(&format!("{p} is not a git repository"));
+                        return ExitCode::FAILURE;
+                    }
+                    RepoEntry { path, remote: None }
+                };
+                if !list
+                    .iter()
+                    .any(|r| absolute(&r.path) == absolute(&entry.path))
+                {
+                    list.push(entry);
                 }
             }
             true
@@ -2463,7 +2470,14 @@ fn configured_checkouts(cfg: &comindly::config::Config) -> anyhow::Result<Vec<St
     let mut out = Vec::new();
     for r in &cfg.repos {
         let path = comindly::config::expand_tilde(&r.path);
-        let c = comindly::worktree::prepare(Path::new(&path), r.branch.as_deref())
+        if let Some(url) = &r.remote {
+            if !Path::new(&path).exists() {
+                comindly::ui::note(&format!("cloning {url}"));
+            }
+            comindly::worktree::ensure_clone(url, Path::new(&path))
+                .map_err(|e| anyhow::anyhow!("{url}: {e:#}"))?;
+        }
+        let c = comindly::worktree::prepare(Path::new(&path))
             .map_err(|e| anyhow::anyhow!("{path}: {e:#}"))?;
         comindly::ui::ok(&format!(
             "{} @ {} {}",

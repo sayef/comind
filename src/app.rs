@@ -22,6 +22,7 @@ enum Msg {
 /// Open the window and serve the index at `root` into it; returns when the window closes.
 pub fn run(root: String) -> anyhow::Result<()> {
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
+    dock_icon();
     let proxy = event_loop.create_proxy();
 
     let key = |k: &str| k.parse::<Accelerator>().ok();
@@ -217,3 +218,17 @@ margin:0 auto 14px;animation:p 1s ease-in-out infinite alternate}@keyframes p{fr
 @media (prefers-color-scheme:dark){body{color:#9aa4b2;background:#151a22}}",
     r#"</style></head><body><div><div class="dot"></div>Loading the index…</div></body></html>"#
 );
+
+/// Show comindly's icon in the Dock and the app switcher; a plain binary has no bundle icon.
+fn dock_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let data = NSData::with_bytes(include_bytes!("app-icon.png"));
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
+    }
+}

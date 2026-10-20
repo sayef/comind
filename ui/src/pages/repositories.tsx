@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, FolderOpen, FolderSearch, GitBranch, GitFork, Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, FolderOpen, FolderSearch, GitBranch, GitFork, Loader2, Play, Plus, Trash2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
@@ -316,10 +316,132 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   );
 }
 
+/** Pick repositories from a GitHub organisation or GitLab group; comindly clones them itself. */
+function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const qc = useQueryClient();
+  const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
+  const hasTeam = team.data?.version != null;
+  const [url, setUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [token, setToken] = useState("");
+  const [asked, setAsked] = useState<NeedsToken | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState("");
+  const [share, setShare] = useState(true);
+  const list = useMutation({
+    mutationFn: () => api.remoteRepos(url, asked && token.trim() ? { username, token } : undefined),
+    onSuccess: (r) => (setAsked(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
+    onError: (e) => {
+      const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
+      if (need) (setAsked(need), setUsername((u) => u || need.username));
+    },
+  });
+  const add = useMutation({
+    mutationFn: () => api.addRemoteRepos([...checked], hasTeam && share),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), onOpenChange(false), list.reset()),
+  });
+  const found = list.data?.repos ?? [];
+  const shown = found.filter((r) => !filter || `${r.full_path} ${r.description ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
+  const toggle = (u: string) =>
+    setChecked((c) => {
+      const n = new Set(c);
+      if (n.has(u)) n.delete(u);
+      else n.add(u);
+      return n;
+    });
+  const picked = found.filter((r) => checked.has(r.clone_url) && !r.listed).length;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl p-5">
+        <DialogTitle className="text-base font-semibold">From GitHub or GitLab</DialogTitle>
+        <p className="mt-1 text-sm text-muted-foreground">
+          An organisation or group, such as github.com/acme or gitlab.com/acme/platform. comindly keeps its own copies and always
+          indexes each repository's default branch.
+        </p>
+        <div className="mt-4 flex gap-2">
+          <Input
+            value={url}
+            onChange={(e) => (setUrl(e.target.value), setAsked(null))}
+            onKeyDown={(e) => e.key === "Enter" && url.trim() && list.mutate()}
+            placeholder="github.com/acme"
+            className="font-mono text-xs"
+          />
+          <Button variant="outline" disabled={!url.trim() || list.isPending || (!!asked && !token.trim())} onClick={() => list.mutate()}>
+            {list.isPending && <Loader2 className="animate-spin" />} List
+          </Button>
+        </div>
+        {asked && (
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+            <p className="text-xs text-muted-foreground">
+              {asked.host} needs an access token that can read these repositories. Your git credential helper keeps it afterwards.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="text-xs" />
+              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Access token" autoFocus />
+            </div>
+          </div>
+        )}
+        {!asked && <div className="mt-2"><Message error={list.error} /></div>}
+        {found.length > 0 && (
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${found.length} repositories`} className="h-8 max-w-xs text-xs" />
+              <Button variant="ghost" size="sm" onClick={() => setChecked(new Set(shown.filter((r) => !r.listed).map((r) => r.clone_url)))}>
+                Select shown
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setChecked(new Set())}>
+                Select none
+              </Button>
+            </div>
+            <div className="max-h-80 overflow-y-auto rounded-lg border">
+              {shown.map((r) => (
+                <label key={r.clone_url} className={`flex cursor-pointer items-start gap-3 border-b px-3 py-2 last:border-0 ${r.listed ? "opacity-60" : ""}`}>
+                  <input type="checkbox" className="mt-1" disabled={r.listed} checked={r.listed || checked.has(r.clone_url)} onChange={() => toggle(r.clone_url)} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-medium">{r.name}</span>
+                      <span className="truncate font-mono text-[11px] text-muted-foreground">{r.full_path}</span>
+                      {r.listed && <Badge variant="outline">Added</Badge>}
+                      {r.archived && <Badge variant="outline">Archived</Badge>}
+                      {r.fork && <Badge variant="outline">Fork</Badge>}
+                    </div>
+                    {r.description && <div className="truncate text-xs text-muted-foreground">{r.description}</div>}
+                  </div>
+                  <div className="shrink-0 text-right text-[11px] text-muted-foreground">
+                    {r.last_activity && <div>{new Date(r.last_activity).toLocaleDateString()}</div>}
+                    {r.size_kib != null && <div>{r.size_kib >= 1024 ? `${Math.round(r.size_kib / 1024)} MB` : `${r.size_kib} KB`}</div>}
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+              {hasTeam ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
+                  Share with the team
+                </label>
+              ) : (
+                <span />
+              )}
+              <Button variant="brand" disabled={picked === 0 || add.isPending} onClick={() => add.mutate()}>
+                {add.isPending && <Loader2 className="animate-spin" />} Add {picked} {picked === 1 ? "repository" : "repositories"}
+              </Button>
+            </div>
+            <Message error={add.error} />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function RepositoriesPage() {
   const qc = useQueryClient();
   const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos });
-  const [dialog, setDialog] = useState<"add" | "scan" | "clone" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "scan" | "clone" | "org" | null>(null);
+  const teamMissing = repos.data?.team_missing ?? [];
+  const addTeam = useMutation({ mutationFn: () => api.addRemoteRepos(teamMissing, false), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
   const [cloneUrl, setCloneUrl] = useState<string>();
   const remove = useMutation({ mutationFn: (path: string) => api.changeRepos({ remove: [path] }), onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }) });
   const remote = useMemo(() => repos.data?.root?.includes("://"), [repos.data]);
@@ -340,6 +462,9 @@ export function RepositoriesPage() {
           <Button variant="outline" onClick={() => setDialog("add")}>
             <Plus /> Add folder
           </Button>
+          <Button variant="brand" onClick={() => setDialog("org")}>
+            <Building2 /> From GitHub or GitLab
+          </Button>
           <Button variant="outline" onClick={() => setDialog("scan")}>
             <FolderSearch /> Scan a folder
           </Button>
@@ -348,6 +473,18 @@ export function RepositoriesPage() {
           </Button>
         </div>
       </div>
+
+      {teamMissing.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand/40 bg-brand/5 p-3 text-sm">
+          <Users className="size-4 shrink-0 text-brand" />
+          <span className="min-w-0 flex-1">
+            The team has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
+          </span>
+          <Button variant="outline" size="sm" disabled={addTeam.isPending} onClick={() => addTeam.mutate()}>
+            Add {teamMissing.length === 1 ? "it" : "them"}
+          </Button>
+        </div>
+      )}
 
       {unlisted.length > 0 ? (
         <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
@@ -373,18 +510,24 @@ export function RepositoriesPage() {
               <div className="flex items-center gap-2">
                 <RepoDot repo={r.name} />
                 <span className="font-medium">{r.name}</span>
-                {!r.exists && <Badge variant="danger">Folder missing</Badge>}
+                {r.managed && !r.cloned && <Badge variant="outline">Cloned when indexing</Badge>}
+                {!r.managed && !r.exists && <Badge variant="danger">Folder missing</Badge>}
                 {r.symbols == null ? <Badge variant="outline">Not indexed yet</Badge> : <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
               </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{r.path}</div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={r.path}>
+                {r.managed ? r.remote : r.path}
+              </div>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="What comindly indexes">
-              <GitBranch className="size-3.5" /> Indexes <span className="font-mono text-foreground">origin/{r.branch ?? "?"}</span>
+              <GitBranch className="size-3.5" /> Indexes{" "}
+              {r.branch ? <span className="font-mono text-foreground">origin/{r.branch}</span> : "the default branch"}
               {r.indexed_commit && <span className="font-mono">@ {r.indexed_commit.slice(0, 7)}</span>}
             </div>
-            <div className="text-xs text-muted-foreground" title="Your own checkout, left as it is">
-              Yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
-            </div>
+            {!r.managed && (
+              <div className="text-xs text-muted-foreground" title="Your own checkout, left as it is">
+                Yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
+              </div>
+            )}
             <Button variant="ghost" size="icon" className="size-8" aria-label="Remove" title="Remove from the list (your folder stays)" onClick={() => remove.mutate(r.path)}>
               <Trash2 />
             </Button>
@@ -420,6 +563,7 @@ export function RepositoriesPage() {
 
       <AddDialog open={dialog === "add"} onOpenChange={close} />
       <ScanDialog open={dialog === "scan"} onOpenChange={close} indexed={unlisted.map((r) => r.name)} />
+      <OrgDialog open={dialog === "org"} onOpenChange={close} />
       <CloneDialog open={dialog === "clone"} onOpenChange={(o) => (close(o), !o && setCloneUrl(undefined))} initialUrl={cloneUrl} />
     </div>
   );
