@@ -596,7 +596,9 @@ fn org(
         .collect();
     let edges: Vec<Value> = links
         .into_iter()
-        .map(|((a, b, k), (n, via))| json!({"src": a, "dst": b, "kind": k, "weight": n, "via": via}))
+        .map(
+            |((a, b, k), (n, via))| json!({"src": a, "dst": b, "kind": k, "weight": n, "via": via}),
+        )
         .collect();
     json!({"nodes": nodes, "edges": edges})
 }
