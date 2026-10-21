@@ -19,9 +19,12 @@ so the plain address works as a bookmark afterwards. Other programs and web page
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
 new one.
 
-- **Overview**: counts, the org map (repositories and the service contracts between them; click a
-  repository to see what a change there can reach), a version slider to compare with earlier index
-  versions, symbols per repository and version skew.
+- **Overview**: counts, the org map, a version slider to compare with earlier index versions, what needs
+  attention, the flows that reach furthest, symbols per repository and version skew. The org map is a
+  tree from the entry points (or any repository you pick) to what each uses, or turned around to what
+  uses it; click a box to open it, and each branch names the contract it goes through. A repository
+  already shown elsewhere is dashed, and where repositories depend on each other in a circle an amber
+  line loops back; **↺ cycles** lists them all.
 - **Contracts**: every route, queue, topic, bucket and table with its providers and consumers, filtered
   by type, by whether both sides are indexed, and by name.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine

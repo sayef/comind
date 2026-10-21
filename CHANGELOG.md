@@ -35,8 +35,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- The org map as layers from entry points to shared foundations, or as a dependency matrix for large
-  organisations; picking a repository shows what uses it and what it uses, through which contracts.
+- The org map as a tree from the entry points (or any repository) to what each uses, or what uses it,
+  opened box by box with the contract on each branch; cycles between repositories are found, looped back
+  in amber and listed.
 - A new look for the app: dark by default with a light variant, Geist and Geist Mono bundled with the
   app, an Overview that puts the org map next to what needs attention and the flows that reach
   furthest, and the index version and its age in the header.

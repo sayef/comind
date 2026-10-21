@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { FocusView, LayersView, MatrixView } from "@/components/org-views";
+import { type Direction, TreeView, useOrg } from "@/components/org-views";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,15 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
+
+/** A per-browser preference, or `fallback` when storage is unavailable. */
+function remembered(key: string, fallback: string) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -39,21 +48,6 @@ function Panel({ title, to, link, children }: { title: string; to: string; link:
   );
 }
 
-/** Repos that depend on `repo`, directly or transitively, with their hop count. */
-function dependents(map: OrgMap, repo: string) {
-  const seen = new Map<string, number>();
-  const queue: [string, number][] = [[repo, 0]];
-  while (queue.length) {
-    const [r, d] = queue.shift()!;
-    for (const e of map.edges) {
-      if (e.dst === r && e.src !== repo && !seen.has(e.src)) {
-        seen.set(e.src, d + 1);
-        queue.push([e.src, d + 1]);
-      }
-    }
-  }
-  return seen;
-}
 
 function linkDiff(then: OrgMap, now: OrgMap) {
   const key = (e: OrgMap["edges"][number]) => `${e.src} → ${e.dst} (${e.kind})`;
@@ -148,21 +142,33 @@ export function OverviewPage() {
   });
   const map = at !== null && at !== last ? past.data : latest.data;
   const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState<"layers" | "matrix">(() => {
-    try {
-      return localStorage.getItem("comindly.orgview") === "matrix" ? "matrix" : "layers";
-    } catch {
-      return "layers";
-    }
-  });
+  const org = useOrg(map);
+  const [start, setStart] = useState(() => remembered("comindly.org.start", "*"));
+  const [dir, setDir] = useState<Direction>(() => (remembered("comindly.org.dir", "uses") === "usedBy" ? "usedBy" : "uses"));
+  const [open, setOpen] = useState<Set<string> | null>(null);
+  const [showCycles, setShowCycles] = useState(false);
   useEffect(() => {
     try {
-      localStorage.setItem("comindly.orgview", view);
+      localStorage.setItem("comindly.org.start", start);
+      localStorage.setItem("comindly.org.dir", dir);
     } catch {
       // storage may be unavailable
     }
-  }, [view]);
-  const reach = useMemo(() => (map && selected ? dependents(map, selected) : null), [map, selected]);
+  }, [start, dir]);
+  const roots = useMemo(() => {
+    if (start !== "*" && org.repos.includes(start)) return [start];
+    const all = dir === "uses" ? org.entries : org.foundations;
+    return all.length ? all : org.repos.slice(0, 1);
+  }, [org, start, dir]);
+  // Until someone opens or closes a box, each starting repository shows what it uses directly.
+  const openKeys = useMemo(() => open ?? new Set(roots), [open, roots]);
+  const toggle = (key: string) => {
+    const next = new Set(openKeys);
+    if (next.has(key)) for (const k of [...next]) k === key || k.startsWith(`${key}/`) ? next.delete(k) : null;
+    else next.add(key);
+    setOpen(next);
+    setSelected(key);
+  };
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
@@ -295,47 +301,82 @@ export function OverviewPage() {
 
       <div className="flex flex-col gap-6">
         <Card className="min-w-0 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
-            <h2 className="text-sm font-semibold">Org map</h2>
-            <div className="flex items-center gap-4">
-              <div className="hidden items-center gap-4 font-mono text-[11px] text-muted-foreground sm:flex">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-0.5 w-3.5 bg-muted-foreground/70" /> code
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-0.5 w-3.5 bg-brand" /> contract
-                </span>
+          <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
+            <h2 className="flex-1 text-sm font-semibold">Org map</h2>
+            {org.cycles.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowCycles((v) => !v)}
+                  className="flex h-8 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2.5 text-xs font-medium text-warning"
+                >
+                  ↺ {org.cycles.length} {org.cycles.length === 1 ? "cycle" : "cycles"}
+                </button>
+                {showCycles && (
+                  <div className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg border bg-popover p-1.5 shadow-lg">
+                    <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                      These repositories depend on each other in a circle, so none of them can change or release on its own.
+                    </p>
+                    {org.cycles.map((c) => (
+                      <button
+                        key={c.join()}
+                        onClick={() => (setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
+                        className="rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-muted"
+                      >
+                        {c.join(" ⇄ ")}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label="Map view">
-                {(["layers", "matrix"] as const).map((v) => (
-                  <button
-                    key={v}
-                    aria-pressed={view === v && !selected}
-                    onClick={() => (setView(v), setSelected(null))}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${view === v && !selected ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    {v}
-                  </button>
+            )}
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Start from
+              <select
+                value={start}
+                onChange={(e) => (
+                  setStart(e.target.value),
+                  setOpen(new Set(e.target.value === "*" ? [] : [e.target.value])),
+                  setSelected(null)
+                )}
+                className="h-8 rounded-md border border-input bg-card px-2 text-[13px] text-foreground"
+              >
+                <option value="*">{dir === "uses" ? "All entry points" : "All shared code"}</option>
+                {org.repos.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
                 ))}
-              </div>
+              </select>
+            </label>
+            <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label="Direction">
+              {(
+                [
+                  ["uses", "What it uses →"],
+                  ["usedBy", "← What uses it"],
+                ] as const
+              ).map(([d, label]) => (
+                <button
+                  key={d}
+                  aria-pressed={dir === d}
+                  onClick={() => (setDir(d), setOpen(new Set(start === "*" ? [] : [start])), setSelected(null))}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${dir === d ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           {!map ? (
             <Skeleton className="h-[420px] rounded-none" />
-          ) : selected ? (
-            <FocusView map={map} repo={selected} reach={reach ?? new Map()} onPick={setSelected} onBack={() => setSelected(null)} />
-          ) : view === "layers" ? (
-            <LayersView map={map} onPick={setSelected} />
+          ) : roots.length === 0 ? (
+            <p className="px-5 py-8 text-sm text-muted-foreground">No links between the indexed repositories yet.</p>
           ) : (
-            <MatrixView map={map} onPick={setSelected} />
+            <TreeView org={org} roots={roots} dir={dir} open={openKeys} onToggle={toggle} selected={selected} />
           )}
-          {!selected && (
-            <div className="border-t px-5 py-3 font-mono text-xs text-muted-foreground">
-              {view === "layers"
-                ? "Entry points at the top, shared foundations at the bottom; a line means the upper repository uses the lower. Point at one to see its links; pick one to focus on it."
-                : "Pick a repository to see what uses it, what it uses, and through which contracts."}
-            </div>
-          )}
+          <div className="border-t px-5 py-3 font-mono text-xs text-muted-foreground">
+            Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an
+            amber line loops back where repositories depend on each other in a circle.
+          </div>
           {versions.data && versions.data.length > 1 && (
             <div className="border-t px-5 py-3.5">
               <div className="flex items-center justify-between">
