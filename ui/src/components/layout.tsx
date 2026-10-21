@@ -88,8 +88,9 @@ export function Layout() {
           <Logo className="mx-auto size-10" />
           <h1 className="mt-5 text-lg font-semibold tracking-tight">Open comindly from its link</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            comindly only answers browsers that hold its access token. Run <code className="font-mono text-foreground">comindly ui --web --open</code>,
-            or open the link it prints once; after that, this address works as a bookmark.
+            comindly only answers browsers that hold its access token. Run{" "}
+            <code className="font-mono text-foreground">comindly ui --web --open</code>, or open the link it prints once; after that, this
+            address works as a bookmark.
           </p>
         </div>
       </div>
@@ -142,7 +143,12 @@ export function Layout() {
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={me.data.email}>
                 {me.data.email}
               </span>
-              <button onClick={signOut} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Sign out" title="Sign out">
+              <button
+                onClick={signOut}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Sign out"
+                title="Sign out"
+              >
                 <LogOut className="size-3.5" />
               </button>
             </div>
@@ -154,19 +160,21 @@ export function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-[60px] shrink-0 items-center gap-3 border-b px-4 md:px-7">
-          <Link to="/" className="md:hidden">
-            <Logo className="size-6" />
-          </Link>
+        <header className="grid h-[60px] shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b px-4 md:grid-cols-[1fr_minmax(0,560px)_1fr] md:px-7">
+          <div>
+            <Link to="/" className="md:hidden">
+              <Logo className="size-6" />
+            </Link>
+          </div>
           <button
             onClick={() => setPalette(true)}
-            className="flex h-10 w-full max-w-[560px] min-w-0 items-center gap-2.5 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input"
+            className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input"
           >
             <Search className="size-4 shrink-0" />
             <span className="flex-1 truncate text-left">Search symbols, files, contracts</span>
             <kbd className="hidden rounded border border-input px-1.5 py-0.5 font-mono text-[10.5px] sm:inline">⌘K</kbd>
           </button>
-          <div className="ml-auto flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center justify-end gap-3">
             <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             {version > 0 && (
@@ -187,7 +195,10 @@ export function Layout() {
               to={to}
               end={to === "/"}
               className={({ isActive }) =>
-                cn("rounded-md px-3 py-1.5 text-xs whitespace-nowrap", isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")
+                cn(
+                  "rounded-md px-3 py-1.5 text-xs whitespace-nowrap",
+                  isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground",
+                )
               }
             >
               {label}
