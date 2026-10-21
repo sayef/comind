@@ -2,7 +2,8 @@
 
 comindly runs as a server for a team from one container image: members sign in by email or with
 codes, admins invite people and manage the tokens it uses, and the index lives in your
-[storage](storage.md). Docker, Kubernetes, ECS, Cloud Run or a VM all work the same way.
+[storage](storage.md). Agents connect to it over HTTP. Docker, Kubernetes, ECS, Cloud Run or a VM
+all work the same way, with the image `ghcr.io/sayef/comindly` (amd64 and arm64, a tag per release).
 
 ## Settings
 
@@ -23,6 +24,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_INDEX_DIR` | yes | Where the index lives (see [Storage](storage.md)). |
 | `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. |
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
+| `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
 Everything else (members, sessions, personal tokens, stored secrets) is in a SQLite file under
 `/data`. Keep that volume, and back it up with the index.
@@ -39,12 +41,26 @@ for a click, so mail scanners cannot use it up.
 address, within 7 days). With it, the person signs in for the first time and receives their own
 sign-in code, shown once, which they use with their email address from then on. They can make a new
 one under Settings → Your access; an admin can reset it for someone who lost theirs. Each new code
-signs the person out everywhere else. Codes are generated, never chosen; five wrong ones lock an
-address for 15 minutes.
+signs the person out everywhere else. Codes are generated, never chosen; five wrong ones lock that
+address for 15 minutes from the same client, and fifty from anywhere lock it for everyone.
 
 **In both**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
-sessions last 30 days; agents and scripts use a personal access token from Settings → Your access,
-sent as `Authorization: Bearer …`; removing a member ends their sessions, codes and tokens.
+sessions last 30 days; removing a member ends their sessions, codes and tokens.
+
+## Agents
+
+Agents reach the server's tools at `https://<your server>/mcp` (MCP over HTTP) with a personal
+access token from Settings → Your access, which also shows the command or config for Claude Code,
+Cursor, Codex and VS Code. For Claude Code:
+
+```sh
+claude mcp add --transport http --scope user comindly https://comindly.example.com/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Nothing is installed on the developer's machine, and no storage credentials leave the server.
+Records an agent writes say which member it works for; after each re-index, agents get the new
+index without reconnecting.
 
 Admins manage repositories, indexing, members and the server's tokens; members use everything
 else. Ledger records written in the app carry the member's address.

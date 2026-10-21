@@ -95,11 +95,21 @@ impl ComindlyServer {
         }
     }
 
-    /// The calling agent: `COMINDLY_AGENT`, else the client name from the MCP handshake.
-    fn agent(peer: &rmcp::Peer<rmcp::RoleServer>) -> crate::ledger::Provenance {
+    /// The calling agent: `COMINDLY_AGENT`, else the client name from the MCP handshake; over
+    /// HTTP on a server, working for the member whose token it uses.
+    fn agent(ctx: &rmcp::service::RequestContext<rmcp::RoleServer>) -> crate::ledger::Provenance {
         let name = crate::config::env("COMINDLY_AGENT")
-            .or_else(|| Some(peer.peer_info()?.client_info.name.clone()));
-        crate::ledger::Provenance::agent("mcp", name)
+            .or_else(|| Some(ctx.peer.peer_info()?.client_info.name.clone()));
+        let mut p = crate::ledger::Provenance::agent("mcp", name);
+        let who = ctx
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<crate::server::Who>());
+        if let Some(w) = who {
+            p.actor = format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]);
+            p.name = Some(w.email.clone());
+        }
+        p
     }
 
     /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
@@ -851,10 +861,10 @@ impl ComindlyServer {
     )]
     async fn remember(
         &self,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<RememberParam>,
     ) -> CallToolResult {
-        let result = self.write_record(p, Self::agent(&peer)).await;
+        let result = self.write_record(p, Self::agent(&ctx)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -869,10 +879,10 @@ impl ComindlyServer {
     )]
     async fn review(
         &self,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<ReviewParam>,
     ) -> CallToolResult {
-        let result = self.write_review(p, Self::agent(&peer)).await;
+        let result = self.write_review(p, Self::agent(&ctx)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -1406,6 +1416,16 @@ fn md_guide(d: &GuideDto) -> String {
 /// client disconnects. `markdown` controls whether tool results are handed back as markdown
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
+    let service = load(uri, markdown)
+        .await?
+        .serve(rmcp::transport::io::stdio())
+        .await?;
+    service.waiting().await?;
+    Ok(())
+}
+
+/// Load the graph, enrichment, conventions and search model for `uri` into a server.
+pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let mut conventions = match crate::index::read_facts(uri).await {
         Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
@@ -1479,9 +1499,31 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
         edges: Arc::new(edges),
         markdown,
     };
-    let service = server.serve(rmcp::transport::io::stdio()).await?;
-    service.waiting().await?;
-    Ok(())
+    Ok(server)
+}
+
+/// The server agents reach over HTTP; empty until an index exists, replaced after each re-index.
+pub type Shared = Arc<std::sync::RwLock<Option<ComindlyServer>>>;
+
+/// MCP over streamable HTTP for `hosts` (the server's own names), answering from `current`.
+pub fn http(
+    current: Shared,
+    hosts: Vec<String>,
+) -> rmcp::transport::streamable_http_server::StreamableHttpService<
+    ComindlyServer,
+    rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+> {
+    let config = rmcp::transport::streamable_http_server::StreamableHttpServerConfig::default()
+        .with_allowed_hosts(hosts);
+    rmcp::transport::streamable_http_server::StreamableHttpService::new(
+        move || {
+            current.read().ok().and_then(|s| s.clone()).ok_or_else(|| {
+                std::io::Error::other("no index yet: an admin indexes repositories first")
+            })
+        },
+        Default::default(),
+        config,
+    )
 }
 
 /// The MCP tools this server offers: `(name, description)`.

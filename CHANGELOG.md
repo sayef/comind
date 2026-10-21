@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - Server mode for teams (`COMINDLY_PUBLIC_URL`): sign-in entirely by email or entirely by codes
   admins hand out (`COMINDLY_SIGN_IN`), invitations tied to one address, admins and members, personal access tokens for agents, and the server's GitHub, GitLab
   and LLM tokens kept encrypted or taken from the deployment's secrets (`*_FILE` too).
+- Agents connect to a server over HTTP at `/mcp` with a personal access token; the access page shows
+  the setup for Claude Code, Cursor, Codex and VS Code.
+- Each release publishes a container image for amd64 and arm64 to `ghcr.io/sayef/comindly`.
+- `comindly doctor` points out `aws_profile` and `sso_auto_login` left in `config.toml` from 0.1.0.
 - A container image (`Dockerfile`) and a local stack (`compose.yaml`, `scripts/docker-local.sh`) with
   an S3-compatible store and a mail catcher.
 - Settings → Repositories → **From GitHub or GitLab**: list an organisation or group (github.com, GitHub

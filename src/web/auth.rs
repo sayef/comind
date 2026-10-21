@@ -94,7 +94,7 @@ pub(super) async fn guard(mut req: Request, next: Next) -> Response {
         return unavailable();
     };
     let path = req.uri().path().to_string();
-    let open = !path.starts_with("/api/")
+    let open = !(path.starts_with("/api/") || path.starts_with("/mcp"))
         || matches!(
             path.as_str(),
             "/api/auth/me" | "/api/auth/link" | "/api/auth/redeem" | "/api/auth/code"
@@ -125,6 +125,18 @@ pub(super) async fn guard(mut req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
+/// The names this server answers to: its public address, and localhost for checks on the host.
+pub(super) fn hosts() -> Vec<String> {
+    let mut out: Vec<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).to_vec();
+    if let Some(url) = server::public_url() {
+        let authority = url.split("://").nth(1).unwrap_or(&url);
+        let authority = authority.split('/').next().unwrap_or(authority);
+        out.push(authority.to_string());
+        out.push(authority.split(':').next().unwrap_or(authority).to_string());
+    }
+    out
+}
+
 pub(super) async fn me(who: Option<Extension<Who>>) -> Json<Value> {
     if !server::enabled() {
         return Json(json!({"mode": "local"}));
@@ -135,6 +147,7 @@ pub(super) async fn me(who: Option<Extension<Who>>) -> Json<Value> {
         "email": who.as_ref().map(|w| w.email.clone()),
         "role": who.as_ref().map(|w| w.role),
         "sign_in": server::mode(),
+        "public_url": server::public_url(),
     }))
 }
 
@@ -211,16 +224,38 @@ pub(super) struct CodeQ {
     code: String,
 }
 
+/// Where a request comes from: the connecting address, or behind a proxy you run
+/// (`COMINDLY_TRUST_PROXY=true`) the first address in `X-Forwarded-For`.
+fn client(peer: std::net::SocketAddr, headers: &axum::http::HeaderMap) -> String {
+    let forwarded = server::env_secret("COMINDLY_TRUST_PROXY")
+        .is_some_and(|v| v == "true" || v == "1")
+        .then(|| {
+            headers
+                .get("x-forwarded-for")?
+                .to_str()
+                .ok()?
+                .split(',')
+                .next()
+                .map(|a| a.trim().to_string())
+        })
+        .flatten();
+    forwarded.unwrap_or_else(|| peer.ip().to_string())
+}
+
 /// Sign in with an email address and a code; an invitation code also returns the person's own
 /// sign-in code, once.
-pub(super) async fn sign_in_code(Json(q): Json<CodeQ>) -> Response {
+pub(super) async fn sign_in_code(
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(q): Json<CodeQ>,
+) -> Response {
     let Some(store) = server::store() else {
         return unavailable();
     };
     if server::mode() != SignIn::Code {
         return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
     }
-    match store.sign_in_code(&q.email, &q.code) {
+    match store.sign_in_code(&q.email, &q.code, &client(peer, &headers)) {
         Ok((session, who, code)) => (
             StatusCode::OK,
             [(header::SET_COOKIE, session_cookie(&session, 30 * 86400))],

@@ -32,6 +32,8 @@ mod assets {
 struct Session {
     data: Data,
     entries: RwLock<Vec<Entry>>,
+    /// When `entries` was last read from the ledger.
+    entries_read: tokio::sync::Mutex<std::time::Instant>,
     manual: RwLock<Vec<crate::conventions::Manual>>,
     /// Loaded on first use: LLM summaries and flows, and the search model.
     extras: OnceCell<Extras>,
@@ -104,6 +106,8 @@ struct AppState {
     current: RwLock<Arc<Session>>,
     job: tokio::sync::Mutex<repos::Job>,
     watch: tokio::sync::Mutex<repos::Watch>,
+    /// What agents reach at `/mcp` on a server.
+    mcp: Option<crate::mcp::Shared>,
 }
 
 type Shared = Arc<AppState>;
@@ -123,6 +127,23 @@ impl axum::extract::FromRequestParts<Shared> for Cur {
 }
 
 impl Session {
+    /// Ledger entries, re-read when a few seconds old: agents and colleagues write records too.
+    async fn entries(&self) -> tokio::sync::RwLockReadGuard<'_, Vec<Entry>> {
+        let mut read = self.entries_read.lock().await;
+        if read.elapsed() > std::time::Duration::from_secs(15) {
+            if let Some(root) = &self.data.root {
+                if let Ok(records) = async { crate::ledger::Ledger::open(root)?.all().await }.await
+                {
+                    *self.entries.write().await =
+                        crate::ledger::derive(&records, &self.data.symbols);
+                }
+            }
+            *read = std::time::Instant::now();
+        }
+        drop(read);
+        self.entries.read().await
+    }
+
     async fn open(mut data: Data) -> Session {
         let entries = std::mem::take(&mut data.entries);
         let manual = std::mem::take(&mut data.manual);
@@ -137,6 +158,7 @@ impl Session {
         Session {
             data,
             entries: RwLock::new(entries),
+            entries_read: tokio::sync::Mutex::new(std::time::Instant::now()),
             manual: RwLock::new(manual),
             extras: OnceCell::new(),
             search: OnceCell::new(),
@@ -150,10 +172,29 @@ impl Session {
 impl AppState {
     /// Load the index at `root` and make it the one every request sees.
     async fn reload(&self, root: &str) -> Result<()> {
-        let root = root.to_string();
-        let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&root)).await?;
+        let owned = root.to_string();
+        let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&owned)).await?;
         *self.current.write().await = Arc::new(Session::open(data).await);
+        self.reload_mcp(root);
         Ok(())
+    }
+
+    /// Load the index at `root` for agents in the background, keeping the previous one until then.
+    fn reload_mcp(&self, root: &str) {
+        let Some(mcp) = self.mcp.clone() else {
+            return;
+        };
+        let uri = format!("{}/_graph", root.trim_end_matches('/'));
+        tokio::spawn(async move {
+            match crate::mcp::load(&uri, true).await {
+                Ok(server) => {
+                    if let Ok(mut m) = mcp.write() {
+                        *m = Some(server);
+                    }
+                }
+                Err(e) => eprintln!("comindly: agents cannot use {uri} yet: {}", error_text(&e)),
+            }
+        });
     }
 }
 
@@ -166,11 +207,18 @@ pub enum Access {
 /// Serve the UI on `listener` until the process ends.
 pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
+    let root = data.root.clone();
+    let server = matches!(access, Access::Server);
     let state = Arc::new(AppState {
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data)))),
         job: Default::default(),
         watch: Default::default(),
+        mcp: server.then(Default::default),
     });
+    if let Some(root) = root {
+        let _guard = rt.enter();
+        state.reload_mcp(&root);
+    }
     rt.spawn(repos::watch(state.clone()));
     let app = Router::new()
         .route("/api/overview", get(overview))
@@ -225,13 +273,22 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/tokens", get(auth::tokens).post(auth::create_token))
             .route("/api/tokens/revoke", post(auth::revoke_token))
             .route("/api/secrets", get(auth::secrets).post(auth::set_secret))
+            .nest_service(
+                "/mcp",
+                crate::mcp::http(state.mcp.clone().unwrap_or_default(), auth::hosts()),
+            )
             .layer(axum::middleware::from_fn(auth::guard)),
     }
     .with_state(state);
     listener.set_nonblocking(true)?;
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
-        axum::serve(listener, app).await.context("serve")
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .context("serve")
     })
 }
 
@@ -353,7 +410,7 @@ async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
 
 async fn overview(Cur(s): Cur) -> Json<Value> {
     let d = &s.data;
-    let entries = s.entries.read().await;
+    let entries = s.entries().await;
     let mut status: BTreeMap<String, usize> = BTreeMap::new();
     for e in entries.iter() {
         *status
@@ -527,7 +584,7 @@ async fn contracts(Cur(s): Cur) -> Json<Value> {
 }
 
 async fn ledger(Cur(s): Cur) -> Json<Value> {
-    let entries = s.entries.read().await;
+    let entries = s.entries().await;
     let mut v: Vec<&Entry> = entries.iter().collect();
     v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
     Json(named(&s, &v))
@@ -673,7 +730,7 @@ async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
         .flows
         .get(&fid)
         .map(|(n, q)| json!({"narration": n, "questions": q}));
-    let entries = s.entries.read().await;
+    let entries = s.entries().await;
     let about: Vec<&Entry> = crate::ledger::about(&entries, &ids);
     (
         StatusCode::OK,
@@ -771,7 +828,7 @@ async fn context(Cur(s): Cur, Query(q): Query<ContextQ>) -> impl IntoResponse {
     }
     let mut ids: Vec<String> = pack.iter().map(|(n, _)| n.id.clone()).collect();
     ids.push(focus.id.clone());
-    let entries = s.entries.read().await;
+    let entries = s.entries().await;
     let known: Vec<String> = crate::ledger::about(&entries, &ids)
         .into_iter()
         .filter(|e| e.trust >= crate::ledger::Trust::T2)
@@ -907,7 +964,7 @@ async fn apply_review(s: &Session, b: &ReviewBody, prov: Provenance) -> Result<S
     let (kind, _) = crate::ledger::review_action(&b.action).context("unknown action")?;
     let ledger = crate::ledger::Ledger::open(root)?;
     let target = {
-        let entries = s.entries.read().await;
+        let entries = s.entries().await;
         entries
             .iter()
             .find(|e| e.record.id == b.id)

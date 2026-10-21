@@ -5,16 +5,16 @@ cd "$(dirname "$0")/.."
 
 arch=$(uname -m)
 case "$arch" in
-  arm64 | aarch64) target=aarch64-unknown-linux-gnu ;;
-  x86_64) target=x86_64-unknown-linux-gnu ;;
+  arm64 | aarch64) target=aarch64-unknown-linux-gnu docker_arch=arm64 ;;
+  x86_64) target=x86_64-unknown-linux-gnu docker_arch=amd64 ;;
   *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
 (cd ui && npm ci --silent && npm run build --silent)
 CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
   cargo zigbuild --release --locked --target "$target.2.36" -j "${JOBS:-6}"
-mkdir -p dist/linux
-cp "target/$target/release/comindly" dist/linux/comindly
+mkdir -p "dist/linux/$docker_arch"
+cp "target/$target/release/comindly" "dist/linux/$docker_arch/comindly"
 docker build --target local -t comindly:local .
 
 # Random secrets for the local stack, made once and never committed.

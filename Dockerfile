@@ -1,5 +1,5 @@
 # comindly in a container: the web UI on port 7878, everything it keeps under /data.
-# `release` (default) compiles inside Docker; `local` packages a binary from scripts/docker-local.sh.
+# `release` (default) compiles inside Docker; `local` packages prebuilt Linux binaries.
 FROM node:24-bookworm-slim AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
@@ -28,8 +28,10 @@ EXPOSE 7878
 ENTRYPOINT ["comindly"]
 CMD ["ui", "--web", "--host", "0.0.0.0"]
 
+# A binary built outside Docker for each platform: scripts/docker-local.sh, or the release workflow.
 FROM runtime AS local
-COPY --chmod=755 dist/linux/comindly /usr/local/bin/comindly
+ARG TARGETARCH
+COPY --chmod=755 dist/linux/${TARGETARCH}/comindly /usr/local/bin/comindly
 
 FROM runtime AS release
 COPY --from=build /usr/local/bin/comindly /usr/local/bin/comindly

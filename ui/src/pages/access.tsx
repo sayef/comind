@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { api, type Role, type SecretState } from "@/lib/api";
 import { Section } from "@/pages/settings";
+import { Code } from "@/pages/setup";
 
 const select = "h-9 rounded-md border bg-card px-2 text-sm";
 const day = (t?: string | null) => (t ? new Date(t).toLocaleDateString() : "—");
@@ -371,6 +372,7 @@ export function AccessPage() {
         </form>
         <Outcome error={create.error} />
         {create.data?.token && <Reveal label="Copy it now; it is not shown again" value={create.data.token} />}
+        <Connect url={me.data?.public_url ?? window.location.origin} token={create.data?.token} />
         {list.data.tokens.length > 0 && (
           <Table>
             <thead>
@@ -398,6 +400,48 @@ export function AccessPage() {
           </Table>
         )}
       </Section>
+    </div>
+  );
+}
+
+const AGENTS = { claude: "Claude Code", cursor: "Cursor", codex: "Codex", vscode: "VS Code" } as const;
+
+/** How an agent reaches this server's tools over HTTP with a personal access token. */
+function Connect({ url, token }: { url: string; token?: string }) {
+  const [agent, setAgent] = useState<keyof typeof AGENTS>("claude");
+  const mcp = `${url}/mcp`;
+  const t = token ?? "<token>";
+  const how = {
+    claude: [
+      "Run once in a terminal:",
+      `claude mcp add --transport http --scope user comindly ${mcp} --header "Authorization: Bearer ${t}"`,
+    ],
+    cursor: [
+      "Add to ~/.cursor/mcp.json:",
+      JSON.stringify({ mcpServers: { comindly: { url: mcp, headers: { Authorization: `Bearer ${t}` } } } }, null, 2),
+    ],
+    codex: [
+      "Add to ~/.codex/config.toml, and set COMINDLY_TOKEN to the token in your shell:",
+      `[mcp_servers.comindly]\nurl = "${mcp}"\nbearer_token_env_var = "COMINDLY_TOKEN"`,
+    ],
+    vscode: [
+      "Add to .vscode/mcp.json in your workspace:",
+      JSON.stringify({ servers: { comindly: { type: "http", url: mcp, headers: { Authorization: `Bearer ${t}` } } } }, null, 2),
+    ],
+  }[agent];
+  return (
+    <div className="flex flex-col gap-2 border-t pt-3">
+      <div className="text-sm font-medium">Connect an agent</div>
+      <div className="flex flex-wrap gap-1">
+        {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((a) => (
+          <Button key={a} variant={a === agent ? "outline" : "ghost"} size="sm" onClick={() => setAgent(a)}>
+            {AGENTS[a]}
+          </Button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">{how[0]}</p>
+      <Code>{how[1]}</Code>
+      <p className="text-xs text-muted-foreground">The agent then lists comindly's tools; records it writes say it works for you.</p>
     </div>
   );
 }

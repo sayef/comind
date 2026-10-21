@@ -349,6 +349,7 @@ export interface Me {
   role?: Role | null;
   /** Everything by email, or everything by codes admins hand out. */
   sign_in?: SignIn;
+  public_url?: string | null;
 }
 
 export type SignIn = "email" | "code";

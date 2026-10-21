@@ -151,6 +151,7 @@ const SESSION_DAYS: i64 = 30;
 const LINK_MINUTES: i64 = 15;
 const INVITE_DAYS: i64 = 7;
 const MAX_FAILED: i64 = 5;
+const MAX_FAILED_ADDRESS: i64 = 50;
 const LOCK_MINUTES: i64 = 15;
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -511,9 +512,17 @@ impl Store {
 
     /// Sign in with an email address and a code: an invitation code, which also issues the
     /// person's own sign-in code (returned once), or that sign-in code.
-    pub fn sign_in_code(&self, email: &str, code: &str) -> Result<(String, Who, Option<String>)> {
+    /// `client` identifies where the attempt comes from: wrong codes lock the address for that
+    /// client, and for everyone only after many failures.
+    pub fn sign_in_code(
+        &self,
+        email: &str,
+        code: &str,
+        client: &str,
+    ) -> Result<(String, Who, Option<String>)> {
         let email = normalize(email);
-        self.check_lock(&email)?;
+        let from = format!("{email}|{client}");
+        self.check_lock(&[&from, &email])?;
         let h = code_hash(code);
         let t = now();
         let invite: Option<String> = self
@@ -531,7 +540,7 @@ impl Store {
                 params![email, role, t],
             )?;
             let personal = self.set_code(&email)?;
-            self.clear_attempts(&email);
+            self.clear_attempts(&[&from, &email]);
             self.audit(&email, "join", &role);
             let (session, who) = self.session_for(&email)?;
             return Ok((session, who, Some(personal)));
@@ -545,12 +554,13 @@ impl Store {
             )
             .optional()?;
         if known.is_some() && self.member(&email)?.is_some() {
-            self.clear_attempts(&email);
+            self.clear_attempts(&[&from, &email]);
             self.audit(&email, "sign-in", "code");
             let (session, who) = self.session_for(&email)?;
             return Ok((session, who, None));
         }
-        self.failed(&email);
+        self.failed(&from, MAX_FAILED);
+        self.failed(&email, MAX_FAILED_ADDRESS);
         bail!("Wrong email or code")
     }
 
@@ -563,7 +573,11 @@ impl Store {
             "DELETE FROM sessions WHERE email = ?1 AND hash != ?2",
             params![email, keep.map(hash).unwrap_or_default()],
         )?;
-        self.clear_attempts(&email);
+        self.clear_attempts(&[&email]);
+        let _ = self.db().execute(
+            "DELETE FROM attempts WHERE email LIKE ?1",
+            [format!("{email}|%")],
+        );
         self.audit(by, "reset-code", &email);
         Ok(code)
     }
@@ -578,45 +592,49 @@ impl Store {
         Ok(code)
     }
 
-    fn check_lock(&self, email: &str) -> Result<()> {
-        let until: Option<String> = self
-            .db()
-            .query_row(
-                "SELECT locked_until FROM attempts WHERE email = ?1 AND locked_until > ?2",
-                params![email, now()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(u) = until {
-            let at = chrono::DateTime::parse_from_rfc3339(&u)
-                .map(|t| t.format("%H:%M UTC").to_string())
-                .unwrap_or(u);
-            bail!("Too many wrong codes for this address; try again after {at}");
+    fn check_lock(&self, keys: &[&str]) -> Result<()> {
+        for key in keys {
+            let until: Option<String> = self
+                .db()
+                .query_row(
+                    "SELECT locked_until FROM attempts WHERE email = ?1 AND locked_until > ?2",
+                    params![key, now()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(u) = until {
+                let at = chrono::DateTime::parse_from_rfc3339(&u)
+                    .map(|t| t.format("%H:%M UTC").to_string())
+                    .unwrap_or(u);
+                bail!("Too many wrong codes for this address; try again after {at}");
+            }
         }
         Ok(())
     }
 
-    fn failed(&self, email: &str) {
+    fn failed(&self, key: &str, limit: i64) {
         let db = self.db();
         let _ = db.execute(
             "INSERT INTO attempts VALUES (?1, 1, NULL)
              ON CONFLICT(email) DO UPDATE SET failed = failed + 1",
-            [email],
+            [key],
         );
         let _ = db.execute(
             "UPDATE attempts SET failed = 0, locked_until = ?2 WHERE email = ?1 AND failed >= ?3",
             params![
-                email,
+                key,
                 (Utc::now() + Duration::minutes(LOCK_MINUTES)).to_rfc3339(),
-                MAX_FAILED
+                limit
             ],
         );
     }
 
-    fn clear_attempts(&self, email: &str) {
-        let _ = self
-            .db()
-            .execute("DELETE FROM attempts WHERE email = ?1", [email]);
+    fn clear_attempts(&self, keys: &[&str]) {
+        for key in keys {
+            let _ = self
+                .db()
+                .execute("DELETE FROM attempts WHERE email = ?1", [key]);
+        }
     }
 
     fn session_for(&self, email: &str) -> Result<(String, Who)> {
@@ -938,13 +956,13 @@ mod tests {
     fn invitation_codes_need_their_own_address_and_give_a_sign_in_code() {
         let (_d, s) = temp_store();
         let invite = s.invite("a", "m@x.org", Role::Member, true).unwrap();
-        assert!(s.sign_in_code("other@x.org", &invite).is_err());
+        assert!(s.sign_in_code("other@x.org", &invite, "10.0.0.1").is_err());
         let typed = invite.to_lowercase().replace('-', " ");
-        let (_, who, personal) = s.sign_in_code("M@x.org", &typed).unwrap();
+        let (_, who, personal) = s.sign_in_code("M@x.org", &typed, "10.0.0.1").unwrap();
         assert_eq!(who.email, "m@x.org");
         let personal = personal.unwrap();
-        assert!(s.sign_in_code("m@x.org", &invite).is_err());
-        let (_, _, again) = s.sign_in_code("m@x.org", &personal).unwrap();
+        assert!(s.sign_in_code("m@x.org", &invite, "10.0.0.1").is_err());
+        let (_, _, again) = s.sign_in_code("m@x.org", &personal, "10.0.0.1").unwrap();
         assert!(again.is_none());
     }
 
@@ -952,24 +970,32 @@ mod tests {
     fn a_reset_code_replaces_the_old_one_and_ends_other_sessions() {
         let (_d, s) = temp_store();
         let invite = s.invite("a", "m@x.org", Role::Member, true).unwrap();
-        let (mine, _, old) = s.sign_in_code("m@x.org", &invite).unwrap();
-        let (elsewhere, _, _) = s.sign_in_code("m@x.org", old.as_ref().unwrap()).unwrap();
+        let (mine, _, old) = s.sign_in_code("m@x.org", &invite, "10.0.0.1").unwrap();
+        let (elsewhere, _, _) = s
+            .sign_in_code("m@x.org", old.as_ref().unwrap(), "10.0.0.1")
+            .unwrap();
         let new = s.reset_code("m@x.org", "m@x.org", Some(&mine)).unwrap();
         assert!(s.authenticate(Some(&mine), None).unwrap().is_some());
         assert!(s.authenticate(Some(&elsewhere), None).unwrap().is_none());
-        assert!(s.sign_in_code("m@x.org", old.as_ref().unwrap()).is_err());
-        assert!(s.sign_in_code("m@x.org", &new).is_ok());
+        assert!(s
+            .sign_in_code("m@x.org", old.as_ref().unwrap(), "10.0.0.1")
+            .is_err());
+        assert!(s.sign_in_code("m@x.org", &new, "10.0.0.1").is_ok());
     }
 
     #[test]
-    fn wrong_codes_lock_the_address_for_a_while() {
+    fn wrong_codes_lock_the_address_for_that_client() {
         let (_d, s) = temp_store();
         let invite = s.invite("a", "m@x.org", Role::Member, true).unwrap();
         for _ in 0..MAX_FAILED {
-            assert!(s.sign_in_code("m@x.org", "AAAA-AAAA").is_err());
+            assert!(s.sign_in_code("m@x.org", "AAAA-AAAA", "10.0.0.1").is_err());
         }
-        let e = s.sign_in_code("m@x.org", &invite).unwrap_err().to_string();
+        let e = s
+            .sign_in_code("m@x.org", &invite, "10.0.0.1")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("Too many"), "{e}");
+        assert!(s.sign_in_code("m@x.org", &invite, "10.0.0.2").is_ok());
     }
 
     #[test]

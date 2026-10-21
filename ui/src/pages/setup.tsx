@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, BookOpen, Check, CheckCircle2, CircleDashed, Copy } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,11 +40,13 @@ const TERMINAL: [string, string][] = [
   ["Record a constraint", 'comindly remember constraint --on OrderService --title "…"'],
 ];
 
-function Code({ children }: { children: string }) {
+export function Code({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="group relative">
-      <pre className="whitespace-pre-wrap rounded-lg border bg-muted/50 p-3 pr-12 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">{children}</pre>
+      <pre className="whitespace-pre-wrap rounded-lg border bg-muted/50 p-3 pr-12 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">
+        {children}
+      </pre>
       <Button
         size="icon"
         variant="ghost"
@@ -64,7 +67,9 @@ function Code({ children }: { children: string }) {
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-4">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">{n}</div>
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+        {n}
+      </div>
       <div className="min-w-0 flex-1">
         <h3 className="font-medium">{title}</h3>
         <div className="mt-2 flex flex-col gap-3 text-sm text-muted-foreground">{children}</div>
@@ -103,6 +108,7 @@ function connect(agent: Agent, index: string) {
 
 export function SetupPage() {
   const setup = useQuery({ queryKey: ["setup"], queryFn: api.setup });
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const [agent, setAgent] = useState<Agent>("claude");
   const s = setup.data;
   const index = s?.index || "<index-dir>";
@@ -150,49 +156,71 @@ export function SetupPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="flex flex-col gap-6 pt-6">
-          <Step n={1} title="Install comindly on your machine">
-            <p>Prebuilt for macOS and Linux. Check with <code className="font-mono">comindly --version</code>.</p>
-            <Code>{"curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh"}</Code>
-          </Step>
-          <Step n={2} title="Register the MCP server with your agent">
-            <Tabs value={agent} onValueChange={(v) => setAgent(v as Agent)}>
-              <TabsList>
-                {AGENTS.map((a) => (
-                  <TabsTrigger key={a} value={a}>
-                    {AGENT_NAME[a]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            <p>{how.where}</p>
-            <Code>{how.code}</Code>
-            {s?.remote && (
+      {me.data?.mode === "server" ? (
+        <Card>
+          <CardContent className="flex flex-col gap-6 pt-6">
+            <Step n={1} title="Create a personal access token">
               <p>
-                The index is in a bucket, so the agent needs the same storage credentials as this app. Hooks read a local mirror that
-                refreshes itself.
+                Under{" "}
+                <Link to="/settings/access" className="font-medium text-foreground underline underline-offset-2">
+                  Settings → Your access
+                </Link>
+                , create a token for your agent. Nothing to install: the agent talks to this server.
               </p>
-            )}
-            <p>Restart the agent; it then lists comindly's tools and calls them on its own when a question needs them.</p>
-          </Step>
-          <Step n={3} title="Optional: hooks for Claude Code">
-            <p>
-              Hooks put what the team recorded in front of the agent without it asking: records about this repository when a session
-              starts, and about a file just before the agent edits it (each record once per session). Print the settings and merge them
-              into <code className="font-mono">~/.claude/settings.json</code>:
-            </p>
-            <Code>{"comindly init-hooks claude"}</Code>
-            <p>
-              For Cursor, Gemini or Codex: <code className="font-mono">comindly init-hooks cursor</code> (or{" "}
-              <code className="font-mono">gemini</code>, <code className="font-mono">codex</code>, <code className="font-mono">generic</code>).
-            </p>
-          </Step>
-          <Step n={4} title="Check it">
-            <Code>{`comindly doctor --index-dir ${index}`}</Code>
-          </Step>
-        </CardContent>
-      </Card>
+            </Step>
+            <Step n={2} title="Add the server to your agent">
+              <p>The same page shows the command or config for Claude Code, Cursor, Codex and VS Code, with your token filled in.</p>
+            </Step>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="flex flex-col gap-6 pt-6">
+            <Step n={1} title="Install comindly on your machine">
+              <p>
+                Prebuilt for macOS and Linux. Check with <code className="font-mono">comindly --version</code>.
+              </p>
+              <Code>{"curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh"}</Code>
+            </Step>
+            <Step n={2} title="Register the MCP server with your agent">
+              <Tabs value={agent} onValueChange={(v) => setAgent(v as Agent)}>
+                <TabsList>
+                  {AGENTS.map((a) => (
+                    <TabsTrigger key={a} value={a}>
+                      {AGENT_NAME[a]}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+              <p>{how.where}</p>
+              <Code>{how.code}</Code>
+              {s?.remote && (
+                <p>
+                  The index is in a bucket, so the agent needs the same storage credentials as this app. Hooks read a local mirror that
+                  refreshes itself.
+                </p>
+              )}
+              <p>Restart the agent; it then lists comindly's tools and calls them on its own when a question needs them.</p>
+            </Step>
+            <Step n={3} title="Optional: hooks for Claude Code">
+              <p>
+                Hooks put what the team recorded in front of the agent without it asking: records about this repository when a session
+                starts, and about a file just before the agent edits it (each record once per session). Print the settings and merge them
+                into <code className="font-mono">~/.claude/settings.json</code>:
+              </p>
+              <Code>{"comindly init-hooks claude"}</Code>
+              <p>
+                For Cursor, Gemini or Codex: <code className="font-mono">comindly init-hooks cursor</code> (or{" "}
+                <code className="font-mono">gemini</code>, <code className="font-mono">codex</code>,{" "}
+                <code className="font-mono">generic</code>).
+              </p>
+            </Step>
+            <Step n={4} title="Check it">
+              <Code>{`comindly doctor --index-dir ${index}`}</Code>
+            </Step>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

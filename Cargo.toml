@@ -51,7 +51,7 @@ lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb'
 lance-io = { version = "=10.0.0", default-features = false } # object stores for the ledger, as lancedb opens them
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
 rig = { package = "rig-core", version = "0.44", features = ["reqwest"] }
-rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
+rmcp = { version = "3.5.1", features = ["server", "transport-io", "transport-streamable-http-server"] } # MCP server, over stdio and HTTP
 blake3 = "1"
 tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
