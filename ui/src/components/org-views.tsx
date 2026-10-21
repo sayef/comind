@@ -99,7 +99,7 @@ function layout(org: Org, roots: string[], dir: Direction, open: Set<string>) {
       path,
       col: path.length,
       y: 0,
-      via: via === null ? "" : names.length ? names[0] + (names.length > 1 ? ` (+${names.length - 1} more)` : "") : "code dependency",
+      via: via === null ? "" : names.length ? names[0] + (names.length > 1 ? ` +${names.length - 1}` : "") : "code dependency",
       contract: names.length > 0,
       kind: !first ? "seen" : expanded ? "open" : children.length ? "closed" : "leaf",
       more: children.length,
@@ -172,8 +172,8 @@ export function TreeView({
   }
 
   return (
-    <div className="overflow-auto">
-      <div className="relative m-5" style={{ width, height }}>
+    <div className="overflow-auto px-5">
+      <div className="relative mx-auto my-5" style={{ width, height }}>
         <svg className="pointer-events-none absolute inset-0 overflow-visible" width={width} height={height} aria-hidden="true">
           <defs>
             <marker id="loop-tip" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="8" markerHeight="8" orient="auto">
@@ -218,7 +218,11 @@ export function TreeView({
                   ↺ {b.loopTo}
                 </span>
               )}
-              {b.kind === "closed" && <span className="font-mono text-[11px] text-muted-foreground">+{b.more}</span>}
+              {b.kind === "closed" && (
+                <span className="font-mono text-[11px] text-muted-foreground" title={`Opens to ${b.more} more`}>
+                  {b.more} ›
+                </span>
+              )}
               {b.kind === "open" && <span className="font-mono text-[11px] text-muted-foreground">−</span>}
             </span>
             <span
