@@ -322,14 +322,14 @@ export function ConventionsPage() {
           <p className="p-6 text-center text-sm text-muted-foreground">{items.length === 0 ? "No conventions yet." : "No conventions match."}</p>
         ) : (
           <table className="w-full text-left">
-            <thead className="border-b text-xs text-muted-foreground">
+            <thead className="border-b">
               <tr>
                 <th className="w-8" />
-                <th className="py-2 pr-4 font-medium">Rule</th>
-                <th className="py-2 pr-4 font-medium">Scope</th>
-                <th className="py-2 pr-4 font-medium">Topic</th>
-                <th className="py-2 pr-4 font-medium">Origin</th>
-                <th className="py-2 pr-4 font-medium">Followed</th>
+                <th className="eyebrow h-9 pr-4 font-normal">Rule</th>
+                <th className="eyebrow h-9 pr-4 font-normal">Scope</th>
+                <th className="eyebrow h-9 pr-4 font-normal">Topic</th>
+                <th className="eyebrow h-9 pr-4 font-normal">Origin</th>
+                <th className="eyebrow h-9 pr-4 font-normal">Followed</th>
                 <th />
               </tr>
             </thead>

@@ -3,10 +3,10 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// `npm run dev` proxies the API to a running `comindly ui --web` (default port 7878).
+// `npm run dev` proxies the API to a running `comindly ui --web` (port 7878, or COMINDLY_API).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  server: { host: "127.0.0.1", proxy: { "/api": "http://127.0.0.1:7878" } },
+  server: { host: "127.0.0.1", proxy: { "/api": process.env.COMINDLY_API ?? "http://127.0.0.1:7878" } },
   build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 900 },
 });

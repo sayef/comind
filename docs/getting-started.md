@@ -6,6 +6,17 @@ agent reads that map through MCP; you read it in the terminal and a local web UI
 
 This page takes you from nothing to an agent that uses comindly, in about ten minutes.
 
+## Ways to run comindly
+
+| | For | Start here |
+| --- | --- | --- |
+| **On your machine** | One person: the CLI, the app and MCP over stdio for your agent | This page |
+| **A team server** | A team: one container, members sign in, agents connect over HTTP | [Self-hosting](guides/self-hosting.md) |
+| **A shared index from CI** | A team without a server: CI builds the index, everyone reads it | [Team setup](guides/team-setup.md) |
+| **As a library** | Your own tools on top of the index, or comindly's MCP tools in your service | [Using comindly as a library](guides/library.md) |
+
+All of them read the same index, so you can start on your machine and move to a server later.
+
 ## 1. Install
 
 Prebuilt binaries for macOS (arm64, x64) and Linux (x64, arm64) are attached to each

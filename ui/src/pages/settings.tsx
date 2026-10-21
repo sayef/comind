@@ -198,10 +198,10 @@ export function SettingsShell() {
   const server = me.data?.mode === "server";
   const admin = me.data?.role === "admin";
   const tab = ({ isActive }: { isActive: boolean }) =>
-    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`;
+    `rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`;
   return (
     <div className="flex flex-col gap-5">
-      <nav className="flex w-fit gap-1 rounded-lg bg-muted p-1">
+      <nav className="flex w-fit flex-wrap gap-0.5 rounded-lg border bg-card p-0.5">
         <NavLink to="/settings" end className={tab}>
           General
         </NavLink>

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Boxes, GitBranch, History, Network, Workflow } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { GraphView } from "@/components/graph-view";
@@ -12,18 +12,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
-import { api, attention, type OrgMap } from "@/lib/api";
+import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 
-function Stat({ icon: Icon, label, value, hint }: { icon: typeof Boxes; label: string; value: string; hint?: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <Card className="p-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Icon className="size-3.5" />
-        {label}
+    <div className="flex flex-col gap-1.5 bg-card px-[18px] py-4">
+      <span className="eyebrow">{label}</span>
+      <span className="nums text-[30px] font-medium leading-none tracking-[-0.02em]">{value}</span>
+      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
+
+function Panel({ title, to, link, children }: { title: string; to: string; link: string; children: React.ReactNode }) {
+  return (
+    <section className="overflow-hidden rounded-[10px] border bg-card">
+      <div className="flex items-center justify-between border-b px-5 py-3.5">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Link to={to} className="text-xs text-muted-foreground hover:text-foreground">
+          {link} →
+        </Link>
       </div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
-    </Card>
+      {children}
+    </section>
   );
 }
 
@@ -113,6 +124,7 @@ function CreateTeam() {
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
+  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows });
   const latest = useQuery({ queryKey: ["orgmap"], queryFn: () => api.orgmap() });
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const last = (versions.data?.length ?? 1) - 1;
@@ -192,77 +204,79 @@ export function OverviewPage() {
     );
   }
 
+  const totalRecords = o ? Object.values(o.ledger).reduce((a, b) => a + b, 0) : 0;
+  const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
+
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-1 text-sm text-muted-foreground">How the indexed repositories depend on each other, in code and through service contracts.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Overview</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">How the team's repositories depend on each other, in code and through service contracts.</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {o ? (
-          <>
-            <Stat icon={Boxes} label="Repositories" value={String(o.repos.length)} hint={`${o.symbols.toLocaleString()} symbols`} />
-            <Stat icon={GitBranch} label="Dependency edges" value={o.edges.toLocaleString()} hint={`${o.cross_repo_edges.toLocaleString()} cross-repo`} />
-            <Stat icon={Network} label="Service contracts" value={String(o.contracts)} hint={`${o.linked_contracts} with both sides indexed`} />
-            <Stat
-              icon={History}
-              label="Ledger records"
-              value={String(Object.values(o.ledger).reduce((a, b) => a + b, 0))}
-              hint={`${(ledger.data ?? []).filter((e) => attention(e) < 3).length} need review`}
-            />
-          </>
-        ) : (
-          [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[98px] rounded-xl" />)
-        )}
-      </div>
+      {o ? (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border bg-border lg:grid-cols-4">
+          <Stat label="Repositories" value={String(o.repos.length)} hint={`${o.symbols.toLocaleString()} symbols indexed`} />
+          <Stat label="Cross-repo edges" value={o.cross_repo_edges.toLocaleString()} hint={`of ${o.edges.toLocaleString()} dependency edges`} />
+          <Stat label="Contracts" value={String(o.contracts)} hint={`${o.linked_contracts} with both sides indexed`} />
+          <Stat label="Ledger records" value={String(totalRecords)} hint={needs.length ? `${needs.length} need review` : "none need review"} />
+        </div>
+      ) : (
+        <Skeleton className="h-[106px] rounded-[10px]" />
+      )}
 
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Workflow className="size-4" /> Org map
-            </CardTitle>
-            <CardDescription>
-              Arrows point from dependent to dependency; amber edges are service contracts. Click a repository to see what a change there can reach.
-            </CardDescription>
+      <div className="flex flex-wrap gap-6">
+        <Card className="min-w-0 flex-[999_1_520px] overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
+            <h2 className="text-sm font-semibold">Org map</h2>
+            <div className="flex items-center gap-4 font-mono text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="h-0.5 w-3.5 bg-muted-foreground/70" /> code
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-0.5 w-3.5 bg-brand" /> contract
+              </span>
+              {selected && (
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(null)}>
+                  clear
+                </button>
+              )}
+            </div>
           </div>
-          {selected && (
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSelected(null)}>
-              Clear
-            </button>
+          {graph ? (
+            <GraphView
+              nodes={graph.nodes}
+              edges={graph.edges}
+              highlight={highlight}
+              onPick={(id) => setSelected((s) => (s === id ? null : id))}
+              className="h-[460px] w-full"
+            />
+          ) : (
+            <Skeleton className="h-[460px] rounded-none" />
           )}
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-hidden rounded-lg border bg-muted/30">
-            {graph ? (
-              <GraphView
-                nodes={graph.nodes}
-                edges={graph.edges}
-                highlight={highlight}
-                onPick={(id) => setSelected((s) => (s === id ? null : id))}
-                className="h-[520px] w-full"
-              />
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t px-5 py-3 font-mono text-xs text-muted-foreground">
+            {selected && reach ? (
+              <>
+                <span className="text-foreground">{selected}</span>
+                <span className="text-input">/</span>
+                <span>{reach.size ? "a change can reach" : "no other indexed repository depends on it"}</span>
+                {[...reach].map(([r, d]) => (
+                  <Badge key={r} variant="warning">
+                    {r} · {d} hop{d > 1 ? "s" : ""}
+                  </Badge>
+                ))}
+              </>
             ) : (
-              <Skeleton className="h-[520px] rounded-none" />
+              <span>Arrows point from dependent to dependency. Pick a repository to see what a change there can reach.</span>
             )}
           </div>
-          {selected && reach && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm">
-              <span className="font-medium">{selected}</span>
-              <span className="text-muted-foreground">{reach.size ? "— a change can reach" : "— no other indexed repository depends on it"}</span>
-              {[...reach].map(([r, d]) => (
-                <Badge key={r} variant="warning">
-                  {r} · {d} hop{d > 1 ? "s" : ""}
-                </Badge>
-              ))}
-            </div>
-          )}
           {versions.data && versions.data.length > 1 && (
-            <div className="mt-4 rounded-lg border p-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium">Index version</span>
-                <span className="font-mono text-muted-foreground">
+            <div className="border-t px-5 py-3.5">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow">Index version</span>
+                <span className="font-mono text-xs text-muted-foreground">
                   {(versions.data[at ?? last] ?? "").slice(0, 16).replace("T", " ")}
                   {(at ?? last) === last ? " · latest" : ` · ${(at ?? last) + 1} of ${last + 1}`}
                 </span>
@@ -285,8 +299,47 @@ export function OverviewPage() {
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </Card>
+
+        <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-6">
+          <Panel title="Needs attention" to="/ledger" link="Ledger">
+            {needs.length === 0 ? (
+              <p className="px-5 py-4 text-sm text-muted-foreground">Nothing to review. Records that go stale or get disputed show up here.</p>
+            ) : (
+              needs.slice(0, 4).map((e) => (
+                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1.5 border-b px-5 py-3 last:border-0 hover:bg-muted/40">
+                  <span className="eyebrow flex items-center gap-2">
+                    <span className={isChallenged(e) ? "text-warning" : ["stale", "orphaned"].includes(e.status) ? "text-danger" : "text-[#8fb8ff]"}>
+                      {isChallenged(e) ? "disputed" : ["stale", "orphaned"].includes(e.status) ? e.status : "unconfirmed"}
+                    </span>
+                    {e.record.kind} · {e.record.anchors[0]?.repo ?? "—"}
+                  </span>
+                  <span className="text-[13.5px]">{e.record.title}</span>
+                </Link>
+              ))
+            )}
+          </Panel>
+          <Panel title="Flows that reach furthest" to="/flows" link="Flows">
+            {(flows.data ?? []).slice(0, 4).map((f) => {
+              const most = Math.max(...(flows.data ?? []).map((x) => x.repos.length), 1);
+              return (
+                <Link
+                  key={f.entry.id}
+                  to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
+                  className="flex items-center gap-3 border-b px-5 py-3 last:border-0 hover:bg-muted/40"
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{f.entry.name}</span>
+                  <span className="text-xs text-muted-foreground">{f.repos.length} repos</span>
+                  <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                    <span className="block h-1 bg-brand" style={{ width: `${(f.repos.length / most) * 100}%` }} />
+                  </span>
+                </Link>
+              );
+            })}
+            {flows.data?.length === 0 && <p className="px-5 py-4 text-sm text-muted-foreground">No flows yet.</p>}
+          </Panel>
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

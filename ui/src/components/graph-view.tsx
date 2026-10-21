@@ -45,22 +45,22 @@ type Data = { label: string; repo: string; focus: boolean; dim: boolean; more: b
 const PER_SIDE = 12;
 const HEIGHT = 44;
 
-const color = (repo: string) => (repo === CONTRACTS ? "var(--color-warning)" : `hsl(${repoHue(repo)} 55% 52%)`);
+const color = (repo: string) => (repo === CONTRACTS ? "var(--color-brand)" : `hsl(${repoHue(repo)} 62% 62%)`);
 const isContract = (kind: string) => kind === "contract" || kind === "counterpart";
 
 function SymbolNode({ data }: NodeProps<Node<Data>>) {
   return (
     <div
       className={cn(
-        "flex h-11 max-w-[260px] cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 text-xs shadow-xs transition-opacity",
+        "flex h-10 max-w-[260px] cursor-pointer items-center gap-2 rounded-lg border border-input bg-popover px-3 text-[13px] transition-[opacity,border-color] hover:border-muted-foreground/50",
         data.large && "text-sm font-medium",
-        data.focus && "border-brand font-semibold ring-2 ring-brand/30",
+        data.focus && "border-brand font-medium shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-brand)_14%,transparent)]",
         data.more && "cursor-default border-dashed text-muted-foreground",
         data.dim && "opacity-25",
       )}
     >
       <Handle type="target" position={data.large ? Position.Top : Position.Left} className="!pointer-events-none !opacity-0" />
-      {!data.more && <span className="size-2.5 shrink-0 rounded-full" style={{ background: color(data.repo) }} />}
+      {!data.more && <span className="size-2 shrink-0 rounded-[2px]" style={{ background: color(data.repo) }} />}
       <div className="min-w-0">
         <div className={cn("truncate", data.repo === CONTRACTS && "font-mono")}>{data.label}</div>
         {data.showRepo && <div className="truncate text-[10px] font-normal text-muted-foreground">{data.repo}</div>}
@@ -155,7 +155,7 @@ export function GraphView({ nodes, edges, focus, highlight, onPick, className }:
     .map((e) => {
       const touched = hovered === e.src || hovered === e.dst;
       const lit = !highlight || ((highlight.has(e.src) || e.src === focus) && (highlight.has(e.dst) || e.dst === focus));
-      const stroke = touched ? "var(--color-brand)" : isContract(e.kind) ? "var(--color-warning)" : "var(--color-muted-foreground)";
+      const stroke = touched ? "var(--color-foreground)" : isContract(e.kind) ? "var(--color-brand)" : "color-mix(in srgb, var(--color-muted-foreground) 70%, transparent)";
       const width = e.weight ? 1 + (Math.log(e.weight + 1) / Math.log(maxW + 1)) * 3 : 1.25;
       return {
         id: `${e.src}->${e.dst}`,

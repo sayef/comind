@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -29,59 +31,74 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* Graphite: dark first, hairline borders, one green accent. */
 :root {
-  --radius: 0.65rem;
-  --background: oklch(0.985 0.002 250);
-  --foreground: oklch(0.24 0.03 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.03 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.03 255);
-  --primary: oklch(0.26 0.035 255);
-  --primary-foreground: oklch(0.98 0.005 250);
-  --secondary: oklch(0.96 0.006 250);
-  --secondary-foreground: oklch(0.26 0.035 255);
-  --muted: oklch(0.96 0.006 250);
-  --muted-foreground: oklch(0.52 0.02 255);
-  --accent: oklch(0.95 0.02 150);
-  --accent-foreground: oklch(0.32 0.08 150);
-  --brand: oklch(0.62 0.16 145);
-  --brand-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.72 0.15 75);
-  --danger: oklch(0.6 0.2 27);
-  --border: oklch(0.91 0.008 250);
-  --input: oklch(0.91 0.008 250);
-  --ring: oklch(0.62 0.16 145);
-  --sidebar: oklch(0.975 0.004 250);
+  --radius: 0.6rem;
+  --background: #fbfcfc;
+  --foreground: #0c1110;
+  --card: #ffffff;
+  --card-foreground: #0c1110;
+  --popover: #ffffff;
+  --popover-foreground: #0c1110;
+  --primary: #0c1110;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f4f3;
+  --secondary-foreground: #0c1110;
+  --muted: #f1f4f3;
+  --muted-foreground: #5a6662;
+  --accent: #e3f5ec;
+  --accent-foreground: #0b6e4c;
+  --brand: #12a36d;
+  --brand-foreground: #03130c;
+  --warning: #a8650c;
+  --danger: #c2410c;
+  --border: #e3e8e6;
+  --input: #d5dcd9;
+  --ring: #12a36d;
+  --sidebar: #f6f8f7;
 }
 
 .dark {
-  --background: oklch(0.17 0.02 255);
-  --foreground: oklch(0.94 0.008 250);
-  --card: oklch(0.21 0.022 255);
-  --card-foreground: oklch(0.94 0.008 250);
-  --popover: oklch(0.21 0.022 255);
-  --popover-foreground: oklch(0.94 0.008 250);
-  --primary: oklch(0.94 0.008 250);
-  --primary-foreground: oklch(0.2 0.025 255);
-  --secondary: oklch(0.27 0.022 255);
-  --secondary-foreground: oklch(0.94 0.008 250);
-  --muted: oklch(0.26 0.02 255);
-  --muted-foreground: oklch(0.68 0.02 255);
-  --accent: oklch(0.3 0.05 150);
-  --accent-foreground: oklch(0.88 0.1 150);
-  --brand: oklch(0.72 0.17 145);
-  --brand-foreground: oklch(0.18 0.03 150);
-  --warning: oklch(0.8 0.14 75);
-  --danger: oklch(0.7 0.18 27);
-  --border: oklch(0.3 0.02 255);
-  --input: oklch(0.32 0.02 255);
-  --ring: oklch(0.72 0.17 145);
-  --sidebar: oklch(0.19 0.021 255);
+  --background: #0a0c0d;
+  --foreground: #e6ece9;
+  --card: #0f1214;
+  --card-foreground: #e6ece9;
+  --popover: #121618;
+  --popover-foreground: #e6ece9;
+  --primary: #e6ece9;
+  --primary-foreground: #0a0c0d;
+  --secondary: #161b1d;
+  --secondary-foreground: #e6ece9;
+  --muted: #161b1d;
+  --muted-foreground: #8b9692;
+  --accent: #10261c;
+  --accent-foreground: #6ee7b0;
+  --brand: #3ddc97;
+  --brand-foreground: #04140d;
+  --warning: #f5c46b;
+  --danger: #f08a7a;
+  --border: #1c2124;
+  --input: #2a3135;
+  --ring: #3ddc97;
+  --sidebar: #0c0f10;
+}
+
+/* Small uppercase mono labels: section names, table heads, stat captions. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+}
+
+@utility nums {
+  font-variant-numeric: tabular-nums;
 }
 
 @layer base {
@@ -97,6 +114,46 @@
     background: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    font-size: 14px;
     -webkit-font-smoothing: antialiased;
   }
+  .dark {
+    color-scheme: dark;
+  }
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"] {
+    accent-color: var(--color-brand);
+  }
+  select {
+    background-color: var(--color-card);
+    border-color: var(--color-input);
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+  }
+}
+
+/* The map's zoom controls and attribution in Graphite colours. */
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--color-popover);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  fill: currentColor;
+}
+.react-flow__controls-button:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+.react-flow__attribution {
+  background: transparent;
+}
+.react-flow__attribution a {
+  color: var(--color-muted-foreground);
 }

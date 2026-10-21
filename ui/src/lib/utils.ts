@@ -19,3 +19,13 @@ export function sentence(text: string): string {
   if (!/^[a-z]/.test(text) || /^comindly\b/.test(text)) return text;
   return text[0].toUpperCase() + text.slice(1);
 }
+
+/** How long ago `iso` was, briefly: "just now", "4 min ago", "3 h ago", "2 d ago". */
+export function ago(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}

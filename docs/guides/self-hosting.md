@@ -72,6 +72,86 @@ One the deployment provides wins and is read-only there; otherwise an admin past
 stored encrypted with `COMINDLY_SECRET_KEY`. Read-only tokens are enough: a GitLab group access token
 with `read_repository` and `read_api`, or a fine-grained GitHub token with Contents and Metadata read.
 
+## Deploying
+
+The image listens on port 7878 and keeps everything it writes under `/data`: give it a volume there,
+its settings and secrets, and HTTPS in front.
+
+### Docker
+
+```sh
+docker run -d --name comindly -p 127.0.0.1:7878:7878 -v comindly:/data \
+  -e COMINDLY_PUBLIC_URL=https://comindly.example.com \
+  -e COMINDLY_ADMIN_EMAILS=you@example.com \
+  -e COMINDLY_INDEX_DIR=s3://bucket/comindly \
+  -e COMINDLY_ADMIN_TOKEN_FILE=/run/secrets/admin_token \
+  -e COMINDLY_SECRET_KEY_FILE=/run/secrets/secret_key \
+  -v /etc/comindly/secrets:/run/secrets:ro \
+  ghcr.io/sayef/comindly:latest
+```
+
+Pin a version tag (`ghcr.io/sayef/comindly:0.2.0`) for anything you rely on. Generate the two
+secrets once, for example with `openssl rand -base64 32`, and keep them in your secret store.
+
+### Kubernetes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: comindly }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one writer per data volume
+  selector: { matchLabels: { app: comindly } }
+  template:
+    metadata: { labels: { app: comindly } }
+    spec:
+      serviceAccountName: comindly   # its cloud role reads the bucket
+      containers:
+        - name: comindly
+          image: ghcr.io/sayef/comindly:0.2.0
+          ports: [{ containerPort: 7878 }]
+          env:
+            - { name: COMINDLY_PUBLIC_URL, value: https://comindly.example.com }
+            - { name: COMINDLY_ADMIN_EMAILS, value: you@example.com }
+            - { name: COMINDLY_INDEX_DIR, value: s3://bucket/comindly }
+            - { name: COMINDLY_TRUST_PROXY, value: "true" }
+            - { name: COMINDLY_ADMIN_TOKEN_FILE, value: /run/secrets/admin_token }
+            - { name: COMINDLY_SECRET_KEY_FILE, value: /run/secrets/secret_key }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe: { httpGet: { path: /api/auth/me, port: 7878 } }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: comindly-data }
+        - name: secrets
+          secret: { secretName: comindly }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: comindly }
+spec:
+  selector: { app: comindly }
+  ports: [{ port: 80, targetPort: 7878 }]
+```
+
+Route your ingress to the service with TLS. On ECS, Cloud Run or Azure Container Apps the same
+applies: the image, a volume at `/data`, the variables above, secrets from the platform's store, and
+the task's or workload's role for the bucket.
+
+### Behind a proxy
+
+Terminate TLS at your proxy or load balancer and forward to port 7878. Set `COMINDLY_PUBLIC_URL` to
+the `https://` address people open (sign-in cookies are then marked secure, and links in emails point
+there) and `COMINDLY_TRUST_PROXY=true` so sign-in limits apply per client.
+
+### Backups and upgrades
+
+Back up the `/data` volume (members, sessions, tokens and stored secrets live in `server.db`) together
+with the index location. To upgrade, start the new image tag on the same volume and settings; the
+database upgrades itself.
+
 ## Trying it locally
 
 ```sh

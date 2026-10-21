@@ -9,11 +9,11 @@ export function Table({ className, ...props }: React.HTMLAttributes<HTMLTableEle
   );
 }
 export function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn("h-9 px-3 text-left text-xs font-medium text-muted-foreground", className)} {...props} />;
+  return <th className={cn("eyebrow h-9 px-3 text-left font-normal", className)} {...props} />;
 }
 export function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
   return <td className={cn("px-3 py-2.5 align-top", className)} {...props} />;
 }
 export function Tr({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn("border-b last:border-0 transition-colors hover:bg-muted/40", className)} {...props} />;
+  return <tr className={cn("border-b last:border-0 transition-colors hover:bg-muted/50", className)} {...props} />;
 }

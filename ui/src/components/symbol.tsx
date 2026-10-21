@@ -5,8 +5,8 @@ import { CONTRACTS, cn, repoHue } from "@/lib/utils";
 export function RepoDot({ repo, className }: { repo: string; className?: string }) {
   return (
     <span
-      className={cn("inline-block size-2 shrink-0 rounded-full", className)}
-      style={{ background: repo === CONTRACTS ? "var(--color-warning)" : `hsl(${repoHue(repo)} 55% 52%)` }}
+      className={cn("inline-block size-2 shrink-0 rounded-[2px]", className)}
+      style={{ background: repo === CONTRACTS ? "var(--color-brand)" : `hsl(${repoHue(repo)} 62% 62%)` }}
     />
   );
 }

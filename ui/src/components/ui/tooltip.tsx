@@ -11,7 +11,7 @@ export function Tooltip({ content, children }: { content: React.ReactNode; child
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           sideOffset={6}
-          className={cn("z-50 rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground shadow-md")}
+          className={cn("z-50 rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg")}
         >
           {content}
         </TooltipPrimitive.Content>

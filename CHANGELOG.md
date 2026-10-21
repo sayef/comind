@@ -35,6 +35,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A new look for the app: dark by default with a light variant, Geist and Geist Mono bundled with the
+  app, an Overview that puts the org map next to what needs attention and the flows that reach
+  furthest, and the index version and its age in the header.
+- Docs: ways to run comindly on Getting started, deployment with Docker and Kubernetes under
+  Self-hosting, and a guide to using the crate as a library.
 - Indexing always uses each repository's current default branch, asked from the remote; the per-repository
   branch setting and `repos add --branch` are gone.
 - Conventions are one filterable, sortable table; a row expands to the code that follows or deviates

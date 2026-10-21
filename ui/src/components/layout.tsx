@@ -1,33 +1,65 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, LayoutDashboard, LogOut, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun, Users, Workflow } from "lucide-react";
+import { ChevronsUpDown, LogOut, Moon, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 import { Activity } from "@/components/activity";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { ago, cn } from "@/lib/utils";
 
 const NAV = [
-  { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/contracts", label: "Contracts", icon: Network },
-  { to: "/flows", label: "Flows", icon: Workflow },
-  { to: "/ledger", label: "Ledger", icon: BookMarked },
-  { to: "/conventions", label: "Conventions", icon: Ruler },
-  { to: "/packages", label: "Packages", icon: Package },
-  { to: "/setup", label: "Get started", icon: Rocket },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/", label: "Overview" },
+  { to: "/contracts", label: "Contracts" },
+  { to: "/flows", label: "Flows" },
+  { to: "/ledger", label: "Ledger" },
+  { to: "/conventions", label: "Conventions" },
+  { to: "/packages", label: "Packages" },
+  { to: "/setup", label: "Get started" },
 ];
+
+function Logo({ className }: { className?: string }) {
+  return (
+    <>
+      <img src="/logo.svg" alt="" className={cn("dark:hidden", className)} />
+      <img src="/logo-dark.svg" alt="" className={cn("hidden dark:block", className)} />
+    </>
+  );
+}
+
+function NavItem({ to, label, count }: { to: string; label: string; count?: number }) {
+  return (
+    <NavLink
+      to={to}
+      end={to === "/"}
+      className={({ isActive }) =>
+        cn(
+          "group flex min-h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[13.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+          isActive && "bg-muted font-medium text-foreground",
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <span className={cn("size-1.5 rounded-[2px] bg-input transition-colors", isActive && "bg-brand")} />
+          <span className="flex-1">{label}</span>
+          {!!count && <Badge variant="warning">{count}</Badge>}
+        </>
+      )}
+    </NavLink>
+  );
+}
 
 export function Layout() {
   const { theme, toggle } = useTheme();
   const [palette, setPalette] = useState(false);
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
-  const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
+  const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
   const signOut = () => api.signOut().finally(() => window.location.replace("/"));
 
   useEffect(() => {
@@ -46,17 +78,18 @@ export function Layout() {
         .filter(([k]) => k === "stale" || k === "orphaned")
         .reduce((n, [, v]) => n + v, 0)
     : 0;
+  const version = versions.data?.length ?? 0;
+  const latest = versions.data?.at(-1);
 
   if (overview.error?.message.includes("access token")) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-md text-center">
-          <img src="/logo.svg" alt="" className="mx-auto size-10 dark:hidden" />
-          <img src="/logo-dark.svg" alt="" className="mx-auto hidden size-10 dark:block" />
-          <h1 className="mt-4 text-lg font-semibold">Open comindly from its link</h1>
+          <Logo className="mx-auto size-10" />
+          <h1 className="mt-5 text-lg font-semibold tracking-tight">Open comindly from its link</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            The UI only answers browsers that hold its access token. Run <code className="font-mono">comindly ui --web --open</code>, or open
-            the link it prints once; after that, this address works as a bookmark.
+            The UI only answers browsers that hold its access token. Run <code className="font-mono text-foreground">comindly ui --web --open</code>,
+            or open the link it prints once; after that, this address works as a bookmark.
           </p>
         </div>
       </div>
@@ -65,92 +98,96 @@ export function Layout() {
 
   return (
     <div className="flex h-full">
-      <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
-        <div className="flex h-14 items-center gap-2.5 px-5">
-          <img src="/logo.svg" alt="" className="size-7 dark:hidden" />
-          <img src="/logo-dark.svg" alt="" className="hidden size-7 dark:block" />
+      <aside className="hidden w-[248px] shrink-0 flex-col gap-5 border-r bg-sidebar px-3.5 py-4 md:flex">
+        <Link to="/" className="flex items-center gap-2.5 px-2 pt-1">
+          <Logo className="size-6" />
           <span className="text-[15px] font-semibold tracking-tight">comindly</span>
-        </div>
-        <nav className="flex flex-1 flex-col gap-0.5 px-3 py-2">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                  isActive && "bg-card font-medium text-foreground shadow-xs ring-1 ring-border",
-                )
-              }
-            >
-              <Icon className="size-4" />
-              <span className="flex-1">{label}</span>
-              {label === "Ledger" && inbox > 0 && <Badge variant="warning">{inbox}</Badge>}
-            </NavLink>
+        </Link>
+
+        <Link
+          to="/settings"
+          className="flex min-h-11 items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors hover:border-input"
+          title="Team settings"
+        >
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="eyebrow">Team</span>
+            <span className="truncate text-[13.5px] font-medium">{teamName ?? "No team yet"}</span>
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </Link>
+
+        <nav className="flex flex-col gap-0.5" aria-label="Main">
+          {NAV.map((n) => (
+            <NavItem key={n.to} to={n.to} label={n.label} count={n.label === "Ledger" ? inbox : undefined} />
           ))}
         </nav>
-        <div className="border-t px-5 py-4 text-xs text-muted-foreground">
-          {overview.data ? (
-            <div className="flex flex-col gap-1">
-              {teamName && (
-                <div className="flex items-center gap-2 font-medium text-foreground" title="The team whose index this is">
-                  <Users className="size-3.5" /> {teamName}
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <Boxes className="size-3.5" />
-                {overview.data.repos.length} repos · {overview.data.symbols.toLocaleString()} symbols
-              </div>
-            </div>
-          ) : (
-            "Loading index…"
-          )}
+
+        <div className="mt-auto flex flex-col gap-0.5 border-t pt-3">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              cn(
+                "flex min-h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[13.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+                isActive && "bg-muted font-medium text-foreground",
+              )
+            }
+          >
+            <Settings className="size-3.5" /> Settings
+          </NavLink>
           {me.data?.mode === "server" && me.data.email && (
-            <div className="mt-3 flex items-center gap-2 border-t pt-3">
-              <span className="min-w-0 flex-1 truncate" title={me.data.email}>
+            <div className="flex items-center gap-2.5 px-2.5 py-2">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase text-foreground">
+                {me.data.email.slice(0, 2)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={me.data.email}>
                 {me.data.email}
               </span>
-              <button onClick={signOut} className="rounded p-1 hover:bg-muted hover:text-foreground" aria-label="Sign out" title="Sign out">
+              <button onClick={signOut} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Sign out" title="Sign out">
                 <LogOut className="size-3.5" />
               </button>
             </div>
           )}
+          <div className="px-2.5 pt-1 font-mono text-[11px] text-muted-foreground">
+            {overview.data ? `${overview.data.repos.length} repos · ${overview.data.symbols.toLocaleString()} symbols` : "Loading index…"}
+          </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:grid md:grid-cols-[1fr_minmax(0,32rem)_1fr] md:px-6">
-          <div className="flex shrink-0 items-center">
-            <span className="md:hidden">
-              <img src="/logo.svg" alt="" className="size-6 dark:hidden" />
-              <img src="/logo-dark.svg" alt="" className="hidden size-6 dark:block" />
-            </span>
-          </div>
+        <header className="flex h-[60px] shrink-0 items-center gap-3 border-b px-4 md:px-7">
+          <Link to="/" className="md:hidden">
+            <Logo className="size-6" />
+          </Link>
           <button
             onClick={() => setPalette(true)}
-            className="flex h-9 w-full min-w-0 items-center gap-2 rounded-md border bg-card px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-muted"
+            className="flex h-10 w-full max-w-[560px] min-w-0 items-center gap-2.5 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input"
           >
             <Search className="size-4 shrink-0" />
-            <span className="flex-1 truncate text-left">Search symbols, files, contracts…</span>
-            <kbd className="hidden rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
+            <span className="flex-1 truncate text-left">Search symbols, files, contracts</span>
+            <kbd className="hidden rounded border border-input px-1.5 py-0.5 font-mono text-[10.5px] sm:inline">⌘K</kbd>
           </button>
-          <div className="flex shrink-0 items-center justify-end gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-3">
             <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
+            {version > 0 && (
+              <span className="hidden items-center gap-2 font-mono text-xs text-muted-foreground lg:flex" title={latest ?? undefined}>
+                <span className="size-[7px] rounded-full bg-brand shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-brand)_18%,transparent)]" />
+                index v{version} · {ago(latest)}
+              </span>
+            )}
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun /> : <Moon />}
             </Button>
           </div>
         </header>
-        <nav className="flex gap-1 overflow-x-auto border-b px-4 py-2 md:hidden">
-          {NAV.map(({ to, label }) => (
+        <nav className="flex gap-1 overflow-x-auto border-b px-4 py-2 md:hidden" aria-label="Main">
+          {[...NAV, { to: "/settings", label: "Settings" }].map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               end={to === "/"}
               className={({ isActive }) =>
-                cn("rounded-md px-3 py-1.5 text-xs whitespace-nowrap", isActive ? "bg-muted font-medium" : "text-muted-foreground")
+                cn("rounded-md px-3 py-1.5 text-xs whitespace-nowrap", isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")
               }
             >
               {label}
@@ -158,7 +195,7 @@ export function Layout() {
           ))}
         </nav>
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8">
+          <div className="mx-auto w-full min-w-0 max-w-[1400px] px-4 py-7 md:px-7">
             <Outlet />
           </div>
         </main>

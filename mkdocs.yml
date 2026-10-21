@@ -102,6 +102,7 @@ nav:
       - Team setup: guides/team-setup.md
       - Storage: guides/storage.md
       - Self-hosting: guides/self-hosting.md
+      - Using comindly as a library: guides/library.md
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md
       - Preflight and checks: guides/preflight.md

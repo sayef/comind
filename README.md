@@ -259,7 +259,10 @@ One container runs comindly as a server for a team: members sign in by email or 
 hand out, admins invite people and manage the GitHub, GitLab and LLM tokens it uses, and the index
 lives in your own storage (a volume, S3, Google Cloud Storage or Azure). See
 [Self-hosting](https://comindly.pages.dev/guides/self-hosting/); `scripts/docker-local.sh` and
-`docker compose up` try it locally.
+`docker compose up` try it locally. Agents connect to it over HTTP with a personal token.
+
+The crate is also a library: read an index, follow flows and serve the MCP tools from your own
+service ([Using comindly as a library](https://comindly.pages.dev/guides/library/)).
 
 ## CI
 

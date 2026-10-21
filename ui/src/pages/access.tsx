@@ -104,10 +104,10 @@ export function MembersPage() {
           <tbody>
             {list.data.members.map((m) => (
               <Tr key={m.email}>
-                <Td className="font-medium">
+                <Td className="align-middle font-medium">
                   {m.email} {m.email === me.data?.email && <span className="text-muted-foreground">(you)</span>}
                 </Td>
-                <Td>
+                <Td className="align-middle">
                   {m.fixed ? (
                     <Badge variant="outline" title="Set by the deployment (COMINDLY_ADMIN_EMAILS)">
                       <ShieldCheck className="size-3" /> Admin
@@ -119,8 +119,8 @@ export function MembersPage() {
                     </select>
                   )}
                 </Td>
-                <Td className="text-muted-foreground">{day(m.last_seen)}</Td>
-                <Td className="text-right">
+                <Td className="align-middle text-muted-foreground">{day(m.last_seen)}</Td>
+                <Td className="align-middle text-right">
                   <div className="flex justify-end gap-1">
                     {codes && m.email !== me.data?.email && (
                       <Button
@@ -165,12 +165,12 @@ export function MembersPage() {
             <tbody>
               {list.data.invites.map((i) => (
                 <Tr key={i.email}>
-                  <Td className="font-medium">{i.email}</Td>
-                  <Td className="capitalize">{i.role}</Td>
-                  <Td className="text-muted-foreground">
+                  <Td className="align-middle font-medium">{i.email}</Td>
+                  <Td className="align-middle capitalize">{i.role}</Td>
+                  <Td className="align-middle text-muted-foreground">
                     by {i.created_by}, until {day(i.expires)}
                   </Td>
-                  <Td className="text-right">
+                  <Td className="align-middle text-right">
                     <Button variant="ghost" size="sm" onClick={() => revoke.mutate(i.email)}>
                       Withdraw
                     </Button>
@@ -386,10 +386,10 @@ export function AccessPage() {
             <tbody>
               {list.data.tokens.map((t) => (
                 <Tr key={t.id}>
-                  <Td className="font-medium">{t.name}</Td>
-                  <Td className="text-muted-foreground">{day(t.created)}</Td>
-                  <Td className="text-muted-foreground">{day(t.last_used)}</Td>
-                  <Td className="text-right">
+                  <Td className="align-middle font-medium">{t.name}</Td>
+                  <Td className="align-middle text-muted-foreground">{day(t.created)}</Td>
+                  <Td className="align-middle text-muted-foreground">{day(t.last_used)}</Td>
+                  <Td className="align-middle text-right">
                     <Button variant="ghost" size="sm" onClick={() => revoke.mutate(t.id)}>
                       Revoke
                     </Button>

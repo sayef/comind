@@ -57,10 +57,10 @@ function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
       const crosses = !contract && s.node.repo !== repo;
       return (
         <li key={s.node.id} className="flex flex-col">
-          <div className={cn("flex flex-wrap items-center gap-2 rounded-md px-2 py-1", contract && "bg-warning/10")}>
+          <div className={cn("flex flex-wrap items-center gap-2 rounded-md px-2 py-1", contract && "bg-accent")}>
             <span className="w-20 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{s.via}</span>
             {contract ? (
-              <span className="font-mono text-xs text-warning">{s.node.name}</span>
+              <span className="font-mono text-xs text-accent-foreground">{s.node.name}</span>
             ) : (
               <SymbolLink node={s.node} />
             )}
@@ -198,7 +198,7 @@ export function FlowsPage() {
             {f.contracts.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {f.contracts.map((c) => (
-                  <span key={c} className="rounded bg-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-warning">
+                  <span key={c} className="rounded bg-accent px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">
                     {c}
                   </span>
                 ))}
