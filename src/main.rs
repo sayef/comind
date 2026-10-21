@@ -272,11 +272,14 @@ enum Cmd {
     Ui {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
-        /// Serve the web UI on 127.0.0.1 instead of the terminal UI
+        /// Serve the web UI instead of the terminal UI
         #[arg(long)]
         web: bool,
         #[arg(long, default_value_t = 7878)]
         port: u16,
+        /// With `--web`: the address to listen on (`0.0.0.0` in a container)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
         /// With `--web`: open it in the browser
         #[arg(long)]
         open: bool,
@@ -288,13 +291,10 @@ enum Cmd {
         #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
     },
-    /// Use a team's index on this machine: remember its location and AWS profile
+    /// Use a team's index on this machine: remember its location
     Join {
-        /// The team's index (s3://bucket/prefix or a folder)
+        /// The team's index (a folder, s3://, gs:// or az:// location)
         index: String,
-        /// AWS profile for an S3 index (from ~/.aws)
-        #[arg(long)]
-        profile: Option<String>,
     },
     /// The web UI in its own window (macOS)
     App {
@@ -482,12 +482,6 @@ enum ConfigAction {
 }
 
 fn main() -> ExitCode {
-    // Before any thread starts: the configured AWS profile applies unless the shell picked one.
-    if let Some(p) = comindly::config::Config::load().aws_profile {
-        if std::env::var_os("AWS_PROFILE").is_none() {
-            std::env::set_var("AWS_PROFILE", p);
-        }
-    }
     let matches = Cli::command().get_matches();
     // Commands that index, search, serve or show the UI run with the index's team settings.
     if let Some((name, sub)) = matches.subcommand() {
@@ -560,7 +554,7 @@ fn main() -> ExitCode {
                 match configured_checkouts(&cfg) {
                     Ok(r) => r,
                     Err(e) => {
-                        comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+                        comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
                         return ExitCode::FAILURE;
                     }
                 }
@@ -712,7 +706,7 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+                    comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
                     ExitCode::FAILURE
                 }
             }
@@ -727,11 +721,12 @@ fn main() -> ExitCode {
             index_dir,
             web,
             port,
+            host,
             open,
-        } => cmd_ui(index_dir.as_deref(), web.then_some(port), open),
+        } => cmd_ui(index_dir.as_deref(), web.then_some((host, port)), open),
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
-        Cmd::Join { index, profile } => cmd_join(&index, profile.as_deref()),
+        Cmd::Join { index } => cmd_join(&index),
         Cmd::Erase {
             ids,
             actor,
@@ -1228,7 +1223,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
     let head = match comindly::git::head_commit(path) {
         Ok(h) => h,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -1259,7 +1254,7 @@ fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1314,7 +1309,10 @@ fn cmd_remember(
     let (symbols, edges) = match comindly::index::read_graph_blocking(&cfg.graph_dir(from)) {
         Ok(x) => x,
         Err(e) => {
-            comindly::ui::err(&format!("no index to anchor to: {e:#}"));
+            comindly::ui::err(&format!(
+                "no index to anchor to: {}",
+                comindly::storage::explain(&format!("{e:#}"))
+            ));
             return ExitCode::FAILURE;
         }
     };
@@ -1355,7 +1353,7 @@ fn cmd_remember(
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1400,7 +1398,7 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1417,7 +1415,7 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+                comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
                 ExitCode::FAILURE
             }
         };
@@ -1427,7 +1425,7 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
     let records = match comindly::ledger::all_blocking(&cfg.index_dir(from)) {
         Ok(r) => r,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -1517,13 +1515,13 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
             ExitCode::SUCCESS
         }
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
 }
 
-fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
+fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCode {
     use anyhow::Context as _;
     let root = comindly::config::Config::load().index_dir(from);
     let load = match web {
@@ -1531,24 +1529,38 @@ fn cmd_ui(from: Option<&str>, web: Option<u16>, open: bool) -> ExitCode {
         None => comindly::tui::Data::load(&root),
     };
     let run = load.and_then(|data| match web {
-        Some(port) => {
-            let addr = format!("127.0.0.1:{port}");
+        Some((host, port)) => {
+            let addr = format!("{host}:{port}");
             let listener =
                 std::net::TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
+            if let Some(url) = comindly::server::public_url() {
+                anyhow::ensure!(
+                    !comindly::server::admin_emails().is_empty(),
+                    "server mode needs COMINDLY_ADMIN_EMAILS: who administers this server"
+                );
+                let sign_in = comindly::server::sign_in()?;
+                comindly::server::store().context("open the server database")?;
+                comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
+                comindly::ui::note(match sign_in {
+                    comindly::server::SignIn::Email => "members sign in by email",
+                    comindly::server::SignIn::Code => "members sign in with codes admins hand out",
+                });
+                return comindly::web::serve(data, listener, comindly::web::Access::Server);
+            }
             let token = comindly::config::ui_token()?;
-            let url = format!("http://{addr}/?token={token}");
+            let url = format!("http://localhost:{port}/?token={token}");
             comindly::ui::ok(&format!("comindly web UI on {url} (Ctrl-C to stop)"));
             if open {
                 open_in_browser(&url);
             }
-            comindly::web::serve(data, listener, token)
+            comindly::web::serve(data, listener, comindly::web::Access::Local(token))
         }
         None => comindly::tui::App::new(data).run(),
     });
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1641,7 +1653,7 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
     };
     if changed {
         if let Err(e) = comindly::config::set_repos(&list) {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
         comindly::ui::ok(&format!(
@@ -1676,7 +1688,7 @@ fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
     match team_run(what, &root) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1718,6 +1730,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 comindly::credentials::Source::Team => "your key for this team (credentials file)",
                 comindly::credentials::Source::Default => "your default key (credentials file)",
                 comindly::credentials::Source::Environment => "OPENAI_API_KEY",
+                comindly::credentials::Source::Server => "stored on this server",
                 comindly::credentials::Source::None => "none: `comindly team key`",
             };
             comindly::ui::field("api key on this machine", source);
@@ -1778,25 +1791,15 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
+fn cmd_join(index: &str) -> ExitCode {
     let root = comindly::config::expand_tilde(index.trim());
-    if let Some(p) = profile {
-        comindly::s3::use_profile(p);
-    }
     let run = || -> anyhow::Result<()> {
         let rt = comindly::ledger::runtime()?;
         let graph = format!("{}/_graph", root.trim_end_matches('/'));
         let versions = rt.block_on(comindly::index::graph_versions(&graph))?;
         anyhow::ensure!(!versions.is_empty(), "no index at {root}");
         let stored = rt.block_on(comindly::team::load(&root))?;
-        let mut personal = vec![("index_dir", comindly::config::Setting::Text(root.clone()))];
-        if let Some(p) = profile {
-            personal.push((
-                "aws_profile",
-                comindly::config::Setting::Text(p.to_string()),
-            ));
-        }
-        comindly::config::update(&personal)?;
+        comindly::config::update(&[("index_dir", comindly::config::Setting::Text(root.clone()))])?;
         let name = stored.settings.name.clone();
         comindly::ui::ok(&format!("joined {}", name.as_deref().unwrap_or(&root)));
         if comindly::credentials::llm_key(name.as_deref()).0.is_none() {
@@ -1810,7 +1813,7 @@ fn cmd_join(index: &str, profile: Option<&str>) -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -1823,7 +1826,7 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
         match comindly::app::run(root) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+                comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
                 ExitCode::FAILURE
             }
         }
@@ -1854,7 +1857,7 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
     let raw = match comindly::git::working_changes(root, base) {
         Ok(c) => c,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -2136,7 +2139,7 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
     let (all, manual) = match load_conventions(from) {
         Ok(x) => x,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -2203,7 +2206,7 @@ fn cmd_conventions_change(
         Ok(Write::Delete(id)) if restore => comindly::ui::ok(&format!("restored {id}")),
         Ok(Write::Delete(id)) => comindly::ui::ok(&format!("removed {id}")),
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     }
@@ -2422,7 +2425,7 @@ fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+                    comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
                     ExitCode::FAILURE
                 }
             }
@@ -2672,7 +2675,10 @@ fn cmd_link(
                 "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
             )),
             Err(e) => {
-                comindly::ui::err(&format!("write failed: {e:#}"));
+                comindly::ui::err(&format!(
+                    "write failed: {}",
+                    comindly::storage::explain(&format!("{e:#}"))
+                ));
                 return ExitCode::FAILURE;
             }
         }
@@ -3373,7 +3379,7 @@ fn cmd_index(
     let mut out = match comindly::parse::parse_repo(root, &repo_name) {
         Ok(o) => o,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -3432,7 +3438,10 @@ fn cmd_index(
         }) {
         Ok((sv, ev)) => comindly::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
         Err(e) => {
-            comindly::ui::err(&format!("write failed: {e:#}"));
+            comindly::ui::err(&format!(
+                "write failed: {}",
+                comindly::storage::explain(&format!("{e:#}"))
+            ));
             return ExitCode::FAILURE;
         }
     }
@@ -3495,14 +3504,14 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     let head = match comindly::git::head_commit(root) {
         Ok(h) => h,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
     let cs = match comindly::git::changed_files(root, base) {
         Ok(c) => c,
         Err(e) => {
-            comindly::ui::err(&comindly::s3::explain(&format!("{e:#}")));
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
             return ExitCode::FAILURE;
         }
     };
@@ -3585,7 +3594,10 @@ fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> Exi
     if let Err(e) = comindly::index::write_graph_blocking(dst, &symbols, &edges)
         .and_then(|_| comindly::index::write_facts_blocking(dst, &facts))
     {
-        comindly::ui::err(&format!("write failed: {e:#}"));
+        comindly::ui::err(&format!(
+            "write failed: {}",
+            comindly::storage::explain(&format!("{e:#}"))
+        ));
         return ExitCode::FAILURE;
     }
     let _ = comindly::index::write_repo_meta_blocking(dst, repo_name, &head);

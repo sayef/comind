@@ -14,6 +14,7 @@ const sources: Record<KeySource, string> = {
   team: "From your credentials file, for this team",
   default: "From your credentials file",
   environment: "From OPENAI_API_KEY in the environment",
+  server: "Stored on this server (Settings → Integrations)",
   none: "Not set",
 };
 

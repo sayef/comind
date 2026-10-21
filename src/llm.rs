@@ -51,8 +51,8 @@ impl LlmClient {
     pub fn from_env() -> Result<Self> {
         // Your key for this team (credentials file), else your default key, else OPENAI_API_KEY.
         let team = crate::team::current().and_then(|t| t.name);
-        if let (Some(k), source) = crate::credentials::llm_key(team.as_deref()) {
-            if source != crate::credentials::Source::Environment {
+        if let (Some(k), _) = crate::credentials::llm_key(team.as_deref()) {
+            if std::env::var("OPENAI_API_KEY").ok().as_deref() != Some(k.as_str()) {
                 std::env::set_var("OPENAI_API_KEY", k);
             }
         }

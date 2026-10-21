@@ -35,10 +35,6 @@ comfy-table = "7" # unicode result tables
 anyhow = "1"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util"] }
 futures = "0.3"
-# S3 access through the standard AWS chain (profiles, SSO, credential_process); lance uses it too.
-aws-config = "1"
-aws-credential-types = "1"
-async-trait = "0.1"
 toml_edit = "0.25"
 rpassword = "7"
 rayon = "1"
@@ -50,8 +46,9 @@ tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
 model2vec-rs = "0.3"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
-lancedb = { version = "0.37.1", default-features = false, features = ["aws"] }
+lancedb = { version = "0.37.1", default-features = false, features = ["aws", "gcs", "azure"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
+lance-io = { version = "=10.0.0", default-features = false } # object stores for the ledger, as lancedb opens them
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
 rig = { package = "rig-core", version = "0.44", features = ["reqwest"] }
 rmcp = { version = "3.5.1", features = ["server", "transport-io"] } # MCP server
@@ -63,8 +60,13 @@ tree-sitter-rust = "0.24"
 scip = "0.10"
 protobuf = "=3.7.2"
 sqlparser = "0.63"
-object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
+object_store = { version = "0.13.2", default-features = false, features = ["fs"] }
 uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
+# Server mode: members, sessions and encrypted tokens in SQLite; sign-in links by email.
+rusqlite = { version = "0.40", features = ["bundled"] }
+chacha20poly1305 = "0.10"
+getrandom = "0.3"
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 crossterm = "0.29"

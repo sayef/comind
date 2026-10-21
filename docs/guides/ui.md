@@ -7,7 +7,7 @@ system's WebKit, no browser and no bundled Chromium. The window shows a loading 
 index loads, then the UI from a private server on a random local port that only this window can
 call. Links to other sites open in your browser.
 
-Started from a terminal, it sees your shell's environment (AWS credentials for an S3 index). Linux
+Started from a terminal, it sees your shell's environment (storage credentials for an index in a bucket). Linux
 and Windows: use the web UI.
 
 ## Web UI
@@ -56,7 +56,7 @@ new one.
   **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
   branch moved on the remote and re-indexes without LLM steps when one did.
 - **Settings**: the index location (with a connection test), the team settings (shared LLM and
-  embedding model), your own API key, the AWS profile for S3, your name on ledger records, and how often to check for a
+  embedding model), your own API key, your name on ledger records, and how often to check for a
   new index version. Changing the index location switches the UI without a restart.
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
@@ -130,9 +130,8 @@ Search: describe what you are looking for
 Get started: register the MCP server with your agent
 ///
 
-What is running shows in the header's corner (indexing with its current step, waiting for the AWS sign-in,
-or any action in progress), with **Cancel** where it can be stopped; indexing and the sign-in stop with
-every process they started. Finished actions appear as toasts in the bottom-right corner.
+What is running shows in the header's corner (indexing with its current step, or any action in
+progress), with **Cancel** where it can be stopped; indexing stops with every process it started. Finished actions appear as toasts in the bottom-right corner.
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`

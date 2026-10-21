@@ -1,5 +1,5 @@
-//! Local web UI (`comindly ui --web`): one embedded page over a small JSON API, bound to
-//! 127.0.0.1. Ledger reviews write to the index root like the terminal UI.
+//! Web UI (`comindly ui --web`): one embedded page over a small JSON API. Locally it answers on
+//! localhost to the link's token; in server mode members sign in. Ledger writes go to the index root.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
-mod aws;
+mod auth;
 mod flows;
 mod repos;
 mod settings;
@@ -104,7 +104,6 @@ struct AppState {
     current: RwLock<Arc<Session>>,
     job: tokio::sync::Mutex<repos::Job>,
     watch: tokio::sync::Mutex<repos::Watch>,
-    signin: tokio::sync::Mutex<aws::SignIn>,
 }
 
 type Shared = Arc<AppState>;
@@ -158,15 +157,19 @@ impl AppState {
     }
 }
 
-/// Serve the UI on `listener` (bound to 127.0.0.1) until the process ends. API calls must carry
-/// `token` as a cookie; opening any page with `?token=` sets it.
-pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Result<()> {
+/// Who the UI lets in: whoever holds the local link's token, or signed-in members of a server.
+pub enum Access {
+    Local(String),
+    Server,
+}
+
+/// Serve the UI on `listener` until the process ends.
+pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let state = Arc::new(AppState {
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data)))),
         job: Default::default(),
         watch: Default::default(),
-        signin: Default::default(),
     });
     rt.spawn(repos::watch(state.clone()));
     let app = Router::new()
@@ -201,13 +204,30 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/team/key", post(team::key))
         .route("/api/join", post(team::join))
         .route("/api/team/create", post(team::create))
-        .route("/api/aws", get(aws::status))
-        .route("/api/aws/login", post(aws::start))
-        .route("/api/aws/login/cancel", post(aws::cancel))
-        .fallback(get(asset))
-        .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
-        .layer(axum::middleware::from_fn(local_only))
-        .with_state(state);
+        .route("/api/auth/me", get(auth::me))
+        .fallback(get(asset));
+    let app = match access {
+        Access::Local(token) => app
+            .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
+            .layer(axum::middleware::from_fn(local_only)),
+        Access::Server => app
+            .route("/api/auth/link", post(auth::request_link))
+            .route("/api/auth/redeem", post(auth::redeem))
+            .route("/api/auth/code", post(auth::sign_in_code))
+            .route("/api/auth/reset-code", post(auth::reset_own_code))
+            .route("/api/auth/signout", post(auth::sign_out))
+            .route("/api/members", get(auth::members))
+            .route("/api/members/invite", post(auth::invite))
+            .route("/api/members/reset", post(auth::reset_code))
+            .route("/api/members/role", post(auth::set_role))
+            .route("/api/members/remove", post(auth::remove))
+            .route("/api/members/revoke", post(auth::revoke_invite))
+            .route("/api/tokens", get(auth::tokens).post(auth::create_token))
+            .route("/api/tokens/revoke", post(auth::revoke_token))
+            .route("/api/secrets", get(auth::secrets).post(auth::set_secret))
+            .layer(axum::middleware::from_fn(auth::guard)),
+    }
+    .with_state(state);
     listener.set_nonblocking(true)?;
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -392,7 +412,7 @@ pub(crate) fn stop_group(pid: u32) {
 
 /// An error for the UI: short, with S3 replies explained and credentials removed.
 pub(crate) fn error_text(e: &anyhow::Error) -> String {
-    crate::s3::explain(&format!("{e:#}"))
+    crate::storage::explain(&format!("{e:#}"))
 }
 
 fn graph_uri(s: &Session) -> Option<String> {
@@ -860,8 +880,20 @@ struct ReviewBody {
     reason: String,
 }
 
-async fn review(Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
-    match apply_review(&s, &b).await {
+/// Provenance for a write from the UI: the signed-in member on a server, else this machine's user.
+fn provenance(who: Option<&crate::server::Who>) -> Provenance {
+    let mut p = Provenance::human("comindly-web");
+    if let Some(w) = who {
+        p.actor = format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]);
+        p.name = Some(w.email.clone());
+    }
+    p
+}
+
+type Member = Option<axum::Extension<crate::server::Who>>;
+
+async fn review(who: Member, Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
+    match apply_review(&s, &b, provenance(who.as_deref())).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -870,7 +902,7 @@ async fn review(Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
     }
 }
 
-async fn apply_review(s: &Session, b: &ReviewBody) -> Result<String> {
+async fn apply_review(s: &Session, b: &ReviewBody, prov: Provenance) -> Result<String> {
     let root = s.data.root.as_deref().context("read-only UI")?;
     let (kind, _) = crate::ledger::review_action(&b.action).context("unknown action")?;
     let ledger = crate::ledger::Ledger::open(root)?;
@@ -885,12 +917,7 @@ async fn apply_review(s: &Session, b: &ReviewBody) -> Result<String> {
     if matches!(kind, RelationKind::Retracts) && target.kind == crate::ledger::Kind::Relation {
         anyhow::bail!("relations cannot be retracted");
     }
-    let rec = Record::review(
-        &target,
-        &b.action,
-        &b.reason,
-        Provenance::human("comindly-web"),
-    )?;
+    let rec = Record::review(&target, &b.action, &b.reason, prov)?;
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
     let fresh = crate::ledger::derive(&records, &s.data.symbols);
@@ -919,7 +946,7 @@ struct RememberBody {
 }
 
 /// A record written by the person using the UI.
-async fn remember(Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse {
+async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse {
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
@@ -933,7 +960,7 @@ async fn remember(Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse
             let sym = s.data.symbols.iter().find(|x| x.id.render() == id);
             anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?));
         }
-        let mut rec = Record::new(kind, &b.title, anchors, Provenance::human("comindly-web"));
+        let mut rec = Record::new(kind, &b.title, anchors, provenance(who.as_deref()));
         rec.body = b.body.trim().to_string();
         rec.trigger = b.trigger.filter(|t| !t.trim().is_empty());
         rec.evidence = b

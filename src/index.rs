@@ -2,7 +2,7 @@
 //!
 //! Tables: `symbols`, `edges`, `file_facts`, `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`.
 //! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
-//! is the atomic "latest" pointer. S3 uses the standard AWS environment for credentials/region.
+//! is the atomic "latest" pointer. Remote stores use the platform's own credentials.
 
 use std::sync::Arc;
 
@@ -178,7 +178,7 @@ pub(crate) async fn write_versioned(
 /// Write the symbol/edge graph to a LanceDB dataset at `uri`
 /// (e.g. `s3://bucket/prefix` or a local path). Returns the new `(symbols, edges)` versions.
 pub async fn write_graph(uri: &str, symbols: &[Symbol], edges: &[Edge]) -> Result<(u64, u64)> {
-    let db = crate::s3::connect(uri)
+    let db = crate::storage::connect(uri)
         .execute()
         .await
         .with_context(|| format!("connect lancedb at {uri}"))?;
@@ -189,7 +189,7 @@ pub async fn write_graph(uri: &str, symbols: &[Symbol], edges: &[Edge]) -> Resul
 
 /// Read the current `(symbols, edges)` versions — the atomic latest pointer.
 pub async fn latest_versions(uri: &str) -> Result<(u64, u64)> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let sv = db.open_table("symbols").execute().await?.version().await?;
     let ev = db.open_table("edges").execute().await?.version().await?;
     Ok((sv, ev))
@@ -295,7 +295,7 @@ pub async fn read_graph(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 
 /// The graph at given `(symbols, edges)` table versions, or the latest.
 pub async fn read_graph_at(uri: &str, at: Option<(u64, u64)>) -> Result<(Vec<Symbol>, Vec<Edge>)> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     read_graph_in(&db, at).await
 }
 
@@ -444,7 +444,7 @@ fn edge_kind_from_str(s: &str) -> EdgeKind {
 /// Graph versions as `(symbols version, edges version, UTC time)`, oldest first. Each graph
 /// write commits both tables, so the n-th versions of each belong together.
 pub async fn graph_versions(uri: &str) -> Result<Vec<(u64, u64, String)>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let s = db.open_table("symbols").execute().await?;
     let e = db.open_table("edges").execute().await?;
     versions_of(&s, &e).await
@@ -468,7 +468,7 @@ pub fn read_graph_blocking(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
 
 /// Read back `(symbol_count, edge_count)` — proves the persisted tables are queryable.
 pub async fn count_rows(uri: &str) -> Result<(usize, usize)> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let symbols = db
         .open_table("symbols")
         .execute()
@@ -518,14 +518,14 @@ pub async fn write_repo_meta(uri: &str, repo: &str, commit: &str) -> Result<()> 
         ],
     )
     .context("build repo_meta batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "repo_meta", batch).await?;
     Ok(())
 }
 
 /// The commit a repo dataset was last indexed at, if recorded.
 pub async fn read_repo_meta(uri: &str) -> Result<Option<String>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("repo_meta").execute().await else {
         return Ok(None);
     };
@@ -569,7 +569,7 @@ pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> 
         ],
     )
     .context("build repo_commits batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "repo_meta", batch).await?;
     Ok(())
 }
@@ -584,7 +584,7 @@ pub struct IndexedRepo {
 
 /// The repositories recorded in the index (indexes made before remotes were stored have none).
 pub async fn read_indexed_repos(uri: &str) -> Result<Vec<IndexedRepo>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("repo_meta").execute().await else {
         return Ok(Vec::new());
     };
@@ -677,7 +677,7 @@ pub async fn write_search_table(uri: &str, rows: &[SearchRow]) -> Result<u64> {
     )
     .context("build search batch")?;
 
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let version = write_versioned(&db, "search", batch).await?;
 
     // (Re)build the BM25 full-text index on `text`.
@@ -703,7 +703,7 @@ pub async fn write_search_table(uri: &str, rows: &[SearchRow]) -> Result<u64> {
 
 /// Read `(symbol_id, vector)` from the search table for incremental reuse. `Ok(None)` if absent.
 pub async fn read_search_vectors(uri: &str) -> Result<Option<Vec<VectorRow>>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("search").execute().await else {
         return Ok(None);
     };
@@ -736,7 +736,7 @@ pub async fn hybrid_search(
     query_vector: Vec<f32>,
     k: usize,
 ) -> Result<Vec<(String, f32)>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let tbl = db.open_table("search").execute().await?;
     hybrid_in(&tbl, query_text, query_vector, k).await
 }
@@ -785,7 +785,7 @@ pub struct Tables {
 
 impl Tables {
     pub async fn connect(uri: &str, fresh: std::time::Duration) -> Result<Tables> {
-        let db = crate::s3::connect(uri)
+        let db = crate::storage::connect(uri)
             .read_consistency_interval(fresh)
             .execute()
             .await
@@ -873,13 +873,13 @@ pub async fn write_enrichment(uri: &str, rows: &[TextRow]) -> Result<u64> {
         ],
     )
     .context("build enrichment batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "enrichment", batch).await
 }
 
 /// Load persisted enrichment as `(symbol_id, summary, queries)`. `Ok(None)` if absent.
 pub async fn read_enrichment(uri: &str) -> Result<Option<Vec<TextRow>>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("enrichment").execute().await else {
         return Ok(None);
     };
@@ -939,13 +939,13 @@ pub async fn write_flows(uri: &str, rows: &[TextRow]) -> Result<u64> {
         ],
     )
     .context("build flows batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "flows", batch).await
 }
 
 /// Load persisted flows as `(entry_id, narration, queries)`. `Ok(None)` if absent.
 pub async fn read_flows(uri: &str) -> Result<Option<Vec<TextRow>>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("flows").execute().await else {
         return Ok(None);
     };
@@ -988,14 +988,14 @@ pub async fn write_style_guide(uri: &str, rows: &[(String, String)]) -> Result<(
         ],
     )
     .context("build style_guide batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "style_guide", batch).await?;
     Ok(())
 }
 
 /// Read the persisted per-repo style guides as `(repo, content)` pairs.
 pub async fn read_style_guide(uri: &str) -> Result<Vec<(String, String)>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("style_guide").execute().await else {
         return Ok(vec![]);
     };
@@ -1046,14 +1046,14 @@ pub async fn write_facts(uri: &str, facts: &[FileFacts]) -> Result<()> {
         ],
     )
     .context("build file_facts batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "file_facts", batch).await?;
     Ok(())
 }
 
 /// Read persisted facts; `None` for indexes written before facts were stored.
 pub async fn read_facts(uri: &str) -> Result<Option<Vec<FileFacts>>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("file_facts").execute().await else {
         return Ok(None);
     };
@@ -1089,13 +1089,13 @@ pub async fn write_recipes(uri: &str, rows: &[crate::conventions::Convention]) -
         ],
     )
     .context("build recipes batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "recipes", batch).await?;
     Ok(())
 }
 
 pub async fn read_recipes(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("recipes").execute().await else {
         return Ok(Vec::new());
     };
@@ -1139,13 +1139,13 @@ pub async fn write_packages(uri: &str, rows: &[crate::manifests::PackageRow]) ->
         ],
     )
     .context("build packages batch")?;
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     write_versioned(&db, "packages", batch).await?;
     Ok(())
 }
 
 pub async fn read_packages(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
-    let db = crate::s3::connect(uri).execute().await?;
+    let db = crate::storage::connect(uri).execute().await?;
     let Ok(tbl) = db.open_table("packages").execute().await else {
         return Ok(Vec::new());
     };
@@ -1202,7 +1202,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let db = crate::s3::connect(uri).execute().await.unwrap();
+        let db = crate::storage::connect(uri).execute().await.unwrap();
         write_versioned(&db, "repo_meta", old).await.unwrap();
         let read = read_indexed_repos(uri).await.unwrap();
         assert_eq!(read[0].remote, None);

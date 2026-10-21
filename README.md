@@ -187,7 +187,7 @@ ledger, packages and search. Shown here on the example shop in [`examples/acme`]
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
 | `comindly team [set k=v… \| key]` | Team settings stored with the index (LLM, embedding model, LLM steps); `key` stores your own API key |
-| `comindly join <index> [--profile p]` | Use a team's index on this machine |
+| `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comindly config <path\|init>` | Show or scaffold the config file |
 
@@ -253,6 +253,14 @@ src/mcp.rs     MCP server (15 tools)
 src/main.rs    the comindly binary (CLI)
 ```
 
+## For a team
+
+One container runs comindly as a server for a team: members sign in by email or with codes admins
+hand out, admins invite people and manage the GitHub, GitLab and LLM tokens it uses, and the index
+lives in your own storage (a volume, S3, Google Cloud Storage or Azure). See
+[Self-hosting](https://comindly.pages.dev/guides/self-hosting/); `scripts/docker-local.sh` and
+`docker compose up` try it locally.
+
 ## CI
 
 [`.github/workflows/comindly-index.yml`](.github/workflows/comindly-index.yml) (and
@@ -289,9 +297,8 @@ Environment overrides: `COMINDLY_INDEX_DIR`, `COMINDLY_LLM_MODEL`, `COMINDLY_EMB
 `COMINDLY_LLM_BASE_URL`, `COMINDLY_FORMAT`.
 
 **Secrets stay in the environment**, never the file: `--enrich`/`--flows` use an LLM via Rig
-(default OpenAI, `OPENAI_API_KEY`; any OpenAI-compatible endpoint via `COMINDLY_LLM_BASE_URL`). For an
-`s3://…` index, AWS credentials/region come from the standard AWS environment (`AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, or an SSO profile).
+(default OpenAI, `OPENAI_API_KEY`; any OpenAI-compatible endpoint via `COMINDLY_LLM_BASE_URL`). An index in a
+bucket (`s3://`, `gs://`, `az://`) is read with the credentials the machine or container already has.
 
 ## Status
 

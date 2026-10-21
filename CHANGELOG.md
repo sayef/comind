@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Server mode for teams (`COMINDLY_PUBLIC_URL`): sign-in entirely by email or entirely by codes
+  admins hand out (`COMINDLY_SIGN_IN`), invitations tied to one address, admins and members, personal access tokens for agents, and the server's GitHub, GitLab
+  and LLM tokens kept encrypted or taken from the deployment's secrets (`*_FILE` too).
+- A container image (`Dockerfile`) and a local stack (`compose.yaml`, `scripts/docker-local.sh`) with
+  an S3-compatible store and a mail catcher.
 - Settings → Repositories → **From GitHub or GitLab**: list an organisation or group (github.com, GitHub
   Enterprise, gitlab.com, self-hosted GitLab with subgroups), pick repositories, and comindly clones and
   keeps them itself; `comindly repos add <clone URL>` does the same from the terminal.
@@ -18,8 +23,8 @@ All notable changes to this project are documented here. The format follows
   that handle them, listed with the repositories it passes through and opened as a tree of steps;
   `/api/flows`. Indexing narrates the flows that reach furthest, across repositories first.
 - comindly's icon in the macOS Dock and app switcher for `comindly app`.
-- Activity in the app's header (indexing, AWS sign-in, any action in progress) with **Cancel**, and toasts
-  when actions finish; indexing and the sign-in stop with everything they started, and a cancelled request
+- Activity in the app's header (indexing, any action in progress) with **Cancel**, and toasts
+  when actions finish; indexing stops with everything it started, and a cancelled request
   stops its work on the server.
 - `install.sh` verifies the download's SHA-256, and every release is installed on Linux and macOS and with
   `cargo install` before it counts.
@@ -32,7 +37,14 @@ All notable changes to this project are documented here. The format follows
   from it. Org-wide examples name their repository.
 - Connect is now **Get started**, and Repositories moved under **Settings**. The separate Clone dialog is
   gone: **From GitHub or GitLab** takes an organisation, a group or a single repository.
-- Messages read as sentences, long commands wrap, and AWS credential errors are one line.
+- Messages read as sentences, long commands wrap, and storage errors are one line.
+- An index can live in Google Cloud Storage (`gs://`) and Azure Blob Storage (`az://`) as well as S3 and
+  folders, read with the credentials the machine or container already has.
+
+### Removed
+
+- AWS profile handling: the profile setting, `join --profile`, the app's AWS sign-in and
+  `sso_auto_login`. Storage access comes from the platform's environment.
 
 ## [0.1.0](https://github.com/sayef/comindly/releases/tag/v0.1.0) - 2026-10-19
 

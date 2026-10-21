@@ -1,0 +1,59 @@
+# Local stack: comindly as a server, its index in SeaweedFS (S3-compatible) and its email caught by
+# Mailpit. `scripts/docker-local.sh`, then `docker compose up`; open http://localhost:7878 and read
+# the sign-in mail at http://localhost:8025. Secrets come from .secrets/, as a deployment's would.
+services:
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json
+    configs:
+      - source: s3
+        target: /etc/seaweedfs/s3.json
+    volumes: [s3:/data]
+
+  bucket:
+    image: amazon/aws-cli:2.38.3
+    depends_on: [s3]
+    environment: &s3-keys
+      AWS_ACCESS_KEY_ID: comindly
+      AWS_SECRET_ACCESS_KEY: local-stack-only
+      AWS_REGION: us-east-1
+    entrypoint: ["sh", "-c", "until aws --endpoint-url http://s3:8333 s3 ls >/dev/null 2>&1; do sleep 1; done; aws --endpoint-url http://s3:8333 s3 mb s3://comindly || true"]
+
+  mail:
+    image: axllent/mailpit:v1.31.3
+    ports: ["127.0.0.1:8025:8025"]
+
+  comindly:
+    image: comindly:local
+    depends_on:
+      bucket: { condition: service_completed_successfully }
+    environment:
+      <<: *s3-keys
+      COMINDLY_INDEX_DIR: s3://comindly/index
+      AWS_ENDPOINT_URL: http://s3:8333
+      AWS_ALLOW_HTTP: "true"
+      COMINDLY_PUBLIC_URL: http://localhost:7878
+      COMINDLY_ADMIN_EMAILS: ${COMINDLY_ADMIN_EMAILS:-admin@example.com}
+      COMINDLY_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      COMINDLY_SECRET_KEY_FILE: /run/secrets/secret_key
+      COMINDLY_SMTP_URL: smtp://mail:1025
+      COMINDLY_SMTP_FROM: comindly <comindly@example.com>
+      COMINDLY_SIGN_IN: ${COMINDLY_SIGN_IN:-}
+    secrets: [admin_token, secret_key]
+    ports: ["127.0.0.1:7878:7878"]
+    volumes: [comindly:/data]
+
+configs:
+  s3:
+    content: |
+      {"identities": [{"name": "comindly", "credentials": [{"accessKey": "comindly", "secretKey": "local-stack-only"}], "actions": ["Admin", "Read", "Write", "List", "Tagging"]}]}
+
+secrets:
+  admin_token:
+    file: .secrets/admin_token
+  secret_key:
+    file: .secrets/secret_key
+
+volumes:
+  s3:
+  comindly:

@@ -58,10 +58,6 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
             "local mirror present (hooks read it)",
             "no local mirror yet: `comindly cache refresh` (hooks create it on first use)",
         );
-        match crate::s3::check() {
-            Ok(m) => check(true, false, &m, ""),
-            Err(m) => check(false, false, "", &m),
-        }
     }
     let settings = std::env::var_os("HOME")
         .map(|h| Path::new(&h).join(".claude/settings.json"))

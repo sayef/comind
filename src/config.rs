@@ -39,16 +39,12 @@ pub struct Config {
     pub allowed_signers: Option<String>,
     /// Seconds between freshness checks of the local mirror of a remote index (default 300).
     pub cache_ttl_secs: Option<u64>,
-    /// AWS profile for S3 indexes when `AWS_PROFILE` is not set (credentials stay in `~/.aws`).
-    pub aws_profile: Option<String>,
     /// Name shown on ledger records you write (default: git `user.name`).
     pub author_name: Option<String>,
     /// `false` keeps names off new ledger records (only the pseudonymous actor id is stored).
     pub record_names: Option<bool>,
     /// Re-index from the app when a listed repository's default branch moves on the remote.
     pub auto_index: Option<bool>,
-    /// When the AWS SSO session has expired, start `aws sso login` (you still approve it).
-    pub sso_auto_login: Option<bool>,
     /// Repositories `comindly link` indexes when given none: comindly checks out each one's default
     /// branch in its own worktree.
     #[serde(default)]

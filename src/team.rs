@@ -50,7 +50,7 @@ fn uri(root: &str) -> String {
 
 /// The team settings of the index at `root` (empty when none were saved).
 pub async fn load(root: &str) -> Result<Stored> {
-    let db = crate::s3::connect(&uri(root)).execute().await?;
+    let db = crate::storage::connect(&uri(root)).execute().await?;
     let Ok(tbl) = db.open_table(TABLE).execute().await else {
         return Ok(Stored::default());
     };
@@ -73,7 +73,7 @@ pub async fn load(root: &str) -> Result<Stored> {
 
 /// Save `settings` if nobody saved since `expected` (the version they were loaded at).
 pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) -> Result<u64> {
-    let db = crate::s3::connect(&uri(root)).execute().await?;
+    let db = crate::storage::connect(&uri(root)).execute().await?;
     let now = match db.open_table(TABLE).execute().await {
         Ok(t) => Some(t.version().await?),
         Err(_) => None,

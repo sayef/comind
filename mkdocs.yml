@@ -100,7 +100,8 @@ nav:
   - Guides:
       - Using comindly with agents: guides/agents.md
       - Team setup: guides/team-setup.md
-      - S3 and compatible storage: guides/storage.md
+      - Storage: guides/storage.md
+      - Self-hosting: guides/self-hosting.md
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md
       - Preflight and checks: guides/preflight.md

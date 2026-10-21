@@ -27,8 +27,9 @@ pub mod parse;
 pub mod preflight;
 pub mod recipes;
 pub mod resolve;
-pub mod s3;
 pub mod scip;
+pub mod server;
+pub mod storage;
 pub mod team;
 pub mod worktree;
 

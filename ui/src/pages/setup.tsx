@@ -77,23 +77,22 @@ const AGENTS = ["claude", "cursor", "codex", "vscode", "other"] as const;
 type Agent = (typeof AGENTS)[number];
 const AGENT_NAME: Record<Agent, string> = { claude: "Claude Code", cursor: "Cursor", codex: "Codex", vscode: "VS Code", other: "Other" };
 
-function connect(agent: Agent, index: string, remote: boolean) {
+function connect(agent: Agent, index: string) {
   const args = ["serve", "--index-dir", index];
-  const env = remote ? { AWS_PROFILE: "<profile>", AWS_REGION: "<region>" } : null;
   const json = (servers: string, extra: object = {}) =>
-    JSON.stringify({ [servers]: { comindly: { ...extra, command: "comindly", args, ...(env ? { env } : {}) } } }, null, 2);
+    JSON.stringify({ [servers]: { comindly: { ...extra, command: "comindly", args } } }, null, 2);
   switch (agent) {
     case "claude":
       return {
         where: "Run once in a terminal (user scope: every project):",
-        code: `claude mcp add --scope user comindly${env ? " -e AWS_PROFILE=<profile> -e AWS_REGION=<region>" : ""} -- comindly ${args.join(" ")}`,
+        code: `claude mcp add --scope user comindly -- comindly ${args.join(" ")}`,
       };
     case "cursor":
       return { where: "Add to ~/.cursor/mcp.json:", code: json("mcpServers") };
     case "codex":
       return {
         where: "Add to ~/.codex/config.toml:",
-        code: `[mcp_servers.comindly]\ncommand = "comindly"\nargs = ${JSON.stringify(args)}${env ? `\nenv = { AWS_PROFILE = "<profile>", AWS_REGION = "<region>" }` : ""}`,
+        code: `[mcp_servers.comindly]\ncommand = "comindly"\nargs = ${JSON.stringify(args)}`,
       };
     case "vscode":
       return { where: "Add to .vscode/mcp.json in your workspace:", code: json("servers", { type: "stdio" }) };
@@ -107,7 +106,7 @@ export function SetupPage() {
   const [agent, setAgent] = useState<Agent>("claude");
   const s = setup.data;
   const index = s?.index || "<index-dir>";
-  const how = connect(agent, index, !!s?.remote);
+  const how = connect(agent, index);
 
   return (
     <div className="flex flex-col gap-6">
@@ -171,8 +170,8 @@ export function SetupPage() {
             <Code>{how.code}</Code>
             {s?.remote && (
               <p>
-                The index is in S3, so the server needs AWS credentials: set the profile and region (or other AWS variables) your account
-                uses. Hooks read a local mirror that refreshes itself.
+                The index is in a bucket, so the agent needs the same storage credentials as this app. Hooks read a local mirror that
+                refreshes itself.
               </p>
             )}
             <p>Restart the agent; it then lists comindly's tools and calls them on its own when a question needs them.</p>

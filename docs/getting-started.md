@@ -117,8 +117,8 @@ needs them.
     }
     ```
 
-For an index in S3, give the server AWS credentials, for example `-e AWS_PROFILE=… -e AWS_REGION=…`
-with `claude mcp add`, or an `env` block in the JSON and TOML configs.
+For an index in a bucket, the server needs the same storage credentials as you ([Storage](guides/storage.md)),
+for example `-e AWS_PROFILE=…` with `claude mcp add`, or an `env` block in the JSON and TOML configs.
 
 Restart the agent and ask it something only a map of the whole codebase can answer:
 

@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, Boxes, LayoutDashboard, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun, Users, Workflow } from "lucide-react";
+import { BookMarked, Boxes, LayoutDashboard, LogOut, Moon, Network, Package, Rocket, Ruler, Search, Settings, Sun, Users, Workflow } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { Activity } from "@/components/activity";
-import { AwsBanner } from "@/components/aws-banner";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +27,8 @@ export function Layout() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
   const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
+  const signOut = () => api.signOut().finally(() => window.location.replace("/"));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -105,6 +106,16 @@ export function Layout() {
           ) : (
             "Loading index…"
           )}
+          {me.data?.mode === "server" && me.data.email && (
+            <div className="mt-3 flex items-center gap-2 border-t pt-3">
+              <span className="min-w-0 flex-1 truncate" title={me.data.email}>
+                {me.data.email}
+              </span>
+              <button onClick={signOut} className="rounded p-1 hover:bg-muted hover:text-foreground" aria-label="Sign out" title="Sign out">
+                <LogOut className="size-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -146,7 +157,6 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
-        <AwsBanner remote={!!overview.data?.root?.startsWith("s3://")} />
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8">
             <Outlet />

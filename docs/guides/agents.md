@@ -85,7 +85,7 @@ or with `comindly conventions add|edit|rm|restore`.
 |---|---|
 | The agent lists no comindly tools | Restart the agent after adding the server; run the `comindly serve` command yourself to see errors. |
 | "no index here yet" | The `--index-dir` path; `comindly doctor --index-dir …`. |
-| An S3 index fails to load | The server's environment needs AWS credentials (`AWS_PROFILE` and `AWS_REGION`, or keys). |
+| An index in a bucket fails to load | The server's environment needs storage credentials ([Storage](storage.md)). |
 | `search` finds nothing | The index was built with `--no-embed`; rebuild without it. |
 | Answers miss recent code | The index is older than the code: re-run `comindly link` (CI usually does). |
 | New conventions or records do not show | A running MCP server loads them at start; restart the agent. |

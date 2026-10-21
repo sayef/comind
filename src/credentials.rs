@@ -41,11 +41,22 @@ pub enum Source {
     Team,
     Default,
     Environment,
+    Server,
     None,
 }
 
-/// The API key for `team` (a team name): its entry, else the default, else `OPENAI_API_KEY`.
+/// The API key for `team` (a team name): its entry, else the default, else `OPENAI_API_KEY`;
+/// on a server, the deployment's key or the one stored there.
 pub fn llm_key(team: Option<&str>) -> (Option<String>, Source) {
+    if crate::server::enabled() {
+        if let Some(k) = crate::server::env_secret("OPENAI_API_KEY") {
+            return (Some(k), Source::Environment);
+        }
+        return match crate::server::store().and_then(|s| s.secret(crate::server::LLM_SECRET)) {
+            Some(k) => (Some(k), Source::Server),
+            None => (None, Source::None),
+        };
+    }
     let f = read();
     if let Some(k) = team.and_then(|t| f.team.iter().find(|e| e.name == t)) {
         return (Some(k.llm_api_key.clone()), Source::Team);

@@ -50,41 +50,24 @@ function linkDiff(then: OrgMap, now: OrgMap) {
   return { added: [...b].filter((k) => !a.has(k)), gone: [...a].filter((k) => !b.has(k)) };
 }
 
-/** Where a team's index lives: a folder or an S3 location, with the AWS profile for S3. */
-function Location({ index, setIndex, profile, setProfile }: { index: string; setIndex: (v: string) => void; profile: string; setProfile: (v: string) => void }) {
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
-  return (
-    <>
-      <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://bucket/comindly or a folder" className="font-mono text-xs" />
-      {index.trim().startsWith("s3://") && (
-        <select className="h-9 rounded-md border bg-card px-2 text-sm" value={profile} onChange={(e) => setProfile(e.target.value)}>
-          <option value="">AWS profile: default</option>
-          {settings.data?.aws_profiles.map((p) => (
-            <option key={p} value={p}>
-              AWS profile: {p}
-            </option>
-          ))}
-        </select>
-      )}
-    </>
-  );
+/** Where a team's index lives: a folder or a bucket location. */
+function Location({ index, setIndex }: { index: string; setIndex: (v: string) => void }) {
+  return <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://, gs://, az:// or a folder" className="font-mono text-xs" />;
 }
 
 /** First run: use the team's index. */
 function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
-  const [profile, setProfile] = useState("");
-  const s3 = index.trim().startsWith("s3://");
-  const join = useMutation({ mutationFn: () => api.join(index, s3 ? profile : ""), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
+  const join = useMutation({ mutationFn: () => api.join(index), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
     <Card className="flex flex-col p-4 text-left">
       <div className="text-sm font-medium">Join a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Where your team's index lives and, for S3, your AWS profile (sign in with <code>aws sso login</code> first).
+        Where your team's index lives. Bucket access uses the credentials this machine already has.
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
-        <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
+        <Location index={index} setIndex={setIndex} />
         <div className="mt-auto">
           <Button variant="brand" disabled={!index.trim()} loading={join.isPending} onClick={() => join.mutate()}>
             Join
@@ -96,16 +79,14 @@ function JoinTeam() {
   );
 }
 
-/** First run: start a team at an empty folder or S3 location; colleagues then join it. */
+/** First run: start a team at an empty folder or bucket location; colleagues then join it. */
 function CreateTeam() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [index, setIndex] = useState("");
-  const [profile, setProfile] = useState("");
-  const s3 = index.trim().startsWith("s3://");
   const create = useMutation({
-    mutationFn: () => api.createTeam(name, index, s3 ? profile : ""),
+    mutationFn: () => api.createTeam(name, index),
     meta: { inline: true },
     onSuccess: () => (qc.invalidateQueries(), navigate("/settings/repositories")),
   });
@@ -113,11 +94,11 @@ function CreateTeam() {
     <Card className="flex flex-col p-4 text-left">
       <div className="text-sm font-medium">Create a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Pick an empty folder or S3 location everyone can reach. You add repositories next; colleagues join with the same location.
+        Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location.
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" />
-        <Location index={index} setIndex={setIndex} profile={profile} setProfile={setProfile} />
+        <Location index={index} setIndex={setIndex} />
         <div className="mt-auto">
           <Button variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending} onClick={() => create.mutate()}>
             Create team

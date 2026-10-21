@@ -21,23 +21,16 @@ fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
 pub(super) async fn get(Cur(s): Cur) -> Json<Value> {
     let cfg = Config::load();
     let root = s.data.root.clone().unwrap_or_default();
-    let remote = root.starts_with("s3://");
-    let (aws, key) = tokio::task::spawn_blocking(move || {
-        let aws = remote.then(crate::s3::check);
+    let key = tokio::task::spawn_blocking(|| {
         let team = crate::team::current().and_then(|t| t.name);
-        let key = crate::credentials::llm_key(team.as_deref()).1;
-        (aws, key)
+        crate::credentials::llm_key(team.as_deref()).1
     })
     .await
-    .unwrap_or((None, crate::credentials::Source::None));
+    .unwrap_or(crate::credentials::Source::None);
     Json(json!({
         "config_path": crate::config::config_path(),
         "index_dir": cfg.index_dir,
         "index_effective": root,
-        "aws_profile": cfg.aws_profile,
-        "aws_profile_env": std::env::var("AWS_PROFILE").ok(),
-        "aws_profiles": crate::s3::profiles(),
-        "aws_status": aws.map(|r| match r { Ok(m) => json!({"ok": true, "message": m}), Err(m) => json!({"ok": false, "message": m}) }),
         "author_name": cfg.author_name,
         "author_effective": crate::ledger::author_name(),
         "record_names": cfg.record_names.unwrap_or(true),
@@ -47,21 +40,18 @@ pub(super) async fn get(Cur(s): Cur) -> Json<Value> {
         "llm_key": key,
         "cache_ttl_secs": cfg.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL),
         "auto_index": cfg.auto_index.unwrap_or(false),
-        "sso_auto_login": cfg.sso_auto_login.unwrap_or(false),
     }))
 }
 
 #[derive(Deserialize)]
 pub(super) struct Changes {
     index_dir: Option<String>,
-    aws_profile: Option<String>,
     author_name: Option<String>,
     record_names: Option<bool>,
     llm_base_url: Option<String>,
     llm_model: Option<String>,
     cache_ttl_secs: Option<u64>,
     auto_index: Option<bool>,
-    sso_auto_login: Option<bool>,
 }
 
 /// Save the given settings; a new index location is loaded before it is saved.
@@ -74,7 +64,6 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
         };
         let mut changes: Vec<(&str, Setting)> = Vec::new();
         for (key, v) in [
-            ("aws_profile", &c.aws_profile),
             ("author_name", &c.author_name),
             ("llm_base_url", &c.llm_base_url),
             ("llm_model", &c.llm_model),
@@ -86,7 +75,6 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
         for (key, v) in [
             ("record_names", c.record_names),
             ("auto_index", c.auto_index),
-            ("sso_auto_login", c.sso_auto_login),
         ] {
             if let Some(v) = v {
                 changes.push((key, Setting::Flag(v)));
@@ -108,14 +96,6 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             message = format!("saved; now showing {dir}");
         }
         crate::config::update(&changes)?;
-        if let Some(p) = c
-            .aws_profile
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-        {
-            crate::s3::use_profile(p);
-        }
         anyhow::Ok(message)
     };
     match run.await {

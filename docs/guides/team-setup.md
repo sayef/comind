@@ -38,8 +38,7 @@ comindly init-hooks claude                                # Claude Code hooks to
 Settings everyone on an index must share live with the index (`<index>/_team`, a versioned LanceDB
 table), so every member, CI job and agent runs the same: the LLM endpoint and model, the embedding model
 (an index's vectors only work with the model that made them) and which LLM steps run while indexing. They
-win over personal settings. Your own `config.toml` keeps what is personal: the index location, AWS
-profile, your name and app preferences.
+win over personal settings. Your own `config.toml` keeps what is personal: the index location, your name and app preferences.
 
 The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
 the trust boundary.
@@ -83,20 +82,19 @@ CI sets `OPENAI_API_KEY` from its secret store.
 ### Starting a team
 
 In the app, **Create a team** on the first screen takes a team name and an empty location everyone can
-reach: a shared folder, or `s3://bucket/prefix` with your AWS profile. comindly writes the team settings
+reach: a shared folder, or a bucket location (`s3://`, `gs://`, `az://`). comindly writes the team settings
 there (which also checks you can write to it), switches to it and opens **Settings → Repositories** to add
 and index the first repositories. It refuses a location that already has a team or an index; join that
 one instead.
 
 ### Joining
 
-A colleague needs only the index location and their own cloud access:
+A colleague needs only the index location and their own access to it ([Storage](storage.md)):
 
 ```sh
-aws sso login --profile team-dev                        # their own access to the bucket
-comindly join s3://bucket/comindly --profile team-dev      # remembers both
+comindly join s3://bucket/comindly
 ```
 
-or, in the app, **Join a team** on the first screen (index location, AWS profile); this works as soon as
+or, in the app, **Join a team** on the first screen; this works as soon as
 the team exists, before anything is indexed. For LLM steps they add
 their own API key as above.

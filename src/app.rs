@@ -124,7 +124,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
             let token = crate::web::new_token();
             let url = format!("http://127.0.0.1:{port}/?token={token}");
             let _ = proxy.send_event(Msg::Ready(url));
-            crate::web::serve(data, listener, token)
+            crate::web::serve(data, listener, crate::web::Access::Local(token))
         })();
         if let Err(e) = started {
             let _ = proxy.send_event(Msg::Failed(format!("{e:#}")));
@@ -195,8 +195,8 @@ fn failed(error: &str, config: &str) -> String {
         r#"<!doctype html><html><head><meta charset="utf-8"><style>{STYLE}</style></head><body><main>
 <h1>comindly could not open the index</h1><pre>{}</pre>
 <p>Set <code>index_dir</code> in <code>{}</code>, or start the app from a terminal with
-<code>comindly app --index-dir …</code>. An index in S3 needs AWS credentials in the environment the
-app starts from.</p></main></body></html>"#,
+<code>comindly app --index-dir …</code>. An index in a bucket needs the platform's credentials in the
+environment the app starts from.</p></main></body></html>"#,
         escape(error),
         escape(config)
     )

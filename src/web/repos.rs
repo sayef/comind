@@ -466,7 +466,10 @@ pub(super) struct RemoteListQ {
 }
 
 /// The repositories of a GitHub organisation or GitLab group, with the ones already here marked.
-pub(super) async fn remote_list(Json(q): Json<RemoteListQ>) -> impl IntoResponse {
+pub(super) async fn remote_list(
+    who: Option<axum::Extension<crate::server::Who>>,
+    Json(q): Json<RemoteListQ>,
+) -> impl IntoResponse {
     let run = async {
         let source = crate::hosting::parse(&q.url)?;
         let given = q
@@ -487,7 +490,12 @@ pub(super) async fn remote_list(Json(q): Json<RemoteListQ>) -> impl IntoResponse
         let repos = crate::hosting::list(&source, auth.as_ref()).await?;
         if let Some(a) = given {
             let host = source.host.clone();
-            tokio::task::spawn_blocking(move || worktree::approve(&host, &a)).await?;
+            match (crate::server::store(), who) {
+                (Some(store), Some(w)) => {
+                    store.set_secret(&w.email, &crate::server::git_secret(&host), &a.token)?
+                }
+                _ => tokio::task::spawn_blocking(move || worktree::approve(&host, &a)).await?,
+            }
         }
         let here: Vec<String> = Config::load()
             .repos

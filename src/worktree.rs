@@ -60,6 +60,15 @@ pub fn token_user(host: &str) -> &'static str {
 /// A token for `url`'s host from the environment: `GH_TOKEN`/`GITHUB_TOKEN` for GitHub, `GITLAB_TOKEN` for GitLab.
 pub fn env_auth(url: &str) -> Option<Auth> {
     let host = https_host(url)?;
+    let token = env_token(&host)?;
+    Some(Auth {
+        username: token_user(&host).into(),
+        token,
+    })
+}
+
+/// The deployment's token for `host` (`GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, or their `_FILE`).
+pub fn env_token(host: &str) -> Option<String> {
     let vars: &[&str] = if host == "github.com" {
         &["GH_TOKEN", "GITHUB_TOKEN"]
     } else if host.contains("gitlab") {
@@ -67,13 +76,7 @@ pub fn env_auth(url: &str) -> Option<Auth> {
     } else {
         &[]
     };
-    let token = vars
-        .iter()
-        .find_map(|v| std::env::var(v).ok().filter(|t| !t.is_empty()))?;
-    Some(Auth {
-        username: token_user(&host).into(),
-        token,
-    })
+    vars.iter().find_map(|v| crate::server::env_secret(v))
 }
 
 fn auth_failed(stderr: &str) -> bool {
@@ -345,10 +348,16 @@ pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A token for `host` from the environment or your git credential helper (on macOS the keychain).
+/// A token for `host`: the environment, the server's stored tokens, or your git credential helper.
 pub fn stored_auth(host: &str) -> Option<Auth> {
     if let Some(a) = env_auth(&format!("https://{host}/")) {
         return Some(a);
+    }
+    if crate::server::enabled() {
+        return crate::server::git_token(host).map(|token| Auth {
+            username: token_user(host).into(),
+            token,
+        });
     }
     let input = format!("protocol=https\nhost={host}\n\n");
     let out = credential("fill", &input)?;

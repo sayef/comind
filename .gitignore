@@ -51,3 +51,9 @@ assets/png/
 
 # Docs site build output
 /site
+
+# Linux binary packaged by scripts/docker-local.sh
+/dist/
+
+# Local stack secrets made by scripts/docker-local.sh
+/.secrets/

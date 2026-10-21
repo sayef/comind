@@ -180,10 +180,6 @@ export interface Settings {
   config_path: string;
   index_dir: string | null;
   index_effective: string;
-  aws_profile: string | null;
-  aws_profile_env: string | null;
-  aws_profiles: string[];
-  aws_status: { ok: boolean; message: string } | null;
   author_name: string | null;
   author_effective: string | null;
   record_names: boolean;
@@ -192,7 +188,6 @@ export interface Settings {
   llm_key: KeySource;
   cache_ttl_secs: number;
   auto_index: boolean;
-  sso_auto_login: boolean;
   defaults: Defaults;
 }
 
@@ -207,7 +202,7 @@ export interface TeamSettings {
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
-export type KeySource = "team" | "default" | "environment" | "none";
+export type KeySource = "team" | "default" | "environment" | "server" | "none";
 
 export interface Team {
   settings: TeamSettings;
@@ -225,26 +220,14 @@ export interface Defaults {
   embed_model: string;
 }
 
-export interface AwsStatus {
-  needed: boolean;
-  ok?: boolean;
-  message?: string;
-  signin?: boolean;
-  profile?: string | null;
-  auto?: boolean;
-  run?: { running: boolean; ok: boolean | null; message: string; started: string | null };
-}
-
 export type SettingsChange = Partial<{
   index_dir: string;
-  aws_profile: string;
   author_name: string;
   record_names: boolean;
   llm_base_url: string;
   llm_model: string;
   cache_ttl_secs: number;
   auto_index: boolean;
-  sso_auto_login: boolean;
 }>;
 
 /** POST JSON; throws the server's message when it reports failure. */
@@ -356,7 +339,73 @@ async function get<T>(path: string): Promise<T> {
   return r.json();
 }
 
+export type Role = "admin" | "member";
+
+/** Who is signed in; `local` when comindly runs on this machine without members. */
+export interface Me {
+  mode: "local" | "server";
+  signed_in?: boolean;
+  email?: string | null;
+  role?: Role | null;
+  /** Everything by email, or everything by codes admins hand out. */
+  sign_in?: SignIn;
+}
+
+export type SignIn = "email" | "code";
+
+export interface Member {
+  email: string;
+  role: Role;
+  /** An admin by the deployment's settings: cannot be changed or removed here. */
+  fixed: boolean;
+  created: string;
+  last_seen: string | null;
+}
+
+export interface Invite {
+  email: string;
+  role: Role;
+  created_by: string;
+  expires: string;
+}
+
+export interface AccessToken {
+  id: string;
+  name: string;
+  created: string;
+  last_used: string | null;
+}
+
+/** A token or key the server uses; its value never reaches the browser. */
+export interface SecretState {
+  name: string;
+  label: string;
+  source: "deployment" | "stored" | "none";
+  hint?: string | null;
+  updated?: string | null;
+  updated_by?: string | null;
+}
+
+type Done = { ok: boolean; message: string };
+
 export const api = {
+  me: () => get<Me>("/api/auth/me"),
+  requestLink: (email: string) => post("/api/auth/link", { email }),
+  redeem: (token: string) => post("/api/auth/redeem", { token }),
+  signInCode: (email: string, code: string) => post<Done & { code: string | null }>("/api/auth/code", { email, code }),
+  resetOwnCode: () => post<Done & { code: string }>("/api/auth/reset-code", {}),
+  signOut: (everywhere = false) => post(`/api/auth/signout${everywhere ? "?everywhere=true" : ""}`, {}),
+  members: () => get<{ members: Member[]; invites: Invite[]; sign_in: SignIn }>("/api/members"),
+  invite: (email: string, role: Role) => post<Done & { code?: string }>("/api/members/invite", { email, role }),
+  resetCode: (email: string) => post<Done & { code: string }>("/api/members/reset", { email }),
+  setRole: (email: string, role: Role) => post("/api/members/role", { email, role }),
+  removeMember: (email: string) => post("/api/members/remove", { email }),
+  revokeInvite: (email: string) => post("/api/members/revoke", { email }),
+  tokens: () => get<{ tokens: AccessToken[] }>("/api/tokens"),
+  createToken: (name: string) => post<Done & { token: string }>("/api/tokens", { name }),
+  revokeToken: (id: string) => post("/api/tokens/revoke", { id }),
+  secrets: () => get<{ secrets: SecretState[]; can_store: boolean }>("/api/secrets"),
+  setSecret: (name: string, value: string) => post("/api/secrets", { name, value }),
   overview: () => get<Overview>("/api/overview"),
   orgmap: (at?: number) => get<OrgMap>(at === undefined ? "/api/orgmap" : `/api/orgmap?at=${at}`),
   versions: () => get<string[]>("/api/versions"),
@@ -392,14 +441,11 @@ export const api = {
   startIndex: (llm: boolean, drop_unlisted = false) => post("/api/index", { llm, drop_unlisted }),
   cancelIndex: () => post("/api/index/cancel", {}),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),
-  aws: () => get<AwsStatus>("/api/aws"),
   team: () => get<Team>("/api/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/team", { settings, version }),
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/team/key", { key }),
-  join: (index: string, aws_profile: string) => post("/api/join", { index, aws_profile }),
-  createTeam: (name: string, index: string, aws_profile: string) => post("/api/team/create", { name, index, aws_profile }),
-  awsLogin: () => post("/api/aws/login", {}),
-  cancelAwsLogin: () => post("/api/aws/login/cancel", {}),
+  join: (index: string) => post("/api/join", { index }),
+  createTeam: (name: string, index: string) => post("/api/team/create", { name, index }),
   saveSettings: (c: SettingsChange) => post("/api/settings", c),
   testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),
   context: async (focus: string) => {

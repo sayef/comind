@@ -430,14 +430,11 @@ pub fn actor() -> String {
     format!("actor-{}", &h[..10])
 }
 
-/// An object store rooted at `<index_root>/<sub>` (local directory or S3 prefix).
+/// An object store rooted at `<index_root>/<sub>` (local directory or remote prefix).
 pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
     let root = index_root.trim_end_matches('/');
-    if let Some(rest) = root.strip_prefix("s3://") {
-        let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
-        let store = crate::s3::bucket(bucket)?;
-        let path = ObjPath::from(format!("{prefix}/{sub}").trim_start_matches('/'));
-        return Ok((Arc::new(store), path));
+    if crate::cache::is_remote(root) {
+        return crate::storage::open(&format!("{root}/{sub}"));
     }
     let dir = std::path::Path::new(root).join(sub);
     std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
@@ -446,7 +443,7 @@ pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectSt
     Ok((Arc::new(store), ObjPath::from("")))
 }
 
-/// The ledger under an index root (local directory or `s3://bucket/prefix`).
+/// The ledger under an index root (local directory or a bucket prefix).
 pub struct Ledger {
     store: Arc<dyn ObjectStore>,
     root: ObjPath,
@@ -515,7 +512,7 @@ impl Ledger {
     async fn snapshot(&self) -> Result<HashMap<String, String>> {
         use lancedb::query::ExecutableQuery;
         let mut out = HashMap::new();
-        let db = crate::s3::connect(&self.tables).execute().await?;
+        let db = crate::storage::connect(&self.tables).execute().await?;
         let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
             return Ok(out);
         };
@@ -598,7 +595,7 @@ impl Ledger {
     /// Rewrite the snapshot and drop its old versions, so erased rows leave no copies behind.
     async fn purge_history(&self) -> Result<()> {
         use lancedb::table::OptimizeAction;
-        let db = crate::s3::connect(&self.tables).execute().await?;
+        let db = crate::storage::connect(&self.tables).execute().await?;
         let Ok(tbl) = db.open_table(SNAPSHOT).execute().await else {
             return Ok(());
         };
@@ -630,7 +627,7 @@ impl Ledger {
             .keys()
             .filter(|k| !listed.contains(k.as_str()))
             .collect();
-        let db = crate::s3::connect(&self.tables).execute().await?;
+        let db = crate::storage::connect(&self.tables).execute().await?;
         if !new_keys.is_empty() {
             let schema = Arc::new(Schema::new(vec![
                 Field::new("key", DataType::Utf8, false),
@@ -1332,7 +1329,10 @@ mod tests {
             .collect();
         assert_eq!(left, vec!["other".to_string()]);
         assert_eq!(ledger.snapshot().await.unwrap().len(), 1);
-        let db = crate::s3::connect(&ledger.tables).execute().await.unwrap();
+        let db = crate::storage::connect(&ledger.tables)
+            .execute()
+            .await
+            .unwrap();
         let tbl = db.open_table(SNAPSHOT).execute().await.unwrap();
         assert_eq!(
             tbl.list_versions().await.unwrap().len(),

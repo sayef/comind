@@ -10,12 +10,8 @@ import { cn } from "@/lib/utils";
 export function Activity() {
   const qc = useQueryClient();
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : 10_000) });
-  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
-  const remote = !!overview.data?.root?.includes("://");
-  const aws = useQuery({ queryKey: ["aws"], queryFn: api.aws, enabled: remote, refetchInterval: (q) => (q.state.data?.run?.running ? 2000 : 5 * 60_000) });
   const busy = useIsMutating();
   const stopIndex = useMutation({ mutationFn: api.cancelIndex, meta: { quiet: true }, onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
-  const stopSignIn = useMutation({ mutationFn: api.cancelAwsLogin, meta: { quiet: true }, onSuccess: () => qc.invalidateQueries({ queryKey: ["aws"] }) });
 
   const j = job.data;
   const was = useRef<boolean | undefined>(undefined);
@@ -40,14 +36,6 @@ export function Activity() {
           <span className="hidden max-w-56 truncate text-muted-foreground lg:inline">{step}</span>
         </Link>
         <Stop label="Cancel indexing" pending={stopIndex.isPending} onClick={() => stopIndex.mutate()} />
-      </Pill>
-    );
-  if (aws.data?.run?.running)
-    return (
-      <Pill>
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-brand" />
-        <span className="font-medium">Waiting for AWS sign-in</span>
-        <Stop label="Cancel sign-in" pending={stopSignIn.isPending} onClick={() => stopSignIn.mutate()} />
       </Pill>
     );
   if (busy > 0)
