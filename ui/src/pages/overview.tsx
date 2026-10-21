@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { GraphView } from "@/components/graph-view";
+import { FocusView, LayersView, MatrixView } from "@/components/org-views";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,14 @@ function linkDiff(then: OrgMap, now: OrgMap) {
 
 /** Where a team's index lives: a folder or a bucket location. */
 function Location({ index, setIndex }: { index: string; setIndex: (v: string) => void }) {
-  return <Input value={index} onChange={(e) => setIndex(e.target.value)} placeholder="s3://, gs://, az:// or a folder" className="font-mono text-xs" />;
+  return (
+    <Input
+      value={index}
+      onChange={(e) => setIndex(e.target.value)}
+      placeholder="s3://, gs://, az:// or a folder"
+      className="font-mono text-xs"
+    />
+  );
 }
 
 /** First run: use the team's index. */
@@ -141,18 +148,21 @@ export function OverviewPage() {
   });
   const map = at !== null && at !== last ? past.data : latest.data;
   const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState<"layers" | "matrix">(() => {
+    try {
+      return localStorage.getItem("comindly.orgview") === "matrix" ? "matrix" : "layers";
+    } catch {
+      return "layers";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("comindly.orgview", view);
+    } catch {
+      // storage may be unavailable
+    }
+  }, [view]);
   const reach = useMemo(() => (map && selected ? dependents(map, selected) : null), [map, selected]);
-  const highlight = useMemo(() => (reach ? new Set(reach.keys()) : null), [reach]);
-  const graph = useMemo(
-    () =>
-      map
-        ? {
-            nodes: map.nodes.map((n) => ({ id: n.id, label: n.name, repo: n.repo })),
-            edges: map.edges.map((e) => ({ src: e.src, dst: e.dst, kind: e.kind, weight: e.weight })),
-          }
-        : null,
-    [map],
-  );
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
@@ -229,8 +239,15 @@ export function OverviewPage() {
           <CreateTeam />
         </div>
         <p className="text-xs text-muted-foreground">
-          Just for yourself? <Link to="/settings/repositories" className="underline underline-offset-2">Add repositories</Link> and index them
-          here, or change the location in <Link to="/settings" className="underline underline-offset-2">Settings</Link>.
+          Just for yourself?{" "}
+          <Link to="/settings/repositories" className="underline underline-offset-2">
+            Add repositories
+          </Link>{" "}
+          and index them here, or change the location in{" "}
+          <Link to="/settings" className="underline underline-offset-2">
+            Settings
+          </Link>
+          .
         </p>
         <details className="text-left text-xs text-muted-foreground">
           <summary className="cursor-pointer">Details</summary>
@@ -251,66 +268,74 @@ export function OverviewPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Overview</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">How the team's repositories depend on each other, in code and through service contracts.</p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            How the team's repositories depend on each other, in code and through service contracts.
+          </p>
         </div>
       </div>
 
       {o ? (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border bg-border lg:grid-cols-4">
           <Stat label="Repositories" value={String(o.repos.length)} hint={`${o.symbols.toLocaleString()} symbols indexed`} />
-          <Stat label="Cross-repo edges" value={o.cross_repo_edges.toLocaleString()} hint={`of ${o.edges.toLocaleString()} dependency edges`} />
+          <Stat
+            label="Cross-repo edges"
+            value={o.cross_repo_edges.toLocaleString()}
+            hint={`of ${o.edges.toLocaleString()} dependency edges`}
+          />
           <Stat label="Contracts" value={String(o.contracts)} hint={`${o.linked_contracts} with both sides indexed`} />
-          <Stat label="Ledger records" value={String(totalRecords)} hint={needs.length ? `${needs.length} need review` : "none need review"} />
+          <Stat
+            label="Ledger records"
+            value={String(totalRecords)}
+            hint={needs.length ? `${needs.length} need review` : "none need review"}
+          />
         </div>
       ) : (
         <Skeleton className="h-[106px] rounded-[10px]" />
       )}
 
-      <div className="flex flex-wrap gap-6">
-        <Card className="min-w-0 flex-[999_1_520px] overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
+      <div className="flex flex-col gap-6">
+        <Card className="min-w-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
             <h2 className="text-sm font-semibold">Org map</h2>
-            <div className="flex items-center gap-4 font-mono text-[11px] text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-3.5 bg-muted-foreground/70" /> code
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-3.5 bg-brand" /> contract
-              </span>
-              {selected && (
-                <button className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(null)}>
-                  clear
-                </button>
-              )}
+            <div className="flex items-center gap-4">
+              <div className="hidden items-center gap-4 font-mono text-[11px] text-muted-foreground sm:flex">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-0.5 w-3.5 bg-muted-foreground/70" /> code
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-0.5 w-3.5 bg-brand" /> contract
+                </span>
+              </div>
+              <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label="Map view">
+                {(["layers", "matrix"] as const).map((v) => (
+                  <button
+                    key={v}
+                    aria-pressed={view === v && !selected}
+                    onClick={() => (setView(v), setSelected(null))}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${view === v && !selected ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-          {graph ? (
-            <GraphView
-              nodes={graph.nodes}
-              edges={graph.edges}
-              highlight={highlight}
-              onPick={(id) => setSelected((s) => (s === id ? null : id))}
-              className="h-[460px] w-full"
-            />
+          {!map ? (
+            <Skeleton className="h-[420px] rounded-none" />
+          ) : selected ? (
+            <FocusView map={map} repo={selected} reach={reach ?? new Map()} onPick={setSelected} onBack={() => setSelected(null)} />
+          ) : view === "layers" ? (
+            <LayersView map={map} onPick={setSelected} />
           ) : (
-            <Skeleton className="h-[460px] rounded-none" />
+            <MatrixView map={map} onPick={setSelected} />
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t px-5 py-3 font-mono text-xs text-muted-foreground">
-            {selected && reach ? (
-              <>
-                <span className="text-foreground">{selected}</span>
-                <span className="text-input">/</span>
-                <span>{reach.size ? "a change can reach" : "no other indexed repository depends on it"}</span>
-                {[...reach].map(([r, d]) => (
-                  <Badge key={r} variant="warning">
-                    {r} · {d} hop{d > 1 ? "s" : ""}
-                  </Badge>
-                ))}
-              </>
-            ) : (
-              <span>Arrows point from dependent to dependency. Pick a repository to see what a change there can reach.</span>
-            )}
-          </div>
+          {!selected && (
+            <div className="border-t px-5 py-3 font-mono text-xs text-muted-foreground">
+              {view === "layers"
+                ? "Entry points at the top, shared foundations at the bottom; a line means the upper repository uses the lower. Point at one to see its links; pick one to focus on it."
+                : "Pick a repository to see what uses it, what it uses, and through which contracts."}
+            </div>
+          )}
           {versions.data && versions.data.length > 1 && (
             <div className="border-t px-5 py-3.5">
               <div className="flex items-center justify-between">
@@ -323,7 +348,9 @@ export function OverviewPage() {
               <Slider className="mt-3" min={0} max={last} step={1} value={[at ?? last]} onValueChange={([v]) => setAt(v)} />
               {diff && (
                 <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-                  {diff.added.length + diff.gone.length === 0 && <span className="text-muted-foreground">No repository links changed since then.</span>}
+                  {diff.added.length + diff.gone.length === 0 && (
+                    <span className="text-muted-foreground">No repository links changed since then.</span>
+                  )}
                   {diff.added.map((k) => (
                     <Badge key={k} variant="brand">
                       + {k}
@@ -340,15 +367,21 @@ export function OverviewPage() {
           )}
         </Card>
 
-        <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-6">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-2">
           <Panel title="Needs attention" to="/ledger" link="Ledger">
             {needs.length === 0 ? (
-              <p className="px-5 py-4 text-sm text-muted-foreground">Nothing to review. Records that go stale or get disputed show up here.</p>
+              <p className="px-5 py-4 text-sm text-muted-foreground">
+                Nothing to review. Records that go stale or get disputed show up here.
+              </p>
             ) : (
               needs.slice(0, 4).map((e) => (
                 <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1.5 border-b px-5 py-3 last:border-0 hover:bg-muted/40">
                   <span className="eyebrow flex items-center gap-2">
-                    <span className={isChallenged(e) ? "text-warning" : ["stale", "orphaned"].includes(e.status) ? "text-danger" : "text-[#8fb8ff]"}>
+                    <span
+                      className={
+                        isChallenged(e) ? "text-warning" : ["stale", "orphaned"].includes(e.status) ? "text-danger" : "text-[#8fb8ff]"
+                      }
+                    >
                       {isChallenged(e) ? "disputed" : ["stale", "orphaned"].includes(e.status) ? e.status : "unconfirmed"}
                     </span>
                     {e.record.kind} · {e.record.anchors[0]?.repo ?? "—"}
@@ -367,7 +400,11 @@ export function OverviewPage() {
                   to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
                   className="flex items-center gap-3 border-b px-5 py-3 last:border-0 hover:bg-muted/40"
                 >
-                  <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{f.entry.name}</span>
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <RepoDot repo={f.entry.repo} />
+                    <span className="truncate font-mono text-[13px]">{f.entry.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">{f.entry.repo}</span>
+                  </span>
                   <span className="text-xs text-muted-foreground">{f.repos.length} repos</span>
                   <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
                     <span className="block h-1 bg-brand" style={{ width: `${(f.repos.length / most) * 100}%` }} />
@@ -399,7 +436,9 @@ export function OverviewPage() {
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-brand/70" style={{ width: `${(r.symbols / max) * 100}%` }} />
                     </div>
-                    <span className="w-14 text-right font-mono text-xs tabular-nums text-muted-foreground">{r.symbols.toLocaleString()}</span>
+                    <span className="w-14 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                      {r.symbols.toLocaleString()}
+                    </span>
                   </div>
                 );
               })}

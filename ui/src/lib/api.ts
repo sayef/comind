@@ -60,7 +60,8 @@ export interface Overview {
 
 export interface OrgMap {
   nodes: { id: string; name: string; repo: string }[];
-  edges: { src: string; dst: string; kind: "code" | "contract"; weight: number }[];
+  /** `src` uses `dst`; `via` names the contracts a contract link goes through. */
+  edges: { src: string; dst: string; kind: "code" | "contract"; weight: number; via?: string[] }[];
 }
 
 export interface Anchor {

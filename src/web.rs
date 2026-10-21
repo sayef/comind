@@ -552,13 +552,16 @@ fn org(
         .iter()
         .map(|x| (x.id.render(), x.repo.0.as_str()))
         .collect();
-    let mut links: BTreeMap<(String, String, &str), usize> = BTreeMap::new();
+    // Per (user, provider, kind): how many links, and the contracts they go through.
+    let mut links: BTreeMap<(String, String, &str), (usize, std::collections::BTreeSet<String>)> =
+        BTreeMap::new();
     for e in edges.iter().filter(|e| e.cross_repo) {
         if let (Some(a), Some(b)) = (repo_of.get(&e.src.render()), repo_of.get(&e.dst.render())) {
             if *a != crate::resolve::CONTRACTS && *b != crate::resolve::CONTRACTS && a != b {
-                *links
+                links
                     .entry((a.to_string(), b.to_string(), "code"))
-                    .or_default() += 1;
+                    .or_default()
+                    .0 += 1;
             }
         }
     }
@@ -578,9 +581,11 @@ fn org(
         }
         for u in consumers {
             for p in c.providers.iter().filter(real).filter(|p| p.repo != u.repo) {
-                *links
+                let link = links
                     .entry((u.repo.clone(), p.repo.clone(), "contract"))
-                    .or_default() += 1;
+                    .or_default();
+                link.0 += 1;
+                link.1.insert(c.contract.name.clone());
             }
         }
     }
@@ -591,7 +596,7 @@ fn org(
         .collect();
     let edges: Vec<Value> = links
         .into_iter()
-        .map(|((a, b, k), n)| json!({"src": a, "dst": b, "kind": k, "weight": n}))
+        .map(|((a, b, k), (n, via))| json!({"src": a, "dst": b, "kind": k, "weight": n, "via": via}))
         .collect();
     json!({"nodes": nodes, "edges": edges})
 }
