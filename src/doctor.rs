@@ -132,3 +132,39 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
     );
     out
 }
+
+/// Agents on this machine whose MCP settings already list comindly.
+pub fn agents() -> Vec<&'static str> {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return Vec::new();
+    };
+    let json = |p: &str| -> serde_json::Value {
+        std::fs::read_to_string(home.join(p))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    };
+    let has = |v: &serde_json::Value| {
+        v.get("mcpServers")
+            .and_then(|m| m.get("comindly"))
+            .is_some()
+    };
+    let claude = json(".claude.json");
+    let mut out = Vec::new();
+    if has(&claude)
+        || claude["projects"]
+            .as_object()
+            .is_some_and(|p| p.values().any(has))
+    {
+        out.push("claude");
+    }
+    if has(&json(".cursor/mcp.json")) {
+        out.push("cursor");
+    }
+    if std::fs::read_to_string(home.join(".codex/config.toml"))
+        .is_ok_and(|t| t.contains("[mcp_servers.comindly]"))
+    {
+        out.push("codex");
+    }
+    out
+}

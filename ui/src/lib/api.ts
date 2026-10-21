@@ -330,6 +330,7 @@ export interface Setup {
   version: string;
   checks: { ok: boolean; optional: boolean; message: string }[];
   tools: { name: string; description: string }[];
+  agents: string[];
 }
 
 async function get<T>(path: string): Promise<T> {

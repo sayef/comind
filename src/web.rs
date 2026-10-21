@@ -903,6 +903,7 @@ async fn setup(Cur(s): Cur) -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "checks": checks,
         "tools": tools,
+        "agents": if crate::server::enabled() { Vec::new() } else { crate::doctor::agents() },
     }))
 }
 
