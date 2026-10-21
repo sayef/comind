@@ -34,7 +34,7 @@
   </picture>
 </p>
 
-Comindly indexes a whole team's repositories into one versioned knowledge graph, then serves it to
+comindly indexes a whole team's repositories into one versioned knowledge graph, then serves it to
 coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
 *structural, cross-repo* questions deterministically:
 
@@ -43,7 +43,7 @@ coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo searc
 - **How does this flow work?** — a call-trace walkthrough (`flow`)
 - **Where across the org is this used / how do I …?** — hybrid search + a pre-generated question catalog
 
-Written in Rust. One static binary. No server to run, no per-developer re-indexing.
+Written in Rust. One static binary. No server required (one container if a team wants one), no per-developer re-indexing.
 
 ## Why it's different
 
@@ -53,7 +53,7 @@ Written in Rust. One static binary. No server to run, no per-developer re-indexi
   compiler-grade answers take precedence.
 - **Cross-repo by design.** A global symbol identity (SCIP scheme) links a definition in one repo to
   its users in every other. `ripple` gives blast radius across the whole org.
-- **Built once, read everywhere.** CI builds a new atomically-versioned index (local dir or S3);
+- **Built once, read everywhere.** CI builds a new atomically-versioned index (a folder or a bucket);
   every agent reads the same fresh artifact. Incremental — only changed files/symbols are recomputed.
 - **Graph-aware hybrid search.** Local static embeddings (Model2Vec) + BM25 + a dependency-graph
   **centrality** signal no pure search tool has.
@@ -82,7 +82,7 @@ Or from source:
 git clone https://github.com/sayef/comindly && cd comindly
 cargo build --release      # → target/release/comindly
 
-# Try the deterministic engine on any repo, no network/S3 needed:
+# Try the deterministic engine on any repo, no network or bucket needed:
 cargo run --example index_and_search -- ../some-repo
 ```
 
@@ -97,7 +97,7 @@ comindly search "how do we connect to postgres"   # search it, no path needed
 comindly serve                            # MCP server over the default index
 ```
 
-Explicit location — a local dir or `s3://…`, shared across a team. The **same `--index-dir`**
+Explicit location — a folder or a bucket (`s3://`, `gs://`, `az://`), shared across a team. The **same `--index-dir`**
 builds and reads it (comindly manages the internal dataset layout):
 
 ```bash
@@ -181,19 +181,20 @@ ledger, packages and search. Shown here on the example shop in [`examples/acme`]
 | `comindly review <id> <confirm\|archive\|invalidate\|supersede\|dispute> [--reason "…"]` | Act on a ledger record; `comindly erase <id>` deletes one |
 | `comindly ledger [--inbox] [--check] [--compact]` | All ledger records, only those needing review, evaluate constraint checks (non-zero exit on a violated `must`, for CI), or fold the inbox into the Lance snapshot |
 | `comindly erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
-| `comindly doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, GitLab token, signing, SCIP indexers |
-| `comindly hook claude <event>` / `comindly init-hooks claude` | Claude Code hook adapter / config snippet |
+| `comindly doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, signing, SCIP indexers |
+| `comindly hook <agent> <event>` / `comindly init-hooks <claude\|cursor\|gemini\|codex\|generic>` | Agent hook adapter / config snippet |
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
 | `comindly team [set k=v… \| key]` | Team settings stored with the index (LLM, embedding model, LLM steps); `key` stores your own API key |
 | `comindly join <index>` | Use a team's index on this machine |
-| `comindly ui [--web [--port 7878] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or a local web UI on 127.0.0.1 (overview, contracts, ledger review, explorer with a neighbourhood graph, conventions) |
+| `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions); with `--host 0.0.0.0` and `COMINDLY_PUBLIC_URL`, a team server |
+| `comindly cache refresh [--index-dir <dir>]` | Refresh the local mirror of a remote index that hooks read |
 | `comindly config <path\|init>` | Show or scaffold the config file |
 
 Run `comindly <command> --help` for the full flags of any subcommand.
 
-`--index-dir` is a local directory or an `s3://…` path; it is optional and defaults to the
+`--index-dir` is a folder or a bucket location (`s3://`, `gs://`, `az://`); it is optional and defaults to the
 configured index location. **All build steps default on** (`embed`, `enrich`, `flows`, `guide`);
 each has a `config.toml` default and a `--x` / `--no-x` override (CLI wins). Embeddings are local;
 `enrich`/`flows`/`guide` call an LLM (cost + send code, need `OPENAI_API_KEY`) — they **skip
@@ -215,7 +216,7 @@ flowchart LR
         RS["resolve<br/>cross-repo SCIP"]
         G["git<br/>changed files only"]
     end
-    subgraph ART["Versioned LanceDB artifact (local dir or S3)"]
+    subgraph ART["Versioned LanceDB artifact (folder or bucket)"]
         GR["graph<br/>symbols · edges"]
         SE["search<br/>vectors · BM25"]
         EN["enrichment<br/>summaries · queries · flows"]
@@ -269,7 +270,7 @@ service ([Using comindly as a library](https://comindly.pages.dev/guides/library
 [`.github/workflows/comindly-index.yml`](.github/workflows/comindly-index.yml) (and
 [`docs/guides/ci.md`](docs/guides/ci.md), with a GitLab variant) builds the shared index on a schedule: it clones
 the listed repos and runs `comindly link … [--enrich] [--incremental]`, publishing the result
-as a downloadable artifact (or to S3). Lance's version manifest is the atomic "latest" pointer every
+as a downloadable artifact (or to a bucket). Lance's version manifest is the atomic "latest" pointer every
 consumer reads.
 
 ## Configuration
@@ -279,7 +280,7 @@ config init` scaffolds it). Precedence, highest first: **CLI flag → environmen
 file → built-in default**.
 
 ```toml
-index_dir   = "~/.local/share/comindly"   # default --index-dir (local path or s3://…)
+index_dir   = "~/.local/share/comindly"   # default --index-dir (folder, s3://, gs:// or az://)
 llm_model   = "gpt-6-luna"   # any OpenAI-compatible model id
 embed_model = "minishlab/potion-base-8M"
 format      = "md"    # default when --format is absent (search: md|table, serve: md|json)

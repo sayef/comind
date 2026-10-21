@@ -9,9 +9,20 @@ use axum::{Extension, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::server::{self, Role, SignIn, Who};
+use crate::server::{self, Role, SignIn, Via, Who};
 
-const COOKIE: &str = "comindly_session";
+/// The session cookie; on HTTPS with the `__Host-` prefix, so no sibling domain can set it.
+fn cookie_name() -> &'static str {
+    if secure() {
+        "__Host-comindly_session"
+    } else {
+        "comindly_session"
+    }
+}
+
+fn secure() -> bool {
+    server::public_url().is_some_and(|u| u.starts_with("https://"))
+}
 
 fn fail(status: StatusCode, message: impl Into<String>) -> Response {
     let message = message.into();
@@ -55,6 +66,24 @@ fn bearer(req: &Request) -> Option<String> {
         .map(|t| t.trim().to_string())
 }
 
+/// `scheme://host:port` of a URL, lower-case and with the scheme's default port spelled out.
+fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let authority = rest.split(['/', '?', '#']).next()?.to_ascii_lowercase();
+    let authority = authority.rsplit('@').next()?;
+    let port = match scheme.as_str() {
+        "https" => "443",
+        "http" => "80",
+        _ => return None,
+    };
+    let full = match authority.rsplit_once(':') {
+        Some((_, p)) if p.chars().all(|c| c.is_ascii_digit()) => authority.to_string(),
+        _ => format!("{authority}:{port}"),
+    };
+    Some(format!("{scheme}://{full}"))
+}
+
 /// A write made with the session cookie must come from this site's own pages.
 fn same_site(req: &Request) -> bool {
     let origin = req
@@ -62,12 +91,19 @@ fn same_site(req: &Request) -> bool {
         .get(header::ORIGIN)
         .and_then(|o| o.to_str().ok());
     match (origin, server::public_url()) {
-        (Some(o), Some(url)) => url.starts_with(o) && url[o.len()..].chars().all(|c| c == '/'),
+        (Some(o), Some(url)) => origin_of(o).is_some_and(|o| Some(o) == origin_of(&url)),
         _ => req
             .headers()
             .get("sec-fetch-site")
             .is_some_and(|v| v == "same-origin"),
     }
+}
+
+/// What a personal access token may not do: manage the account, its tokens, members or secrets.
+fn account_only(path: &str) -> bool {
+    ["/api/auth/", "/api/tokens", "/api/members", "/api/secrets"]
+        .iter()
+        .any(|p| path.starts_with(p))
 }
 
 /// Paths only admins may change (and, for members and secrets, read).
@@ -94,26 +130,36 @@ pub(super) async fn guard(mut req: Request, next: Next) -> Response {
         return unavailable();
     };
     let path = req.uri().path().to_string();
-    let open = !(path.starts_with("/api/") || path.starts_with("/mcp"))
-        || matches!(
-            path.as_str(),
-            "/api/auth/me" | "/api/auth/link" | "/api/auth/redeem" | "/api/auth/code"
-        );
+    if !(path.starts_with("/api/") || path.starts_with("/mcp")) {
+        return next.run(req).await;
+    }
+    let open = matches!(
+        path.as_str(),
+        "/api/auth/me" | "/api/auth/link" | "/api/auth/redeem" | "/api/auth/code"
+    );
     let token = bearer(&req);
-    let session = cookie(&req, COOKIE);
-    let who = store
-        .authenticate(session.as_deref(), token.as_deref())
-        .unwrap_or(None);
-    if let Some(w) = &who {
+    let session = cookie(&req, cookie_name());
+    let found = tokio::task::block_in_place(|| {
+        store
+            .authenticate(session.as_deref(), token.as_deref())
+            .unwrap_or(None)
+    });
+    if let Some((w, _)) = &found {
         req.extensions_mut().insert(w.clone());
     }
     if open {
         return next.run(req).await;
     }
-    let Some(who) = who else {
+    let Some((who, via)) = found else {
         return fail(StatusCode::UNAUTHORIZED, "Sign in to continue");
     };
-    if req.method() != Method::GET && token.is_none() && !same_site(&req) {
+    if via == Via::Token && account_only(&path) {
+        return fail(
+            StatusCode::FORBIDDEN,
+            "Personal access tokens are for agents; sign in to manage your account",
+        );
+    }
+    if via == Via::Session && req.method() != Method::GET && !same_site(&req) {
         return fail(
             StatusCode::FORBIDDEN,
             "This request did not come from comindly's own pages",
@@ -172,18 +218,22 @@ pub(super) async fn request_link(Json(q): Json<EmailQ>) -> Response {
         return fail(StatusCode::BAD_REQUEST, "This server signs in with codes");
     }
     let email = server::normalize(&q.email);
+    // Sent in the background, so the answer neither waits on the mail server nor reveals a member.
     match store.sign_in_link(&email) {
         Ok(Some(token)) => {
             let body = format!(
                 "Sign in to comindly with this link (valid for 15 minutes, once):\n\n{}\n\nIf you did not ask for it, ignore this email.",
                 link("signin", &token)
             );
-            if let Err(e) = server::send_mail(&email, "Your comindly sign-in link", &body).await {
-                return bad(e);
-            }
+            tokio::spawn(async move {
+                if let Err(e) = server::send_mail(&email, "Your comindly sign-in link", &body).await
+                {
+                    eprintln!("comindly: {}", super::error_text(&e));
+                }
+            });
         }
         Ok(None) => {}
-        Err(e) => return bad(e),
+        Err(e) => eprintln!("comindly: sign-in link: {}", super::error_text(&e)),
     }
     Json(json!({"ok": true, "message": "If that address belongs to a member, a sign-in link is on its way"}))
         .into_response()
@@ -195,19 +245,23 @@ pub(super) struct TokenQ {
 }
 
 fn session_cookie(token: &str, max_age: i64) -> String {
-    let secure = server::public_url().is_some_and(|u| u.starts_with("https://"));
     format!(
-        "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
-        if secure { "; Secure" } else { "" }
+        "{}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        cookie_name(),
+        if secure() { "; Secure" } else { "" }
     )
 }
 
 /// Exchange a sign-in link, an invitation or the admin token for a session cookie.
-pub(super) async fn redeem(Json(q): Json<TokenQ>) -> Response {
+pub(super) async fn redeem(
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(q): Json<TokenQ>,
+) -> Response {
     let Some(store) = server::store() else {
         return unavailable();
     };
-    match store.redeem(&q.token) {
+    match store.redeem(&q.token, &client(peer, &headers)) {
         Ok((session, who)) => (
             StatusCode::OK,
             [(header::SET_COOKIE, session_cookie(&session, 30 * 86400))],
@@ -225,7 +279,7 @@ pub(super) struct CodeQ {
 }
 
 /// Where a request comes from: the connecting address, or behind a proxy you run
-/// (`COMINDLY_TRUST_PROXY=true`) the first address in `X-Forwarded-For`.
+/// (`COMINDLY_TRUST_PROXY=true`) the address that proxy added last to `X-Forwarded-For`.
 fn client(peer: std::net::SocketAddr, headers: &axum::http::HeaderMap) -> String {
     let forwarded = server::env_secret("COMINDLY_TRUST_PROXY")
         .is_some_and(|v| v == "true" || v == "1")
@@ -234,9 +288,10 @@ fn client(peer: std::net::SocketAddr, headers: &axum::http::HeaderMap) -> String
                 .get("x-forwarded-for")?
                 .to_str()
                 .ok()?
-                .split(',')
+                .rsplit(',')
                 .next()
                 .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty())
         })
         .flatten();
     forwarded.unwrap_or_else(|| peer.ip().to_string())
@@ -276,7 +331,7 @@ pub(super) async fn reset_own_code(Extension(who): Extension<Who>, req: Request)
     if server::mode() != SignIn::Code {
         return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
     }
-    match store.reset_code(&who.email, &who.email, cookie(&req, COOKIE).as_deref()) {
+    match store.reset_code(&who.email, &who.email, cookie(&req, cookie_name()).as_deref()) {
         Ok(code) => Json(json!({"ok": true, "message": "New sign-in code; the old one no longer works", "code": code}))
             .into_response(),
         Err(e) => bad(e),
@@ -288,7 +343,7 @@ pub(super) async fn sign_out(req: Request) -> Response {
         .uri()
         .query()
         .is_some_and(|q| q.contains("everywhere=true"));
-    if let (Some(store), Some(s)) = (server::store(), cookie(&req, COOKIE)) {
+    if let (Some(store), Some(s)) = (server::store(), cookie(&req, cookie_name())) {
         let _ = store.sign_out(&s, everywhere);
     }
     (

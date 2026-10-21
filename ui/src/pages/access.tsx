@@ -52,7 +52,7 @@ export function MembersPage() {
         title="Invite someone"
         description={
           codes
-            ? "You get an invitation code to hand over yourself. It only works with that address, once, within 7 days; with it they get their own sign-in code."
+            ? "You get an invitation code to pass on. It works once, only with that address, within 7 days; with it they sign in and get their own sign-in code."
             : "The invitation is emailed to that address and only works for it, once, within 7 days."
         }
       >
@@ -83,7 +83,7 @@ export function MembersPage() {
           <Reveal
             label={invite.data.message}
             value={invite.data.code}
-            hint="Shown once. They sign in with their email address and this code."
+            hint="Copy it now; it is not shown again. They sign in with their email address and this code."
           />
         )}
       </Section>
@@ -154,7 +154,7 @@ export function MembersPage() {
           <Reveal
             label={`New sign-in code for ${reset.variables}`}
             value={reset.data.code}
-            hint="Shown once. Give it to them; the old code no longer works."
+            hint="Copy it now; it is not shown again. Give it to them; the old code no longer works."
           />
         )}
       </Section>
@@ -345,13 +345,13 @@ export function AccessPage() {
           </div>
           <Outcome error={newCode.error} />
           {newCode.data?.code && (
-            <Reveal label="Your new sign-in code" value={newCode.data.code} hint="Save it now; it is not shown again." />
+            <Reveal label="Your new sign-in code" value={newCode.data.code} hint="Copy it now; it is not shown again." />
           )}
         </Section>
       )}
       <Section
         title="Personal access tokens"
-        description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. Removing you from the team ends them all."
+        description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. They stop working if you are removed from the team."
       >
         <form
           className="flex gap-2"
@@ -371,7 +371,7 @@ export function AccessPage() {
           </Button>
         </form>
         <Outcome error={create.error} />
-        {create.data?.token && <Reveal label="Copy it now; it is not shown again" value={create.data.token} />}
+        {create.data?.token && <Reveal label="Your new token" value={create.data.token} hint="Copy it now; it is not shown again." />}
         <Connect url={me.data?.public_url ?? window.location.origin} token={create.data?.token} />
         {list.data.tokens.length > 0 && (
           <Table>
@@ -441,7 +441,7 @@ function Connect({ url, token }: { url: string; token?: string }) {
       </div>
       <p className="text-xs text-muted-foreground">{how[0]}</p>
       <Code>{how[1]}</Code>
-      <p className="text-xs text-muted-foreground">The agent then lists comindly's tools; records it writes say it works for you.</p>
+      <p className="text-xs text-muted-foreground">The agent then lists comindly's tools; ledger records it writes are attributed to you.</p>
     </div>
   );
 }

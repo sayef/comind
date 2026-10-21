@@ -94,11 +94,11 @@ function ByCode() {
   if (signIn.data?.code)
     return (
       <div className="mt-4 flex flex-col gap-4">
-        <p className="text-sm">Welcome. This is your own sign-in code, from now on with your email address.</p>
+        <p className="text-sm">Welcome. From now on, sign in with your email address and this code.</p>
         <Reveal
           label="Your sign-in code"
           value={signIn.data.code}
-          hint="Save it in your password manager. It is not shown again; you can make a new one in Settings."
+          hint="Save it in your password manager. It is not shown again; you can make a new one under Settings → Your access."
         />
         <Button variant="brand" onClick={home}>
           I have saved it

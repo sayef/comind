@@ -14,8 +14,8 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// Cross-repo code intelligence for coding agents.
 ///
-/// `--index-dir` defaults to the configured index dir (`comindly config path`) and accepts a local
-/// path or an `s3://bucket/prefix` URI. The same value is used to build and to read an index.
+/// `--index-dir` defaults to the configured index dir (`comindly config path`) and accepts a folder
+/// or an `s3://`, `gs://` or `az://` location. The same value is used to build and to read an index.
 #[derive(Parser)]
 #[command(name = "comindly", version, about, long_about = None)]
 struct Cli {
@@ -29,7 +29,7 @@ enum Cmd {
     Index {
         /// Repository path
         repo: String,
-        /// Index directory — root; default: configured index dir (local path or s3://…)
+        /// Index directory — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Vector embeddings for hybrid search (default on; config `embed`)
@@ -67,11 +67,10 @@ enum Cmd {
     },
     /// Link several repos into one cross-repo index (adds cross-repo edges + blast radius)
     Link {
-        /// Repository paths
         /// Repository folders, indexed as they are; none: the configured list (`comindly repos`),
         /// each at its default branch in comindly's own worktree
         repos: Vec<String>,
-        /// Index directory — root; default: configured index dir (local path or s3://…)
+        /// Index directory — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Vector embeddings for hybrid search (default on; config `embed`)
@@ -108,7 +107,7 @@ enum Cmd {
     Explore {
         /// Symbol name or fragment to focus on
         focus: String,
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Repo paths to parse on the fly instead of reading an index
@@ -119,7 +118,7 @@ enum Cmd {
         /// Natural-language query
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Restrict results to one or more repos (repeatable: --repo x --repo y)
@@ -144,13 +143,13 @@ enum Cmd {
     Flow {
         /// Entry-point symbol
         focus: String,
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
     /// Run the MCP server over stdio
     Serve {
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Output format handed to the agent: `md` (default) or `json`
@@ -189,7 +188,7 @@ enum Cmd {
         #[arg(long)]
         repo: Vec<String>,
     },
-    /// Print per-repo inferred coding style guides (built with --enrich)
+    /// Print per-repo inferred coding style guides (built with --guide)
     Guide {
         /// Index directory to read — root; default: configured index dir
         #[arg(long = "index-dir")]
@@ -231,7 +230,7 @@ enum Cmd {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
-    /// Confirm, retract, supersede or dispute a ledger record
+    /// Confirm, archive, invalidate, supersede, dispute or retract a ledger record
     Review {
         id: String,
         /// confirm | archive (no longer applies) | invalidate (was wrong) | supersede | dispute | retract
@@ -346,7 +345,7 @@ enum Cmd {
     Conventions {
         #[command(subcommand)]
         what: Option<ConventionsWhat>,
-        /// Index directory — root; default: configured index dir (local path or s3://…)
+        /// Index directory — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
         /// Only this repo (and the org baseline); with `add`, the repo it applies to (default: org-wide)
@@ -355,7 +354,7 @@ enum Cmd {
     },
     /// Internal packages: who publishes each, who depends on it, and at which version
     Packages {
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Only consumers pinned to a version other than the publisher's
@@ -364,7 +363,7 @@ enum Cmd {
     },
     /// Service contracts (HTTP routes, queues, topics, buckets, tables) and who uses them
     Contracts {
-        /// Index directory to read — root; default: configured index dir (local path or s3://…)
+        /// Index directory to read — root; default: configured index dir (a folder, or an s3://, gs:// or az:// location)
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
         /// Only contracts of this type: http, sqs, sns, s3, table
@@ -1539,6 +1538,12 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                     "server mode needs COMINDLY_ADMIN_EMAILS: who administers this server"
                 );
                 let sign_in = comindly::server::sign_in()?;
+                if let Some(t) = comindly::server::env_secret("COMINDLY_ADMIN_TOKEN") {
+                    anyhow::ensure!(
+                        t.len() >= 32,
+                        "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
+                    );
+                }
                 comindly::server::store().context("open the server database")?;
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
                 comindly::ui::note(match sign_in {

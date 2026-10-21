@@ -5,7 +5,7 @@ init` writes one). Precedence, highest first: command-line flag, environment var
 built-in default.
 
 ```toml
-index_dir   = "~/.local/share/comindly"   # local path or s3://…
+index_dir   = "~/.local/share/comindly"   # folder, s3://, gs:// or az://
 llm_model   = "gpt-6-luna"             # any OpenAI-compatible model id
 embed_model = "minishlab/potion-base-8M"
 format      = "md"                      # search: md|table, serve: md|json
@@ -28,7 +28,7 @@ guide       = true
 Environment: `COMINDLY_INDEX_DIR`, `COMINDLY_LLM_MODEL`, `COMINDLY_EMBED_MODEL`, `COMINDLY_LLM_BASE_URL`,
 `COMINDLY_FORMAT`, `COMINDLY_SIGNING_KEY`, `COMINDLY_ALLOWED_SIGNERS`, `COMINDLY_AUTHOR_NAME`, `COMINDLY_AGENT`.
 
-Settings everyone on an index must share (LLM, its key, the embedding model) are team settings stored
+Settings everyone on an index must share (the LLM endpoint and model, the embedding model) are team settings stored
 with the index and win over this file; see [Team setup](team-setup.md#team-settings).
 
 Secrets stay out of the file: `OPENAI_API_KEY` for the LLM in the environment, and bucket access through

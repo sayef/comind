@@ -3,11 +3,11 @@
 **Model.** One central pipeline checks out the team's repos, runs
 `comindly link … --embed [--enrich]`, and writes a new **atomically-versioned** LanceDB dataset.
 Lance's newest version manifest is the "latest" pointer every consumer reads — no coordination, no
-staleness. comindly needs **no remote git credentials** itself: the CI job clones the repos (with its
+staleness. comindly needs **no remote git credentials** itself when the CI job clones the repos (with its
 token); comindly indexes the local checkouts and their `.git`.
 
 The output location (`--index-dir`) is either a **local directory** (published as a downloadable CI
-artifact) or an **`s3://…`** path. The shipped GitHub workflow uses the local-path + artifact
+artifact) or a bucket location (**`s3://`**, **`gs://`** or **`az://`**). The shipped GitHub workflow uses the local-path + artifact
 approach; the GitLab example below uses S3. Both are equivalent.
 
 ## GitHub Actions (shipped)
@@ -105,12 +105,12 @@ Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENA
 `gpt-6-luna`). Set `COMINDLY_LLM_MODEL` and `COMINDLY_LLM_BASE_URL` to target any OpenAI-compatible
 endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 
-## Per-repo incremental (optimization)
+## Per-repo incremental (optimisation)
 
 `comindly index <repo> --index-dir <dir> --incremental` diffs the last-indexed commit (stored in the Lance
 `repo_meta` table) against HEAD and reparses only changed files — useful for keeping a per-repo
-dataset fresh cheaply. Today the central `link` re-parses sources; org-level re-merge from per-repo
-datasets is a future optimization.
+dataset fresh cheaply. `link --incremental` does the same across repositories, recomputing only the
+symbols in changed files.
 
 ## Merge-request preflight
 

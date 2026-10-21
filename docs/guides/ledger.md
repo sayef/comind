@@ -47,8 +47,7 @@ are never read.
 - **Signing**: with an SSH signing key configured (`signing_key`, or git `user.signingkey` with
   `gpg.format=ssh`), every record is signed; with `allowed_signers` configured, a record that was
   edited or signed by an unknown key drops to T0 and is never shown to agents.
-- **People**: records describe code, never people; actors are pseudonymous ids, `@mentions` are
-  removed before MR text reaches the LLM.
+- **People**: records describe code, never people; actors are pseudonymous ids.
 - **Erasure**: `comindly erase <id> | --actor me --yes` deletes records for good, including old
   snapshot versions.
 - **Secrets**: records that look like they contain a secret are refused; LLM input is redacted.

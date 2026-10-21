@@ -21,7 +21,12 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(start) = graph.lookup("placeOrder") {
         for step in graph.flow(start, 8) {
-            println!("{}{} via {}", "  ".repeat(step.depth), step.node.name, step.via);
+            println!(
+                "{}{} via {}",
+                "  ".repeat(step.depth),
+                step.node.name,
+                step.via
+            );
         }
     }
     for (entry, repos) in graph.entry_points(10) {

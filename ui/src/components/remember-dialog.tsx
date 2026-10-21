@@ -111,7 +111,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
       <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
         <DialogTitle className="text-base font-semibold">Add to the ledger</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
-          A short fact a future engineer or agent should know before changing this code. It is signed with your name and shown to agents.
+          A short fact a future engineer or agent should know before changing this code. It carries your name (or a pseudonymous id) and is shown to agents.
         </p>
         <div className="mt-4 flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">

@@ -5,22 +5,39 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
-use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-/// `NAME` from the environment, or the contents of the file `NAME_FILE` names.
+/// `NAME` from the environment, or the contents of the file `NAME_FILE` names; read once.
 pub fn env_secret(name: &str) -> Option<String> {
+    static READ: std::sync::OnceLock<Mutex<std::collections::HashMap<String, Option<String>>>> =
+        std::sync::OnceLock::new();
+    let cache = READ.get_or_init(Default::default);
+    if let Some(v) = cache.lock().ok().and_then(|c| c.get(name).cloned()) {
+        return v;
+    }
+    let value = read_secret(name);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(name.to_string(), value.clone());
+    }
+    value
+}
+
+fn read_secret(name: &str) -> Option<String> {
     if let Some(v) = std::env::var(name).ok().filter(|v| !v.trim().is_empty()) {
         return Some(v.trim().to_string());
     }
     let path = std::env::var(format!("{name}_FILE")).ok()?;
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+    match std::fs::read_to_string(&path) {
+        Ok(v) => Some(v.trim().to_string()).filter(|v| !v.is_empty()),
+        Err(e) => {
+            eprintln!("comindly: {name}_FILE ({path}) cannot be read: {e}");
+            None
+        }
+    }
 }
 
 /// The address members reach this server at, without a trailing slash.
@@ -105,6 +122,15 @@ impl Role {
     }
 }
 
+/// How a request proved who it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Session,
+    AdminToken,
+    /// A personal access token: enough for agents, not for managing the account.
+    Token,
+}
+
 /// Who a request comes from.
 #[derive(Debug, Clone, Serialize)]
 pub struct Who {
@@ -151,8 +177,9 @@ const SESSION_DAYS: i64 = 30;
 const LINK_MINUTES: i64 = 15;
 const INVITE_DAYS: i64 = 7;
 const MAX_FAILED: i64 = 5;
-const MAX_FAILED_ADDRESS: i64 = 50;
+const MAX_REDEEM_FAILED: i64 = 20;
 const LOCK_MINUTES: i64 = 15;
+const MAX_LINKS_PER_HOUR: i64 = 5;
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 pub struct Store {
@@ -204,18 +231,27 @@ fn cipher(key: &str) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new((&k).into())
 }
 
-fn seal(key: &str, value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+/// Encrypt `value`, bound to the secret's `name` so a value cannot be moved to another name.
+fn seal(key: &str, name: &str, value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut nonce = [0u8; 24];
     getrandom::fill(&mut nonce).context("randomness")?;
+    let payload = Payload {
+        msg: value.as_bytes(),
+        aad: name.as_bytes(),
+    };
     let sealed = cipher(key)
-        .encrypt(XNonce::from_slice(&nonce), value.as_bytes())
+        .encrypt(XNonce::from_slice(&nonce), payload)
         .map_err(|_| anyhow::anyhow!("encryption failed"))?;
     Ok((sealed, nonce.to_vec()))
 }
 
-fn open(key: &str, sealed: &[u8], nonce: &[u8]) -> Option<String> {
+fn open(key: &str, name: &str, sealed: &[u8], nonce: &[u8]) -> Option<String> {
+    let payload = Payload {
+        msg: sealed,
+        aad: name.as_bytes(),
+    };
     let plain = cipher(key)
-        .decrypt(XNonce::from_slice(nonce), sealed)
+        .decrypt(XNonce::from_slice(nonce), payload)
         .ok()?;
     String::from_utf8(plain).ok()
 }
@@ -238,12 +274,18 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let db = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
+        // Owner-only from the start; SQLite gives its -wal and -shm files the same mode.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(path)
+                .with_context(|| format!("create {}", path.display()))?;
         }
+        let db = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
         db.execute_batch(
             "PRAGMA journal_mode = WAL;
              CREATE TABLE IF NOT EXISTS users (email TEXT PRIMARY KEY, role TEXT NOT NULL,
@@ -262,14 +304,94 @@ impl Store {
                  updated_by TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS codes (email TEXT PRIMARY KEY, hash TEXT NOT NULL,
                  created TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS attempts (email TEXT PRIMARY KEY, failed INTEGER NOT NULL,
-                 locked_until TEXT);
+             CREATE TABLE IF NOT EXISTS failures (key TEXT NOT NULL, at TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS failures_key ON failures (key, at);
+             DROP TABLE IF EXISTS attempts;
              CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, actor TEXT NOT NULL,
                  action TEXT NOT NULL, detail TEXT NOT NULL);",
         )?;
         let store = Store { db: Mutex::new(db) };
         store.rotate_key()?;
+        store.prune();
+        let unreadable = store.unreadable_secrets();
+        if !unreadable.is_empty() {
+            eprintln!(
+                "comindly: {} stored secret(s) cannot be decrypted with COMINDLY_SECRET_KEY ({}); \
+                 set COMINDLY_SECRET_KEY_PREVIOUS to the old key, or save them again",
+                unreadable.len(),
+                unreadable.join(", ")
+            );
+        }
         Ok(store)
+    }
+
+    /// Drop expired links, invitations and sessions, and old failed attempts.
+    fn prune(&self) {
+        let t = now();
+        let day = (Utc::now() - Duration::days(1)).to_rfc3339();
+        let db = self.db();
+        for (sql, arg) in [
+            (
+                "DELETE FROM links WHERE expires < ?1 OR used IS NOT NULL",
+                &t,
+            ),
+            ("DELETE FROM invites WHERE expires < ?1", &t),
+            ("DELETE FROM sessions WHERE expires < ?1", &t),
+            ("DELETE FROM failures WHERE at < ?1", &day),
+        ] {
+            let _ = db.execute(sql, [arg]);
+        }
+    }
+
+    /// Names of stored secrets the current key cannot open.
+    fn unreadable_secrets(&self) -> Vec<String> {
+        let Some(key) = env_secret("COMINDLY_SECRET_KEY") else {
+            return Vec::new();
+        };
+        let db = self.db();
+        let Ok(mut q) = db.prepare("SELECT name, sealed, nonce FROM secrets") else {
+            return Vec::new();
+        };
+        q.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Vec<u8>>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
+        })
+        .map(|rows| {
+            rows.flatten()
+                .filter(|(n, s, nonce)| open(&key, n, s, nonce).is_none())
+                .map(|(n, _, _)| n)
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Failed attempts under `key` in the last few minutes.
+    fn failures(&self, key: &str) -> i64 {
+        self.db()
+            .query_row(
+                "SELECT COUNT(*) FROM failures WHERE key = ?1 AND at > ?2",
+                params![
+                    key,
+                    (Utc::now() - Duration::minutes(LOCK_MINUTES)).to_rfc3339()
+                ],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    fn fail(&self, key: &str) {
+        let _ = self
+            .db()
+            .execute("INSERT INTO failures VALUES (?1, ?2)", params![key, now()]);
+    }
+
+    fn forgive(&self, key: &str) {
+        let _ = self
+            .db()
+            .execute("DELETE FROM failures WHERE key = ?1", [key]);
     }
 
     fn db(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -361,11 +483,14 @@ impl Store {
             bail!("{email} is an admin by the deployment's settings");
         }
         let db = self.db();
-        for table in [
-            "users", "sessions", "tokens", "invites", "links", "codes", "attempts",
-        ] {
+        for table in ["users", "sessions", "tokens", "invites", "links", "codes"] {
             db.execute(&format!("DELETE FROM {table} WHERE email = ?1"), [&email])?;
         }
+        let prefix = format!("code|{email}|");
+        db.execute(
+            "DELETE FROM failures WHERE substr(key, 1, ?2) = ?1",
+            params![prefix, prefix.len() as i64],
+        )?;
         drop(db);
         self.audit(by, "remove", &email);
         Ok(())
@@ -448,7 +573,11 @@ impl Store {
             params![who.email, (Utc::now() - Duration::hours(1)).to_rfc3339()],
             |r| r.get(0),
         )?;
-        anyhow::ensure!(recent < 5, "too many sign-in links; try again in an hour");
+        // Answered like any other address, so the limit does not reveal who is a member.
+        if recent >= MAX_LINKS_PER_HOUR {
+            eprintln!("comindly: a member asked for more than {MAX_LINKS_PER_HOUR} sign-in links in an hour");
+            return Ok(None);
+        }
         let token = new_token("lnk_");
         db.execute(
             "INSERT INTO links VALUES (?1, ?2, ?3, ?4, NULL)",
@@ -462,9 +591,15 @@ impl Store {
         Ok(Some(token))
     }
 
-    /// Exchange a sign-in link, an invitation or the admin token for a new session.
-    pub fn redeem(&self, token: &str) -> Result<(String, Who)> {
+    /// Exchange a sign-in link, an invitation or the admin token for a new session; `client`
+    /// limits how often one place may guess.
+    pub fn redeem(&self, token: &str, client: &str) -> Result<(String, Who)> {
         let token = token.trim();
+        let from = format!("redeem|{client}");
+        anyhow::ensure!(
+            self.failures(&from) < MAX_REDEEM_FAILED,
+            "Too many attempts from here; try again in {LOCK_MINUTES} minutes"
+        );
         if let Some(admin) = env_secret("COMINDLY_ADMIN_TOKEN") {
             if constant_eq(token, &admin) {
                 let email = admin_emails()
@@ -507,13 +642,14 @@ impl Store {
             self.audit(&email, "join", &role);
             return self.session_for(&email);
         }
+        self.fail(&from);
         bail!("this link has expired or was already used; ask for a new one")
     }
 
     /// Sign in with an email address and a code: an invitation code, which also issues the
     /// person's own sign-in code (returned once), or that sign-in code.
-    /// `client` identifies where the attempt comes from: wrong codes lock the address for that
-    /// client, and for everyone only after many failures.
+    /// `client` identifies where the attempt comes from: wrong codes pause that address for that
+    /// client only, so nobody can lock another person out.
     pub fn sign_in_code(
         &self,
         email: &str,
@@ -521,8 +657,12 @@ impl Store {
         client: &str,
     ) -> Result<(String, Who, Option<String>)> {
         let email = normalize(email);
-        let from = format!("{email}|{client}");
-        self.check_lock(&[&from, &email])?;
+        anyhow::ensure!(valid_email(&email), "Wrong email or code");
+        let from = format!("code|{email}|{client}");
+        anyhow::ensure!(
+            self.failures(&from) < MAX_FAILED,
+            "Too many wrong codes for this address; try again in {LOCK_MINUTES} minutes"
+        );
         let h = code_hash(code);
         let t = now();
         let invite: Option<String> = self
@@ -540,7 +680,7 @@ impl Store {
                 params![email, role, t],
             )?;
             let personal = self.set_code(&email)?;
-            self.clear_attempts(&[&from, &email]);
+            self.forgive(&from);
             self.audit(&email, "join", &role);
             let (session, who) = self.session_for(&email)?;
             return Ok((session, who, Some(personal)));
@@ -554,13 +694,12 @@ impl Store {
             )
             .optional()?;
         if known.is_some() && self.member(&email)?.is_some() {
-            self.clear_attempts(&[&from, &email]);
+            self.forgive(&from);
             self.audit(&email, "sign-in", "code");
             let (session, who) = self.session_for(&email)?;
             return Ok((session, who, None));
         }
-        self.failed(&from, MAX_FAILED);
-        self.failed(&email, MAX_FAILED_ADDRESS);
+        self.fail(&from);
         bail!("Wrong email or code")
     }
 
@@ -568,15 +707,19 @@ impl Store {
     pub fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String> {
         let email = normalize(email);
         anyhow::ensure!(self.member(&email)?.is_some(), "{email} is not a member");
+        anyhow::ensure!(
+            by == email || !admin_emails().contains(&email),
+            "{email} is an admin by the deployment's settings and resets their own code"
+        );
         let code = self.set_code(&email)?;
         self.db().execute(
             "DELETE FROM sessions WHERE email = ?1 AND hash != ?2",
             params![email, keep.map(hash).unwrap_or_default()],
         )?;
-        self.clear_attempts(&[&email]);
+        let prefix = format!("code|{email}|");
         let _ = self.db().execute(
-            "DELETE FROM attempts WHERE email LIKE ?1",
-            [format!("{email}|%")],
+            "DELETE FROM failures WHERE substr(key, 1, ?2) = ?1",
+            params![prefix, prefix.len() as i64],
         );
         self.audit(by, "reset-code", &email);
         Ok(code)
@@ -590,51 +733,6 @@ impl Store {
             params![email, code_hash(&code), now()],
         )?;
         Ok(code)
-    }
-
-    fn check_lock(&self, keys: &[&str]) -> Result<()> {
-        for key in keys {
-            let until: Option<String> = self
-                .db()
-                .query_row(
-                    "SELECT locked_until FROM attempts WHERE email = ?1 AND locked_until > ?2",
-                    params![key, now()],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if let Some(u) = until {
-                let at = chrono::DateTime::parse_from_rfc3339(&u)
-                    .map(|t| t.format("%H:%M UTC").to_string())
-                    .unwrap_or(u);
-                bail!("Too many wrong codes for this address; try again after {at}");
-            }
-        }
-        Ok(())
-    }
-
-    fn failed(&self, key: &str, limit: i64) {
-        let db = self.db();
-        let _ = db.execute(
-            "INSERT INTO attempts VALUES (?1, 1, NULL)
-             ON CONFLICT(email) DO UPDATE SET failed = failed + 1",
-            [key],
-        );
-        let _ = db.execute(
-            "UPDATE attempts SET failed = 0, locked_until = ?2 WHERE email = ?1 AND failed >= ?3",
-            params![
-                key,
-                (Utc::now() + Duration::minutes(LOCK_MINUTES)).to_rfc3339(),
-                limit
-            ],
-        );
-    }
-
-    fn clear_attempts(&self, keys: &[&str]) {
-        for key in keys {
-            let _ = self
-                .db()
-                .execute("DELETE FROM attempts WHERE email = ?1", [key]);
-        }
     }
 
     fn session_for(&self, email: &str) -> Result<(String, Who)> {
@@ -652,43 +750,55 @@ impl Store {
         Ok((token, who))
     }
 
-    /// The member behind a session cookie or a bearer token.
-    pub fn authenticate(&self, session: Option<&str>, bearer: Option<&str>) -> Result<Option<Who>> {
+    /// The member behind a session cookie or, failing that, a bearer token, and which it was.
+    pub fn authenticate(
+        &self,
+        session: Option<&str>,
+        bearer: Option<&str>,
+    ) -> Result<Option<(Who, Via)>> {
         let t = now();
-        let email: Option<String> = if let Some(s) = session {
-            self.db()
+        let mut found: Option<(String, Via)> = None;
+        if let Some(s) = session {
+            found = self
+                .db()
                 .query_row(
                     "SELECT email FROM sessions WHERE hash = ?1 AND expires > ?2",
                     params![hash(s), t],
                     |r| r.get(0),
                 )
                 .optional()?
-        } else if let Some(b) = bearer {
-            if env_secret("COMINDLY_ADMIN_TOKEN").is_some_and(|a| constant_eq(b, &a)) {
-                admin_emails().into_iter().next()
-            } else {
-                self.db()
-                    .query_row(
-                        "UPDATE tokens SET last_used = ?2 WHERE hash = ?1 RETURNING email",
-                        params![hash(b), t],
-                        |r| r.get(0),
-                    )
-                    .optional()?
+                .map(|e| (e, Via::Session));
+        }
+        if found.is_none() {
+            if let Some(b) = bearer {
+                found = if env_secret("COMINDLY_ADMIN_TOKEN").is_some_and(|a| constant_eq(b, &a)) {
+                    admin_emails()
+                        .into_iter()
+                        .next()
+                        .map(|e| (e, Via::AdminToken))
+                } else {
+                    self.db()
+                        .query_row(
+                            "UPDATE tokens SET last_used = ?2 WHERE hash = ?1 RETURNING email",
+                            params![hash(b), t],
+                            |r| r.get(0),
+                        )
+                        .optional()?
+                        .map(|e| (e, Via::Token))
+                };
             }
-        } else {
-            None
-        };
-        let Some(email) = email else {
+        }
+        let Some((email, via)) = found else {
             return Ok(None);
         };
         let who = self.member(&email)?;
         if who.is_some() {
             let _ = self.db().execute(
-                "UPDATE users SET last_seen = ?2 WHERE email = ?1",
-                params![email, t],
+                "UPDATE users SET last_seen = ?2 WHERE email = ?1 AND (last_seen IS NULL OR last_seen < ?3)",
+                params![email, t, (Utc::now() - Duration::minutes(5)).to_rfc3339()],
             );
         }
-        Ok(who)
+        Ok(who.map(|w| (w, via)))
     }
 
     pub fn sign_out(&self, session: &str, everywhere: bool) -> Result<()> {
@@ -756,7 +866,7 @@ impl Store {
         }
         let key = env_secret("COMINDLY_SECRET_KEY")
             .context("set COMINDLY_SECRET_KEY on the server to store tokens here")?;
-        let (sealed, nonce) = seal(&key, value)?;
+        let (sealed, nonce) = seal(&key, name, value)?;
         self.db().execute(
             "INSERT INTO secrets VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(name) DO UPDATE SET sealed = ?2, nonce = ?3, hint = ?4, updated = ?5,
@@ -777,7 +887,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .ok()?;
-        open(&key, &sealed, &nonce)
+        open(&key, name, &sealed, &nonce)
     }
 
     pub fn secret_info(&self, name: &str) -> Option<SecretInfo> {
@@ -824,13 +934,13 @@ impl Store {
             rows.collect::<rusqlite::Result<_>>()?
         };
         for (name, sealed, nonce) in rows {
-            if open(&key, &sealed, &nonce).is_some() {
+            if open(&key, &name, &sealed, &nonce).is_some() {
                 continue;
             }
-            let Some(plain) = open(&old, &sealed, &nonce) else {
+            let Some(plain) = open(&old, &name, &sealed, &nonce) else {
                 continue;
             };
-            let (s, n) = seal(&key, &plain)?;
+            let (s, n) = seal(&key, &name, &plain)?;
             db.execute(
                 "UPDATE secrets SET sealed = ?2, nonce = ?3 WHERE name = ?1",
                 params![name, s, n],
@@ -840,12 +950,18 @@ impl Store {
     }
 }
 
+/// Equal without revealing where or how long the values differ.
 fn constant_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0
+    let (a, b) = (blake3::hash(a.as_bytes()), blake3::hash(b.as_bytes()));
+    a.as_bytes()
+        .iter()
+        .zip(b.as_bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+fn valid_email(email: &str) -> bool {
+    email.contains('@') && !email.contains(|c: char| c.is_whitespace() || c == '|')
 }
 
 /// The store, when this process runs in server mode (opened once).
@@ -920,11 +1036,11 @@ mod tests {
         let token = s
             .invite("admin@x.org", "Dev@X.org ", Role::Member, false)
             .unwrap();
-        let (session, who) = s.redeem(&token).unwrap();
+        let (session, who) = s.redeem(&token, "10.0.0.1").unwrap();
         assert_eq!(who.email, "dev@x.org");
         assert_eq!(who.role, Role::Member);
-        assert!(s.redeem(&token).is_err());
-        let back = s.authenticate(Some(&session), None).unwrap().unwrap();
+        assert!(s.redeem(&token, "10.0.0.1").is_err());
+        let (back, _) = s.authenticate(Some(&session), None).unwrap().unwrap();
         assert_eq!(back.email, "dev@x.org");
         s.sign_out(&session, false).unwrap();
         assert!(s.authenticate(Some(&session), None).unwrap().is_none());
@@ -935,17 +1051,17 @@ mod tests {
         let (_d, s) = temp_store();
         assert!(s.sign_in_link("stranger@x.org").unwrap().is_none());
         let inv = s.invite("a", "m@x.org", Role::Member, false).unwrap();
-        s.redeem(&inv).unwrap();
+        s.redeem(&inv, "10.0.0.1").unwrap();
         let link = s.sign_in_link("m@x.org").unwrap().unwrap();
-        assert!(s.redeem(&link).is_ok());
-        assert!(s.redeem(&link).is_err());
+        assert!(s.redeem(&link, "10.0.0.1").is_ok());
+        assert!(s.redeem(&link, "10.0.0.1").is_err());
     }
 
     #[test]
     fn removing_a_member_ends_their_tokens() {
         let (_d, s) = temp_store();
         let inv = s.invite("a", "m@x.org", Role::Member, false).unwrap();
-        let (_, who) = s.redeem(&inv).unwrap();
+        let (_, who) = s.redeem(&inv, "10.0.0.1").unwrap();
         let token = s.create_token(&who, "laptop").unwrap();
         assert!(s.authenticate(None, Some(&token)).unwrap().is_some());
         s.remove("a", "m@x.org").unwrap();
@@ -1008,12 +1124,13 @@ mod tests {
 
     #[test]
     fn sealed_values_open_only_with_their_key() {
-        let (sealed, nonce) = seal("key-one", "glpat-example").unwrap();
+        let (sealed, nonce) = seal("key-one", "git:gitlab.com", "glpat-example").unwrap();
         assert_eq!(
-            open("key-one", &sealed, &nonce).as_deref(),
+            open("key-one", "git:gitlab.com", &sealed, &nonce).as_deref(),
             Some("glpat-example")
         );
-        assert!(open("key-two", &sealed, &nonce).is_none());
+        assert!(open("key-two", "git:gitlab.com", &sealed, &nonce).is_none());
+        assert!(open("key-one", "llm_api_key", &sealed, &nonce).is_none());
         assert_eq!(hint("glpat-example"), "…mple");
     }
 }

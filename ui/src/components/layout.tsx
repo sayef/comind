@@ -88,7 +88,7 @@ export function Layout() {
           <Logo className="mx-auto size-10" />
           <h1 className="mt-5 text-lg font-semibold tracking-tight">Open comindly from its link</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            The UI only answers browsers that hold its access token. Run <code className="font-mono text-foreground">comindly ui --web --open</code>,
+            comindly only answers browsers that hold its access token. Run <code className="font-mono text-foreground">comindly ui --web --open</code>,
             or open the link it prints once; after that, this address works as a bookmark.
           </p>
         </div>

@@ -1,6 +1,7 @@
 # MCP tools
 
-`comindly serve --index-dir <dir>` speaks MCP over stdio. Results are markdown by default, with
+`comindly serve --index-dir <dir>` speaks MCP over stdio; a team server also serves the tools over HTTP
+at `/mcp` ([Self-hosting](../guides/self-hosting.md#agents)). Results are markdown by default, with
 structured JSON attached (`--format json` for JSON only). How to register the server with an agent:
 [Getting started](../getting-started.md#4-connect-your-agent); what to ask:
 [Using comindly with agents](../guides/agents.md).
@@ -45,5 +46,6 @@ Optional parameters are marked with `?`.
 | `review` | `id`, `action`, `reason?` | `confirm`, `archive` (no longer applies), `invalidate` (was wrong), `supersede` or `dispute` a record; retiring one a person wrote or confirmed only flags it for a person |
 
 Records written through MCP name the agent (from the MCP client, or `COMINDLY_AGENT`) and the person
-it works for (config `author_name`, else git `user.name`). Deleting records is not available over
+it works for (config `author_name`, else git `user.name`; on a team server, the member whose token the
+agent uses). Deleting records is not available over
 MCP.

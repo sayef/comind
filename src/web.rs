@@ -108,6 +108,7 @@ struct AppState {
     watch: tokio::sync::Mutex<repos::Watch>,
     /// What agents reach at `/mcp` on a server.
     mcp: Option<crate::mcp::Shared>,
+    mcp_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 type Shared = Arc<AppState>;
@@ -129,18 +130,25 @@ impl axum::extract::FromRequestParts<Shared> for Cur {
 impl Session {
     /// Ledger entries, re-read when a few seconds old: agents and colleagues write records too.
     async fn entries(&self) -> tokio::sync::RwLockReadGuard<'_, Vec<Entry>> {
-        let mut read = self.entries_read.lock().await;
-        if read.elapsed() > std::time::Duration::from_secs(15) {
-            if let Some(root) = &self.data.root {
-                if let Ok(records) = async { crate::ledger::Ledger::open(root)?.all().await }.await
-                {
+        // One request refreshes; the others read what is there without waiting on storage.
+        let due = {
+            let mut read = self.entries_read.lock().await;
+            let due = read.elapsed() > std::time::Duration::from_secs(15);
+            if due {
+                *read = std::time::Instant::now();
+            }
+            due
+        };
+        if let (true, Some(root)) = (due, self.data.root.clone()) {
+            let opened =
+                tokio::task::spawn_blocking(move || crate::ledger::Ledger::open(&root)).await;
+            if let Ok(Ok(ledger)) = opened {
+                if let Ok(records) = ledger.all().await {
                     *self.entries.write().await =
                         crate::ledger::derive(&records, &self.data.symbols);
                 }
             }
-            *read = std::time::Instant::now();
         }
-        drop(read);
         self.entries.read().await
     }
 
@@ -185,13 +193,20 @@ impl AppState {
             return;
         };
         let uri = format!("{}/_graph", root.trim_end_matches('/'));
+        let generation = self
+            .mcp_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        let latest = self.mcp_generation.clone();
         tokio::spawn(async move {
             match crate::mcp::load(&uri, true).await {
-                Ok(server) => {
+                // A slower, older load never replaces a newer one.
+                Ok(server) if latest.load(std::sync::atomic::Ordering::SeqCst) == generation => {
                     if let Ok(mut m) = mcp.write() {
                         *m = Some(server);
                     }
                 }
+                Ok(_) => {}
                 Err(e) => eprintln!("comindly: agents cannot use {uri} yet: {}", error_text(&e)),
             }
         });
@@ -214,6 +229,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         job: Default::default(),
         watch: Default::default(),
         mcp: server.then(Default::default),
+        mcp_generation: Default::default(),
     });
     if let Some(root) = root {
         let _guard = rt.enter();

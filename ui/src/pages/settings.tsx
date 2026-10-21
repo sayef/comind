@@ -146,10 +146,10 @@ export function SettingsPage() {
         </Card>
       ) : (
         <Section
-          title="Your LLM"
+          title={server ? "LLM" : "Your LLM"}
           description="Optional: summaries, flow walkthroughs and style guides while indexing. Any OpenAI-compatible endpoint works; leave the endpoint empty for OpenAI."
         >
-          <div className="grid gap-3 sm:grid-cols-2">
+          <fieldset disabled={server && me.data?.role !== "admin"} className="grid gap-3 sm:grid-cols-2">
             <label className={field}>
               Endpoint
               <Input value={base} onChange={(e) => setBase(e.target.value)} placeholder={s.defaults.llm_base_url} />
@@ -158,17 +158,19 @@ export function SettingsPage() {
               Model
               <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={s.defaults.llm_model} />
             </label>
-          </div>
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              loading={saveLlm.isPending}
-              onClick={() => saveLlm.mutate({ llm_base_url: base, llm_model: model })}
-            >
-              Save
-            </Button>
-          </div>
+          </fieldset>
+          {(!server || me.data?.role === "admin") && (
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                loading={saveLlm.isPending}
+                onClick={() => saveLlm.mutate({ llm_base_url: base, llm_model: model })}
+              >
+                Save
+              </Button>
+            </div>
+          )}
           {result(saveLlm)}
           {!server && <ApiKey />}
         </Section>

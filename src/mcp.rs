@@ -184,10 +184,23 @@ impl ComindlyServer {
     ) -> anyhow::Result<String> {
         let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
         let records = self.records().await;
-        let target = records
+        anyhow::ensure!(
+            p.id.len() >= 6,
+            "give at least the first 6 characters of the record id"
+        );
+        let matches: Vec<_> = records
             .iter()
-            .find(|r| r.id == p.id || r.id.starts_with(&p.id))
-            .ok_or_else(|| anyhow::anyhow!("no ledger record `{}`", p.id))?;
+            .filter(|r| r.id == p.id || r.id.starts_with(&p.id))
+            .collect();
+        let target = match matches.as_slice() {
+            [one] => *one,
+            [] => anyhow::bail!("no ledger record `{}`", p.id),
+            _ => anyhow::bail!(
+                "`{}` matches {} records; give more of the id",
+                p.id,
+                matches.len()
+            ),
+        };
         let reason = p.reason.as_deref().unwrap_or_default();
         let rec = crate::ledger::Record::review(target, &p.action, reason, by)?;
         ledger.put(&rec).await?;
@@ -1474,7 +1487,11 @@ pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
         .collect();
 
     // The embedder powers `search`; graph tools work without it, so a load failure is non-fatal.
-    let embedder = match crate::embed::Embedder::load_default() {
+    let embedder = match tokio::task::spawn_blocking(crate::embed::Embedder::load_default)
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r)
+    {
         Ok(e) => Some(e),
         Err(e) => {
             eprintln!("comindly serve: embedding model unavailable, `search` disabled: {e:#}");

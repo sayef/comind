@@ -430,7 +430,7 @@ export const api = {
   settings: () => get<Settings>("/api/settings"),
   repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/repos"),
   remoteRepos: (url: string, auth?: { username: string; token: string }, signal?: AbortSignal) =>
-    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[] }>("/api/repos/remote/list", { url, ...auth }, signal),
+    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[]; warning?: string | null }>("/api/repos/remote/list", { url, ...auth }, signal),
   addRemoteRepos: (urls: string[], share: boolean) => post("/api/repos/remote/add", { urls, share }),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }, signal),

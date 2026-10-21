@@ -67,16 +67,40 @@ pub fn env_auth(url: &str) -> Option<Auth> {
     })
 }
 
-/// The deployment's token for `host` (`GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, or their `_FILE`).
+/// The deployment's token for `host`: `GH_TOKEN`/`GITHUB_TOKEN` for github.com, `GITLAB_TOKEN` for
+/// gitlab.com and the hosts in `COMINDLY_GITLAB_HOSTS` (or their `_FILE`).
 pub fn env_token(host: &str) -> Option<String> {
+    let host = host.to_ascii_lowercase();
+    let gitlab = host == "gitlab.com"
+        || crate::server::env_secret("COMINDLY_GITLAB_HOSTS").is_some_and(|hosts| {
+            hosts
+                .split([',', ' '])
+                .any(|h| h.trim().eq_ignore_ascii_case(&host))
+        });
     let vars: &[&str] = if host == "github.com" {
         &["GH_TOKEN", "GITHUB_TOKEN"]
-    } else if host.contains("gitlab") {
+    } else if gitlab {
         &["GITLAB_TOKEN"]
     } else {
         &[]
     };
     vars.iter().find_map(|v| crate::server::env_secret(v))
+}
+
+/// A token for cloning or fetching `url` without asking: the deployment's, else on a server the
+/// one stored there. Elsewhere git's own credential helper answers.
+pub fn auth_for(url: &str) -> Option<Auth> {
+    if let Some(a) = env_auth(url) {
+        return Some(a);
+    }
+    if !crate::server::enabled() {
+        return None;
+    }
+    let host = https_host(url)?;
+    crate::server::git_token(&host).map(|token| Auth {
+        username: token_user(&host).into(),
+        token,
+    })
 }
 
 fn auth_failed(stderr: &str) -> bool {
@@ -174,7 +198,7 @@ pub fn default_branch(repo: &Path) -> Result<String> {
 
 /// The remote's default branch and its commit, asked from the remote; also records it as `origin/HEAD`.
 pub fn remote_default(repo: &Path) -> Result<(String, String)> {
-    let auth = remote_url(repo).and_then(|u| env_auth(&u));
+    let auth = remote_url(repo).and_then(|u| auth_for(&u));
     let out = git_auth(
         repo,
         &["ls-remote", "--symref", "origin", "HEAD"],
@@ -242,7 +266,7 @@ pub fn prepare(repo: &Path) -> Result<Checkout> {
         let target = format!("origin/{branch}");
         let auth = git(repo, &["remote", "get-url", "origin"])
             .ok()
-            .and_then(|u| env_auth(&u));
+            .and_then(|u| auth_for(&u));
         if let Err(e) = git_auth(
             repo,
             &["fetch", "--quiet", "origin", &branch],
@@ -327,7 +351,7 @@ pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
     }
     let parent = dest.parent().context("clone folder")?;
     std::fs::create_dir_all(parent)?;
-    let auth = env_auth(url);
+    let auth = auth_for(url);
     let d = dest.to_string_lossy();
     let args = [
         "clone",

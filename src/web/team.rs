@@ -102,6 +102,10 @@ pub(super) struct Key {
 /// Store your API key for this team (or as your default) in your credentials file.
 pub(super) async fn key(State(app): State<Shared>, Json(b): Json<Key>) -> impl IntoResponse {
     let run = async {
+        anyhow::ensure!(
+            !crate::server::enabled(),
+            "on a team server the LLM key is set under Settings → Integrations"
+        );
         let root = root(&app).await?;
         let name = team::load(&root).await?.settings.name;
         let (n, k) = (name.clone(), b.key.clone());
@@ -110,7 +114,7 @@ pub(super) async fn key(State(app): State<Shared>, Json(b): Json<Key>) -> impl I
         anyhow::Ok(match name {
             Some(n) if !b.key.trim().is_empty() => format!("saved as your key for {n}"),
             None if !b.key.trim().is_empty() => "saved as your default key".to_string(),
-            _ => "removed".to_string(),
+            _ => "removed your key".to_string(),
         })
     };
     match run.await {

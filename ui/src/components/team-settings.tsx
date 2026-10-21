@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Outcome } from "@/components/notice";
+import { useAccess } from "@/lib/me";
 import { api, type KeySource, type TeamSettings } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
@@ -53,6 +54,7 @@ export function ApiKey() {
 
 export function TeamSection() {
   const qc = useQueryClient();
+  const { server, admin } = useAccess();
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
   const t = team.data;
   const d = t?.defaults;
@@ -80,8 +82,9 @@ export function TeamSection() {
           <Users className="size-4" /> Team
         </CardTitle>
         <CardDescription>
-          Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comindly's
-          default, shown in grey. Changing them needs write access to the index.
+          {server
+            ? "Stored with the index and used by everyone on it: the same LLM and embedding model for all, with the key from Settings → Integrations. Empty fields use comindly's default, shown in grey. Only admins change them."
+            : "Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comindly's default, shown in grey. Changing them needs write access to the index."}
           {t.changed_by && (
             <span>
               {" "}
@@ -92,39 +95,42 @@ export function TeamSection() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className={field}>
-            Team name
-            <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Platform team" />
-          </label>
-          <label className={field}>
-            Embedding model
-            <Input value={form.embed_model ?? ""} onChange={(e) => set("embed_model", e.target.value)} placeholder={d?.embed_model} />
-          </label>
-          <label className={field}>
-            LLM endpoint
-            <Input value={form.llm_base_url ?? ""} onChange={(e) => set("llm_base_url", e.target.value)} placeholder={d?.llm_base_url} />
-          </label>
-          <label className={field}>
-            LLM model
-            <Input value={form.llm_model ?? ""} onChange={(e) => set("llm_model", e.target.value)} placeholder={d?.llm_model} />
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-4 text-sm">
-          {steps.map(([k, label]) => (
-            <label key={k} className="flex items-center gap-2">
-              <input type="checkbox" checked={form[k] !== false} onChange={(e) => set(k, e.target.checked)} />
-              {label} when indexing
+        <fieldset disabled={!admin} className="contents">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={field}>
+              Team name
+              <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Platform team" />
             </label>
-          ))}
-        </div>
-        <div>
-          <Button variant="outline" size="sm" loading={save.isPending} onClick={() => save.mutate()}>
-            Save for the team
-          </Button>
-        </div>
-        <Outcome error={save.error} message={save.data?.message} />
-
+            <label className={field}>
+              Embedding model
+              <Input value={form.embed_model ?? ""} onChange={(e) => set("embed_model", e.target.value)} placeholder={d?.embed_model} />
+            </label>
+            <label className={field}>
+              LLM endpoint
+              <Input value={form.llm_base_url ?? ""} onChange={(e) => set("llm_base_url", e.target.value)} placeholder={d?.llm_base_url} />
+            </label>
+            <label className={field}>
+              LLM model
+              <Input value={form.llm_model ?? ""} onChange={(e) => set("llm_model", e.target.value)} placeholder={d?.llm_model} />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {steps.map(([k, label]) => (
+              <label key={k} className="flex items-center gap-2">
+                <input type="checkbox" checked={form[k] !== false} onChange={(e) => set(k, e.target.checked)} />
+                {label} when indexing
+              </label>
+            ))}
+          </div>
+          {admin && (
+            <div>
+              <Button variant="outline" size="sm" loading={save.isPending} onClick={() => save.mutate()}>
+                Save for the team
+              </Button>
+            </div>
+          )}
+          <Outcome error={save.error} message={save.data?.message} />
+        </fieldset>
       </CardContent>
     </Card>
   );

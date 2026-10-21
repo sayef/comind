@@ -27,6 +27,25 @@ pub fn open(uri: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
     .with_context(|| format!("open {uri}"))
 }
 
+/// `text` with any `user:password@` removed from URLs in it.
+pub fn without_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail
+            .find(|c: char| c == '/' || c.is_whitespace())
+            .unwrap_or(tail.len());
+        match tail[..end].rfind('@') {
+            Some(at) => rest = &tail[at + 1..],
+            None => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A short, secret-free explanation of an error, with storage error replies turned into what to do.
 pub fn explain(raw: &str) -> String {
     if raw.contains("does not support timezone offsets") {
@@ -102,6 +121,22 @@ fn redact(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drops_credentials_from_urls() {
+        assert_eq!(
+            without_userinfo("fatal: https://oauth2:abc123@gitlab.example.com/a/b.git not found"),
+            "fatal: https://gitlab.example.com/a/b.git not found"
+        );
+        assert_eq!(
+            without_userinfo("git@github.com:a/b.git"),
+            "git@github.com:a/b.git"
+        );
+        assert_eq!(
+            without_userinfo("https://github.com/a/b"),
+            "https://github.com/a/b"
+        );
+    }
 
     #[test]
     fn explains_s3_replies_without_secrets() {

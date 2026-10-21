@@ -100,7 +100,7 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
                 .is_some(),
         true,
         &format!("LLM configured (model {})", cfg.llm_model()),
-        "no LLM key: enrichment and flows are off (indexing works without)",
+        "no LLM key: summaries, flows and style guides are off (indexing works without)",
     );
     check(
         crate::signing::signing_key().is_some(),

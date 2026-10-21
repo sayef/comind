@@ -1,6 +1,7 @@
 # Using comindly with agents
 
-An agent connected to comindly (see [Getting started](../getting-started.md#4-connect-your-agent))
+An agent connected to comindly (see [Getting started](../getting-started.md#4-connect-your-agent), or on
+a team server Settings → Your access)
 sees fifteen tools. It decides when to call them; you ask in plain words. This page shows what to
 ask, what happens, and the habits that keep the answers good.
 

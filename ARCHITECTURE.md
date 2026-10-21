@@ -1,7 +1,7 @@
-# Comindly — Rust Architecture
+# comindly — Rust Architecture
 
 > Polyglot, cross-repo code-intelligence engine. CLI + MCP server, single static binary.
-> Read-heavy / write-rare: the index is a **versioned artifact in S3**, not a live shared DB.
+> Read-heavy / write-rare: the index is a **versioned artifact in your storage**, not a live shared DB.
 
 ## Decisions (locked)
 
@@ -11,7 +11,7 @@
 | Rewrite | **Full Rust rewrite.** LLM enrichment stays, via Rig (provider-agnostic). |
 | Cross-repo graph | **Core launch requirement** — federated symbol identity from day 1. |
 | Embeddings | **Local model in CI** (Model2Vec). No source leaves org infra. |
-| S3 | Assumed reachable (AWS SSO locally, IAM in CI). |
+| Storage | A folder or bucket (S3, Google Cloud Storage, Azure), read with the platform's own credentials. |
 
 ## The core reframe
 

@@ -71,7 +71,7 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
                     "managed": r.remote.is_some(),
                     "cloned": p.exists(),
                     "your_branch": worktree::current_branch(p),
-                    "remote": r.remote.clone().or_else(|| worktree::remote_url(p)),
+                    "remote": r.remote.clone().or_else(|| worktree::remote_url(p)).map(|u| crate::storage::without_userinfo(&u)),
                     "symbols": symbols.get(&name),
                     "indexed_commit": commits.get(&name),
                 })
@@ -125,7 +125,7 @@ fn unlisted(
                 "name": n,
                 "symbols": indexed.get(n),
                 "commit": m.map(|r| &r.commit),
-                "remote": m.and_then(|r| r.remote.as_ref()),
+                "remote": m.and_then(|r| r.remote.as_deref()).map(crate::storage::without_userinfo),
             })
         })
         .collect()
@@ -157,7 +157,7 @@ pub(super) async fn scan(Json(q): Json<ScanQ>) -> impl IntoResponse {
                 json!({
                     "name": worktree::name(&p),
                     "listed": listed.contains(&path),
-                    "remote": worktree::remote_url(&p),
+                    "remote": worktree::remote_url(&p).map(|u| crate::storage::without_userinfo(&u)),
                     "path": path,
                 })
             })
@@ -205,7 +205,9 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
     match run.map_err(anyhow::Error::from).and_then(|r| r) {
         Ok(n) => (
             StatusCode::OK,
-            Json(json!({"ok": true, "message": format!("{n} repositories")})),
+            Json(
+                json!({"ok": true, "message": format!("saved; {n} {} in the list", if n == 1 { "repository" } else { "repositories" })}),
+            ),
         ),
         Err(e) => fail(e),
     }
@@ -330,7 +332,11 @@ pub(super) async fn begin(
                 while let Ok(Some(l)) = lines.next_line().await {
                     let l = strip_ansi(&l);
                     if !l.trim().is_empty() {
-                        app.job.lock().await.lines.push(l);
+                        app.job
+                            .lock()
+                            .await
+                            .lines
+                            .push(crate::storage::without_userinfo(&l));
                     }
                 }
             }
@@ -488,11 +494,16 @@ pub(super) async fn remote_list(
             None => tokio::task::spawn_blocking(move || worktree::stored_auth(&host)).await?,
         };
         let repos = crate::hosting::list(&source, auth.as_ref()).await?;
+        let mut warning = None;
         if let Some(a) = given {
             let host = source.host.clone();
             match (crate::server::store(), who) {
                 (Some(store), Some(w)) => {
-                    store.set_secret(&w.email, &crate::server::git_secret(&host), &a.token)?
+                    if let Err(e) =
+                        store.set_secret(&w.email, &crate::server::git_secret(&host), &a.token)
+                    {
+                        warning = Some(format!("the token worked but was not kept: {e:#}"));
+                    }
                 }
                 _ => tokio::task::spawn_blocking(move || worktree::approve(&host, &a)).await?,
             }
@@ -521,6 +532,7 @@ pub(super) async fn remote_list(
             "host": source.host,
             "owner": source.owner,
             "repos": rows,
+            "warning": warning,
         }))
     };
     match run.await {
@@ -584,9 +596,9 @@ pub(super) async fn remote_add(Cur(s): Cur, Json(q): Json<RemoteAddQ>) -> impl I
         }
         anyhow::Ok(match (added, q.share) {
             (_, true) => format!(
-                "added {added}; {shared} new for the team. Index now clones and indexes them"
+                "added {added}, {shared} new for the team; press Index now to clone and index them"
             ),
-            _ => format!("added {added}. Index now clones and indexes them"),
+            _ => format!("added {added}; press Index now to clone and index them"),
         })
     };
     match run.await {

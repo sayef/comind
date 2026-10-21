@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useAccess } from "@/lib/me";
 import { api, type Entry, isChallenged, type ReviewAction, when } from "@/lib/api";
 import { cn, sentence } from "@/lib/utils";
 
@@ -50,6 +51,7 @@ function statusLabel(e: Entry) {
 export function EntryCard({ entry, writable, compact = false }: { entry: Entry; writable?: boolean; compact?: boolean }) {
   const r = entry.record;
   const qc = useQueryClient();
+  const { admin } = useAccess();
   const [asking, setAsking] = useState<"archive" | "invalidate" | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reason, setReason] = useState("");
@@ -159,9 +161,11 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
                   </Button>
                 </>
               )}
-              <Button size="sm" variant="ghost" className="ml-auto text-danger hover:text-danger" onClick={() => setDeleting(true)} title="Remove permanently">
-                <Trash2 /> Delete
-              </Button>
+              {admin && (
+                <Button size="sm" variant="ghost" className="ml-auto text-danger hover:text-danger" onClick={() => setDeleting(true)} title="Remove permanently">
+                  <Trash2 /> Delete
+                </Button>
+              )}
             </>
           )}
           {review.data && !review.data.ok && <span className="text-xs text-danger [overflow-wrap:anywhere]">{sentence(review.data.message)}</span>}

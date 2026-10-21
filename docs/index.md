@@ -35,7 +35,7 @@ hide:
 <div class="cm-stats">
   <div><strong>6 languages</strong><span>Python, TypeScript/JS, Go, Java, Kotlin, Rust</span></div>
   <div><strong>1 binary</strong><span>CLI, MCP server, web UI and desktop app</span></div>
-  <div><strong>0 servers</strong><span>a folder or your own bucket holds the index</span></div>
+  <div><strong>0 servers required</strong><span>a folder or your own bucket holds the index</span></div>
   <div><strong>~0.2 s</strong><span>search against an index in S3</span></div>
 </div>
 
@@ -78,7 +78,7 @@ hide:
 
     ---
 
-    A local web UI with the org map, dependency graphs, contracts, internal packages, conventions and
+    A web UI, locally or on a team server, with the org map, dependency graphs, contracts, internal packages, conventions and
     ledger review, and a guide to connecting your agent.
 
     [:octicons-arrow-right-24: Desktop, web and terminal UI](guides/ui.md)
@@ -87,8 +87,8 @@ hide:
 
     ---
 
-    A local directory or your own bucket holds everything. No server to run; CI builds a new version, every
-    agent reads it.
+    A local directory or your own bucket holds everything. No server required; CI builds a new version, every
+    agent reads it. A team that wants one runs a single container.
 
     [:octicons-arrow-right-24: Team setup](guides/team-setup.md)
 

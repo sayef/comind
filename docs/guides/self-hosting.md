@@ -15,14 +15,15 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | --- | --- | --- |
 | `COMINDLY_PUBLIC_URL` | yes | The address members open, e.g. `https://comindly.example.com`. Setting it turns server mode on. |
 | `COMINDLY_ADMIN_EMAILS` | yes | Comma-separated admins. Always admins; they cannot be removed in the app. |
-| `COMINDLY_ADMIN_TOKEN` | recommended | Your own key: API access as the first admin, and sign-in when email is unavailable. |
+| `COMINDLY_ADMIN_TOKEN` | recommended | Your own key, at least 32 random characters: API access as the first admin, and sign-in when email is unavailable. |
 | `COMINDLY_SECRET_KEY` | for stored tokens | Encrypts tokens and keys saved in the app. Without it, they can only come from the environment. |
 | `COMINDLY_SECRET_KEY_PREVIOUS` | when rotating | The old key: on start, stored secrets are re-encrypted with the new one. |
 | `COMINDLY_SMTP_URL` | for email sign-in | Mail server, e.g. `smtps://user:password@smtp.example.com`. Without it, members sign in with codes. |
 | `COMINDLY_SIGN_IN` | optional | `email` or `code`; by default email when `COMINDLY_SMTP_URL` is set, else code. |
 | `COMINDLY_SMTP_FROM` | with SMTP | Sender, e.g. `comindly <comindly@example.com>`. |
 | `COMINDLY_INDEX_DIR` | yes | Where the index lives (see [Storage](storage.md)). |
-| `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. |
+| `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. `GH_TOKEN` is used for github.com, `GITLAB_TOKEN` for gitlab.com. |
+| `COMINDLY_GITLAB_HOSTS` | for self-managed GitLab | Comma-separated hosts that also get `GITLAB_TOKEN`, e.g. `gitlab.example.com`. |
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
@@ -41,8 +42,8 @@ for a click, so mail scanners cannot use it up.
 address, within 7 days). With it, the person signs in for the first time and receives their own
 sign-in code, shown once, which they use with their email address from then on. They can make a new
 one under Settings → Your access; an admin can reset it for someone who lost theirs. Each new code
-signs the person out everywhere else. Codes are generated, never chosen; five wrong ones lock that
-address for 15 minutes from the same client, and fifty from anywhere lock it for everyone.
+signs the person out everywhere else. Codes are generated, never chosen; five wrong ones pause that
+address for 15 minutes from the same client only, so nobody can lock someone else out.
 
 **In both**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
 sessions last 30 days; removing a member ends their sessions, codes and tokens.
@@ -58,7 +59,9 @@ claude mcp add --transport http --scope user comindly https://comindly.example.c
   --header "Authorization: Bearer <token>"
 ```
 
-Nothing is installed on the developer's machine, and no storage credentials leave the server.
+Nothing is installed on the developer's machine, and no storage credentials leave the server. A
+personal access token is for agents and scripts: it reads and writes the index and the ledger, but
+cannot manage the account, its tokens, members or the server's secrets; that needs signing in.
 Records an agent writes say which member it works for; after each re-index, agents get the new
 index without reconnecting.
 
@@ -142,9 +145,11 @@ the task's or workload's role for the bucket.
 
 ### Behind a proxy
 
-Terminate TLS at your proxy or load balancer and forward to port 7878. Set `COMINDLY_PUBLIC_URL` to
-the `https://` address people open (sign-in cookies are then marked secure, and links in emails point
-there) and `COMINDLY_TRUST_PROXY=true` so sign-in limits apply per client.
+Terminate TLS at your proxy or load balancer and forward to port 7878, keeping the original `Host`
+header (agents' requests to `/mcp` are checked against it). Set `COMINDLY_PUBLIC_URL` to the
+`https://` address people open (sign-in cookies are then secure and host-only, and links in emails
+point there) and `COMINDLY_TRUST_PROXY=true` so sign-in limits apply per client, using the address
+your proxy appends to `X-Forwarded-For`.
 
 ### Backups and upgrades
 

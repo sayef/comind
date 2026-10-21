@@ -43,14 +43,14 @@ win over personal settings. Your own `config.toml` keeps what is personal: the i
 The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
 the trust boundary.
 
-Set them once, in the app (Settings → Team) or from the terminal:
+Set them once, in the app (Settings → General, the Team card) or from the terminal:
 
 ```sh
 comindly team set name="Platform" llm_model=gpt-6-luna enrich=true
 comindly team                    # what is set, and where your API key comes from
 ```
 
-Saving needs write access to the index; two people saving at once cannot overwrite each other (the
+Saving needs write access to the index (on a team server: an admin); two people saving at once cannot overwrite each other (the
 second save is refused and asks to reload).
 
 ### API keys
@@ -61,7 +61,7 @@ Everyone brings their own LLM API key. comindly looks for it, in order:
 2. the default key in that file,
 3. `OPENAI_API_KEY`.
 
-The file is created readable only by you. Set it from the app (Settings → Your API key) or the terminal:
+The file is created readable only by you. Set it from the app (Settings → General, under Your LLM) or the terminal:
 
 ```sh
 comindly team key              # prompts for the key; stored under the team's name

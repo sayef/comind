@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAccess } from "@/lib/me";
 import { api } from "@/lib/api";
 import { sentence } from "@/lib/utils";
 
@@ -109,6 +110,7 @@ function connect(agent: Agent, index: string) {
 export function SetupPage() {
   const setup = useQuery({ queryKey: ["setup"], queryFn: api.setup });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const { server, admin } = useAccess();
   const [agent, setAgent] = useState<Agent>("claude");
   const s = setup.data;
   const index = s?.index || "<index-dir>";
@@ -131,30 +133,32 @@ export function SetupPage() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>This setup</CardTitle>
-          <CardDescription>
-            comindly {s?.version ?? "…"} · index <span className="font-mono">{index}</span>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-1.5 text-sm">
-          {setup.isLoading && <Skeleton className="h-24" />}
-          {s?.checks.map((c) => (
-            <div key={c.message} className="flex items-start gap-2">
-              {c.ok ? (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-brand" />
-              ) : c.optional ? (
-                <CircleDashed className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-              )}
-              <span className={`min-w-0 [overflow-wrap:anywhere] ${c.ok ? "" : "text-muted-foreground"}`}>{sentence(c.message)}</span>
-              {!c.ok && c.optional && <Badge variant="outline">Optional</Badge>}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {admin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{server ? "This server" : "This setup"}</CardTitle>
+            <CardDescription>
+              comindly {s?.version ?? "…"} · index <span className="font-mono">{index}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-1.5 text-sm">
+            {setup.isLoading && <Skeleton className="h-24" />}
+            {s?.checks.map((c) => (
+              <div key={c.message} className="flex items-start gap-2">
+                {c.ok ? (
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-brand" />
+                ) : c.optional ? (
+                  <CircleDashed className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+                )}
+                <span className={`min-w-0 [overflow-wrap:anywhere] ${c.ok ? "" : "text-muted-foreground"}`}>{sentence(c.message)}</span>
+                {!c.ok && c.optional && <Badge variant="outline">Optional</Badge>}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {me.data?.mode === "server" ? (
         <Card>
@@ -202,7 +206,7 @@ export function SetupPage() {
               )}
               <p>Restart the agent; it then lists comindly's tools and calls them on its own when a question needs them.</p>
             </Step>
-            <Step n={3} title="Optional: hooks for Claude Code">
+            <Step n={3} title="Optional: hooks">
               <p>
                 Hooks put what the team recorded in front of the agent without it asking: records about this repository when a session
                 starts, and about a file just before the agent edits it (each record once per session). Print the settings and merge them
@@ -243,25 +247,27 @@ export function SetupPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>From the terminal</CardTitle>
-          <CardDescription>The same answers without an agent.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-4">
-            {TERMINAL.map(([what, cmd]) => (
-              <div key={cmd} className="flex flex-col gap-1.5">
-                <span className="text-sm text-muted-foreground">{what}</span>
-                <Code>{cmd}</Code>
-              </div>
-            ))}
-            <p className="text-xs text-muted-foreground">
-              These use the index in your settings; add <code>--index-dir &lt;location&gt;</code> for another one.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {!server && (
+        <Card>
+          <CardHeader>
+            <CardTitle>From the terminal</CardTitle>
+            <CardDescription>The same answers without an agent.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              {TERMINAL.map(([what, cmd]) => (
+                <div key={cmd} className="flex flex-col gap-1.5">
+                  <span className="text-sm text-muted-foreground">{what}</span>
+                  <Code>{cmd}</Code>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                These use the index in your settings; add <code>--index-dir &lt;location&gt;</code> for another one.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

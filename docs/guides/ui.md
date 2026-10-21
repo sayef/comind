@@ -12,7 +12,8 @@ and Windows: use the web UI.
 
 ## Web UI
 
-`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. It prints a link
+`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. With `--host 0.0.0.0`
+and `COMINDLY_PUBLIC_URL` it runs as a team server instead ([Self-hosting](self-hosting.md)). It prints a link
 with an access token; open it once (or pass `--open`) and the browser keeps the token in a cookie,
 so the plain address works as a bookmark afterwards. Other programs and web pages cannot call the
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
@@ -50,7 +51,7 @@ new one.
   don't have here" with **Add them**. You can also add a folder, scan a folder, or clone a single
   repository by URL. Every repository is always indexed at its remote's current default branch, whatever
   it is called (main, master, trunk…), asked from the remote on each run. The index records each
-  repository's remote URL, so one indexed elsewhere shows **No folder here** with **Locate** and **Clone**.
+  repository's remote URL, so one indexed elsewhere shows **No folder here** with **Locate** and **Add**.
   comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
   until every indexed repository has a folder here, unless you choose to drop the missing ones. With
   **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
@@ -58,6 +59,8 @@ new one.
 - **Settings**: the index location (with a connection test), the team settings (shared LLM and
   embedding model), your own API key, your name on ledger records, and how often to check for a
   new index version. Changing the index location switches the UI without a restart.
+  On a team server, Settings also has **Members** and **Integrations** (admins) and **Your access**
+  (your sign-in code, personal access tokens and how to connect an agent).
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.
@@ -136,7 +139,7 @@ progress), with **Cancel** where it can be stopped; indexing stops with every pr
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`
 tool. Graphs scroll with the page; pinch or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> and scroll to zoom, drag to
-pan. The theme follows the system and can be toggled. Against a read-only index, editing is hidden.
+pan. Dark by default; the header toggles a light theme. Against a read-only index, editing is hidden.
 
 ## Terminal UI
 

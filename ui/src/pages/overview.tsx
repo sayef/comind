@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
+import { useAccess } from "@/lib/me";
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -91,11 +92,12 @@ function JoinTeam() {
 }
 
 /** First run: start a team at an empty folder or bucket location; colleagues then join it. */
-function CreateTeam() {
+/** `at`: the location a server's deployment set; then only the name is asked. */
+function CreateTeam({ at }: { at?: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [index, setIndex] = useState("");
+  const [index, setIndex] = useState(at ?? "");
   const create = useMutation({
     mutationFn: () => api.createTeam(name, index),
     meta: { inline: true },
@@ -105,11 +107,13 @@ function CreateTeam() {
     <Card className="flex flex-col p-4 text-left">
       <div className="text-sm font-medium">Create a team</div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location.
+        {at
+          ? "The index lives where the deployment set it. You add repositories next."
+          : "Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location."}
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" />
-        <Location index={index} setIndex={setIndex} />
+        {!at && <Location index={index} setIndex={setIndex} />}
         <div className="mt-auto">
           <Button variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending} onClick={() => create.mutate()}>
             Create team
@@ -122,6 +126,7 @@ function CreateTeam() {
 }
 
 export function OverviewPage() {
+  const { server, admin } = useAccess();
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
   const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows });
@@ -153,6 +158,40 @@ export function OverviewPage() {
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
   const teamName = team.data?.version != null ? (team.data.settings.name ?? "your team") : null;
   const [switching, setSwitching] = useState(false);
+
+  if (o?.problem && server && !(admin && !teamName)) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
+        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
+        <h1 className="text-xl font-semibold">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
+        <p className="text-sm text-muted-foreground">
+          {admin
+            ? "Nothing is indexed yet. Add the team's repositories and index them; everyone signed in here then sees the same graph."
+            : "Nothing is indexed yet. An admin adds the team's repositories under Settings → Repositories; this page fills in once they are indexed."}
+        </p>
+        {admin && (
+          <Button variant="brand" asChild>
+            <Link to="/settings/repositories">Add repositories</Link>
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (o?.problem && server) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
+        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
+        <h1 className="text-xl font-semibold">Welcome to comindly</h1>
+        <p className="text-sm text-muted-foreground">Name the team; then add its repositories and index them.</p>
+        <div className="w-full max-w-sm">
+          <CreateTeam at={o.root ?? undefined} />
+        </div>
+      </div>
+    );
+  }
 
   if (o?.problem && teamName && !switching) {
     return (

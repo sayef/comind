@@ -70,7 +70,7 @@ export function PackagesPage() {
       {rows.isLoading && <Skeleton className="h-48 rounded-xl" />}
       {!rows.isLoading && groups.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          {only === "skew" ? "Every consumer pins the published version." : "No internal packages found in the indexed manifests."}
+          {only === "skew" ? "Every consumer pins its publisher's version." : "No internal packages found in the indexed manifests."}
         </p>
       )}
       {groups.map((g) => (
