@@ -376,7 +376,7 @@ impl CodeGraph {
                 (!steps.is_empty()).then_some((i, repos.len(), steps.len()))
             })
             .collect();
-        out.sort_by(|a, b| (b.1, b.2).cmp(&(a.1, a.2)));
+        out.sort_by_key(|x| std::cmp::Reverse((x.1, x.2)));
         out.truncate(top);
         out.into_iter().map(|(i, _, n)| (i, n)).collect()
     }
