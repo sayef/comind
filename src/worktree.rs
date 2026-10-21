@@ -262,11 +262,13 @@ pub fn prepare(repo: &Path) -> Result<Checkout> {
     } else {
         default_branch(repo)?
     };
+    // Also used for checking out: a partial clone fetches file contents then, with the same token.
+    let auth = has_origin(repo)
+        .then(|| git(repo, &["remote", "get-url", "origin"]).ok())
+        .flatten()
+        .and_then(|u| auth_for(&u));
     let target = if has_origin(repo) {
         let target = format!("origin/{branch}");
-        let auth = git(repo, &["remote", "get-url", "origin"])
-            .ok()
-            .and_then(|u| auth_for(&u));
         if let Err(e) = git_auth(
             repo,
             &["fetch", "--quiet", "origin", &branch],
@@ -284,19 +286,21 @@ pub fn prepare(repo: &Path) -> Result<Checkout> {
     let dir = worktree_dir(repo)?;
     let _ = git(repo, &["worktree", "prune"]);
     if dir.join(".git").exists() {
-        git(
+        git_auth(
             &dir,
             &["checkout", "--quiet", "--detach", "--force", &target],
+            auth.as_ref(),
         )?;
         git(&dir, &["clean", "-fdq"])?;
     } else {
         std::fs::create_dir_all(dir.parent().context("worktree parent")?)?;
         let d = dir.to_string_lossy();
-        git(
+        git_auth(
             repo,
             &[
                 "worktree", "add", "--quiet", "--detach", "--force", &d, &target,
             ],
+            auth.as_ref(),
         )?;
     }
     let commit = git(&dir, &["rev-parse", "--short", "HEAD"])?;
