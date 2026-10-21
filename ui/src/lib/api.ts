@@ -236,6 +236,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly body: Record<string, unknown>,
+    readonly status = 0,
   ) {
     super(message);
   }
@@ -334,7 +335,7 @@ async function get<T>(path: string): Promise<T> {
   const r = await fetch(path);
   if (!r.ok) {
     const body = await r.json().catch(() => null);
-    throw new Error(body?.error ?? `${path}: ${r.status}`);
+    throw new ApiError(body?.error ?? `${path}: ${r.status}`, body ?? {}, r.status);
   }
   return r.json();
 }

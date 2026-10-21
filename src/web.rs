@@ -339,7 +339,8 @@ async fn guard(
         )
             .into_response();
     }
-    if req.uri().path().starts_with("/api/") {
+    // `/api/auth/me` only says "local", so the page can always tell where it is.
+    if req.uri().path().starts_with("/api/") && req.uri().path() != "/api/auth/me" {
         let want = format!("comindly_token={token}");
         let ok = req
             .headers()

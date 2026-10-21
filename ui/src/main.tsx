@@ -19,11 +19,14 @@ import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { AccessPage, IntegrationsPage, MembersPage } from "@/pages/access";
 import { SignInPage } from "@/pages/signin";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import "./index.css";
 
 const queries = new QueryClient({
-  defaultOptions: { queries: { staleTime: 60_000, retry: 1 } },
+  // A refusal (not signed in, not allowed) is final; only other failures get one retry.
+  defaultOptions: {
+    queries: { staleTime: 60_000, retry: (n, e) => n < 1 && !(e instanceof ApiError && (e.status === 401 || e.status === 403)) },
+  },
   mutationCache: new MutationCache({
     onSuccess: (data, _v, _c, m) => announce(data, null, m.meta),
     onError: (e, _v, _c, m) => announce(null, e, m.meta),
@@ -41,6 +44,15 @@ function Gate({ children }: { children: React.ReactNode }) {
   if (me.data?.mode === "server" && (!me.data.signed_in || window.location.pathname === "/signin")) return <SignInPage me={me.data} />;
   return <>{children}</>;
 }
+
+// Who is signed in is asked once; asking again on every page would unmount the app while it waits.
+queries.setQueryDefaults(["me"], {
+  staleTime: Infinity,
+  retry: false,
+  retryOnMount: false,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false,
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
