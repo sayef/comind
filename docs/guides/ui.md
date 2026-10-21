@@ -27,8 +27,17 @@ new one.
   records) and the full timeline. **Add record** writes a new one under your name; each record shows
   who wrote it and its review history; confirm, archive, invalidate or delete it. The symbol view
   has **Add to the ledger** with that symbol filled in.
-- **Conventions**: measured conventions per repository and org-wide; add your own, edit or hide
-  measured ones (hidden ones can be restored). `/conventions?repo=<name>` opens one repository.
+- **Flows**: where work starts and where it travels. Each flow follows calls and then crosses
+  contracts: an HTTP route to the handler that serves it in another repository, a topic to the queues
+  subscribed to it, a queue to the code that polls it. The list shows the repositories each flow
+  passes through in order and the contracts it crosses; a flow opens as a tree of every step, with the
+  steps that enter another repository marked. With LLM summaries on when indexing, the furthest-reaching
+  flows also get a written walkthrough.
+- **Conventions**: every measured and team convention in one table, filtered by scope (org-wide or a
+  repository), topic, origin and text, and sorted by scope, topic or how widely it is followed. Expand a
+  row to see where it comes from: the places that follow it and those that deviate, each with its code.
+  Add your own, edit or hide measured ones (hidden ones can be restored). `/conventions?repo=<name>`
+  opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
 - **Settings → Repositories**: what is in the index, and where each repository lives on this machine.
@@ -91,16 +100,34 @@ Ledger: constraints, failed attempts and decisions, with who wrote and confirmed
 Packages: an internal package and a consumer pinned behind its publisher
 ///
 
+![Flows: where work travels, across repositories](../assets/screenshots/flows.webp#only-light)
+![Flows: where work travels, across repositories](../assets/screenshots/flows-dark.webp#only-dark)
+/// caption
+Flows: where work travels, across repositories
+///
+
+![A flow: every step, entering orders, inventory and payments](../assets/screenshots/flow.webp#only-light)
+![A flow: every step, entering orders, inventory and payments](../assets/screenshots/flow-dark.webp#only-dark)
+/// caption
+A flow: every step, entering orders, inventory and payments
+///
+
+![Conventions: one table, with where each comes from](../assets/screenshots/conventions-open.webp#only-light)
+![Conventions: one table, with where each comes from](../assets/screenshots/conventions-open-dark.webp#only-dark)
+/// caption
+Conventions: one table, with where each comes from
+///
+
 ![Search: describe what you are looking for](../assets/screenshots/palette.webp#only-light)
 ![Search: describe what you are looking for](../assets/screenshots/palette-dark.webp#only-dark)
 /// caption
 Search: describe what you are looking for
 ///
 
-![Connect: register the MCP server with your agent](../assets/screenshots/setup.webp#only-light)
-![Connect: register the MCP server with your agent](../assets/screenshots/setup-dark.webp#only-dark)
+![Get started: register the MCP server with your agent](../assets/screenshots/setup.webp#only-light)
+![Get started: register the MCP server with your agent](../assets/screenshots/setup-dark.webp#only-dark)
 /// caption
-Connect: register the MCP server with your agent
+Get started: register the MCP server with your agent
 ///
 
 What is running shows in the header's corner (indexing with its current step, waiting for the AWS sign-in,

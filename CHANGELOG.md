@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
 - A team's repository list in its settings: colleagues see the repositories they are missing and add them
   in one click.
 - **Create a team** on the first screen, next to **Join a team**; joining works before the first index.
+- **Flows**: every flow from its entry point across HTTP routes, topics and queues into the services
+  that handle them, listed with the repositories it passes through and opened as a tree of steps;
+  `/api/flows`. Indexing narrates the flows that reach furthest, across repositories first.
 - comindly's icon in the macOS Dock and app switcher for `comindly app`.
 - Activity in the app's header (indexing, AWS sign-in, any action in progress) with **Cancel**, and toasts
   when actions finish; indexing and the sign-in stop with everything they started, and a cancelled request
@@ -25,6 +28,8 @@ All notable changes to this project are documented here. The format follows
 
 - Indexing always uses each repository's current default branch, asked from the remote; the per-repository
   branch setting and `repos add --branch` are gone.
+- Conventions are one filterable, sortable table; a row expands to the code that follows or deviates
+  from it. Org-wide examples name their repository.
 - Connect is now **Get started**, and Repositories moved under **Settings**. The separate Clone dialog is
   gone: **From GitHub or GitLab** takes an organisation, a group or a single repository.
 - Messages read as sentences, long commands wrap, and AWS credential errors are one line.

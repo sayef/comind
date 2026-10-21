@@ -2781,20 +2781,15 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
     let g = comindly::graph::CodeGraph::build(symbols, edges);
 
     comindly::ui::header("Narrating flows (LLM)");
-    // Entry points = functions/methods ranked by forward call-trace size (biggest flows first).
-    let mut candidates: Vec<(&Symbol, usize)> = symbols
-        .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
-        // Skip test/example/legacy files — narrate production flows, where it's most useful.
-        .filter(|s| comindly::embed::rank::path_penalty(&s.file_path) > 0.3)
-        .filter_map(|s| {
-            let idx = g.lookup(&s.id.render())?;
-            let reach = g.thread(idx, 4).len();
-            (reach > 0).then_some((s, reach))
+    // Entry points whose flow reaches furthest, across repositories first.
+    let candidates: Vec<(&Symbol, usize)> = g
+        .entry_points(top)
+        .into_iter()
+        .filter_map(|(idx, n)| {
+            let id = g.node(idx).id;
+            symbols.iter().find(|s| s.id.render() == id).map(|s| (s, n))
         })
         .collect();
-    candidates.sort_by_key(|(_, r)| Reverse(*r));
-    candidates.truncate(top);
 
     if candidates.is_empty() {
         comindly::ui::note("flows: no multi-step flows found to narrate");
@@ -2808,9 +2803,14 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
         .filter_map(|(s, _)| {
             let idx = g.lookup(&s.id.render())?;
             let trace = g
-                .thread(idx, 4)
+                .flow(idx, 6)
                 .iter()
-                .map(|h| format!("d{} {} {} {}", h.depth, h.via, h.node.name, h.node.location))
+                .map(|h| {
+                    format!(
+                        "d{} {} {}:{} {}",
+                        h.depth, h.via, h.node.repo, h.node.name, h.node.location
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             Some((

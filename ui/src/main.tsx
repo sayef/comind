@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ContractsPage } from "@/pages/contracts";
 import { ConventionsPage } from "@/pages/conventions";
 import { ExplorerPage } from "@/pages/explorer";
+import { FlowsPage } from "@/pages/flows";
 import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
 import { PackagesPage } from "@/pages/packages";
@@ -37,6 +38,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="explorer" element={<ExplorerPage />} />
                 <Route path="conventions" element={<ConventionsPage />} />
                 <Route path="packages" element={<PackagesPage />} />
+                <Route path="flows" element={<FlowsPage />} />
                 <Route path="setup" element={<SetupPage />} />
                 <Route path="settings" element={<SettingsShell />}>
                   <Route index element={<SettingsPage />} />

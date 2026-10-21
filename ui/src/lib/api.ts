@@ -7,6 +7,37 @@ export interface Node {
   signature: string | null;
 }
 
+/** A flow's entry point and how far its flow reaches. */
+export interface FlowRow {
+  entry: Node;
+  steps: number;
+  repos: string[];
+  contracts: string[];
+  summary: string | null;
+  narrated: boolean;
+}
+
+/** A step of a flow, reached from `from` via `via`. */
+export interface FlowStep {
+  node: Node;
+  depth: number;
+  via: string;
+  from: string;
+}
+
+export interface FlowDetail {
+  entry: Node;
+  narration: string | null;
+  questions: string[] | null;
+  steps: FlowStep[];
+}
+
+export interface SourceLines {
+  path: string;
+  line: number;
+  lines: { n: number; text: string }[];
+}
+
 export interface ContractView {
   contract: Node;
   providers: Node[];
@@ -354,6 +385,9 @@ export const api = {
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }, signal),
   cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),
+  flows: () => get<FlowRow[]>("/api/flows"),
+  flow: (id: string) => get<FlowDetail>(`/api/flow?id=${encodeURIComponent(id)}`),
+  source: (repo: string, at: string) => get<SourceLines>(`/api/source?repo=${encodeURIComponent(repo)}&at=${encodeURIComponent(at)}`),
   indexJob: () => get<IndexJob>("/api/index"),
   startIndex: (llm: boolean, drop_unlisted = false) => post("/api/index", { llm, drop_unlisted }),
   cancelIndex: () => post("/api/index/cancel", {}),

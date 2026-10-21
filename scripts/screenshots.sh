@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/target/release/comindly"
+BIN="${COMINDLY_BIN:-$ROOT/target/release/comindly}"
 OUT="$ROOT/docs/assets/screenshots"
 LLM=1
 [ "${1:-}" = "--no-llm" ] && LLM=0

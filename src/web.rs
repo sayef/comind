@@ -19,6 +19,7 @@ use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
 mod aws;
+mod flows;
 mod repos;
 mod settings;
 mod team;
@@ -39,6 +40,8 @@ struct Session {
     tables: Option<crate::index::Tables>,
     /// Org maps of earlier index versions, by position in `/api/versions`.
     past: tokio::sync::Mutex<HashMap<usize, Value>>,
+    /// Where flows start, ranked once per loaded index.
+    flow_list: OnceCell<Value>,
 }
 
 #[derive(Default)]
@@ -140,6 +143,7 @@ impl Session {
             search: OnceCell::new(),
             tables,
             past: Default::default(),
+            flow_list: OnceCell::new(),
         }
     }
 }
@@ -177,6 +181,9 @@ pub fn serve(data: Data, listener: std::net::TcpListener, token: String) -> Resu
         .route("/api/search", get(search))
         .route("/api/context", get(context))
         .route("/api/packages", get(packages))
+        .route("/api/flows", get(flows::list))
+        .route("/api/flow", get(flows::one))
+        .route("/api/source", get(flows::source))
         .route("/api/setup", get(setup))
         .route("/api/review", post(review))
         .route("/api/erase", post(erase))

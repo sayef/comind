@@ -71,6 +71,17 @@ for (const theme of ["light", "dark"]) {
     await go(`/${path}`);
     await shot(`${page}${suffix}`);
   }
+  await go("/flows");
+  await shot(`flows${suffix}`);
+  const across = await evaluate(`fetch("/api/flows").then((r) => r.json()).then((l) => (l.find((f) => f.repos.length > 2) ?? l[0])?.entry.id)`);
+  if (across) {
+    await go(`/flows?id=${encodeURIComponent(across)}`, 3000);
+    await shot(`flow${suffix}`);
+  }
+  await go("/conventions");
+  await evaluate(`(async () => { document.querySelector('[aria-label="Show where it comes from"]')?.click(); await new Promise((r) => setTimeout(r, 400)); [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Show code"))?.click(); })()`);
+  await sleep(1500);
+  await shot(`conventions-open${suffix}`);
   await go("/");
   await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: true, bubbles: true }))`);
   await sleep(500);

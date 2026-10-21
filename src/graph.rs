@@ -54,6 +54,15 @@ pub struct Node {
     pub signature: Option<String>,
 }
 
+/// A step of a flow: the node, how it was reached and from which node.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FlowStep {
+    pub node: Node,
+    pub depth: usize,
+    pub via: &'static str,
+    pub from: String,
+}
+
 /// A node plus how far it sits from the focus (BFS depth) and via which relation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Hop {
@@ -302,6 +311,74 @@ impl CodeGraph {
     /// ignored — a containing module is not a dependency.
     pub fn ripple(&self, focus: NodeIndex, max_depth: usize) -> Vec<Hop> {
         self.bfs(focus, max_depth, Incoming, DEPENDENCY, PROVIDES)
+    }
+
+    /// Where a request or message started at `focus` travels: calls, then across contracts to the
+    /// handler of an HTTP route or the subscribers of a topic or queue, in other repositories too.
+    pub fn flow(&self, focus: NodeIndex, max_depth: usize) -> Vec<FlowStep> {
+        use crate::model::SymbolKind::Contract;
+        let mut seen: HashSet<NodeIndex> = HashSet::from([focus]);
+        let mut q: VecDeque<(NodeIndex, usize)> = VecDeque::from([(focus, 0)]);
+        let mut out = Vec::new();
+        while let Some((n, depth)) = q.pop_front() {
+            if depth >= max_depth {
+                continue;
+            }
+            let next: Vec<(NodeIndex, EdgeKind)> = if self.g[n].sym.kind == Contract {
+                self.g
+                    .edges_directed(n, Incoming)
+                    .filter(|e| matches!(e.weight(), EdgeKind::Serves | EdgeKind::Subscribes))
+                    .map(|e| (e.source(), e.weight().clone()))
+                    .collect()
+            } else {
+                self.g
+                    .edges_directed(n, Outgoing)
+                    .filter(|e| {
+                        matches!(
+                            e.weight(),
+                            EdgeKind::Calls
+                                | EdgeKind::Instantiates
+                                | EdgeKind::Consumes
+                                | EdgeKind::Publishes
+                                | EdgeKind::Writes
+                        )
+                    })
+                    .map(|e| (e.target(), e.weight().clone()))
+                    .collect()
+            };
+            for (m, via) in next {
+                if seen.insert(m) {
+                    out.push(FlowStep {
+                        node: self.node_of(m),
+                        depth: depth + 1,
+                        via: via.as_str(),
+                        from: self.g[n].sym.id.render(),
+                    });
+                    q.push_back((m, depth + 1));
+                }
+            }
+        }
+        out
+    }
+
+    /// Where flows start: production functions whose flow goes furthest, the ones crossing the most
+    /// repositories first. Returns the node and how many steps its flow has.
+    pub fn entry_points(&self, top: usize) -> Vec<(NodeIndex, usize)> {
+        use crate::model::SymbolKind::{Function, Method};
+        let mut out: Vec<(NodeIndex, usize, usize)> = self
+            .g
+            .node_indices()
+            .filter(|&i| matches!(self.g[i].sym.kind, Function | Method))
+            .filter(|&i| crate::embed::rank::path_penalty(&self.g[i].sym.file_path) > 0.3)
+            .filter_map(|i| {
+                let steps = self.flow(i, 6);
+                let repos: HashSet<&str> = steps.iter().map(|s| s.node.repo.as_str()).collect();
+                (!steps.is_empty()).then_some((i, repos.len(), steps.len()))
+            })
+            .collect();
+        out.sort_by(|a, b| (b.1, b.2).cmp(&(a.1, a.2)));
+        out.truncate(top);
+        out.into_iter().map(|(i, _, n)| (i, n)).collect()
     }
 
     /// *What does `focus` do downstream?* Forward call trace.

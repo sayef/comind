@@ -202,6 +202,11 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     git(repo, &["remote", "get-url", "origin"]).ok()
 }
 
+/// comindly's checkout of `repo`'s default branch, if one has been made.
+pub fn checkout_dir(repo: &Path) -> Option<PathBuf> {
+    worktree_dir(repo).ok().filter(|d| d.join(".git").exists())
+}
+
 fn worktree_dir(repo: &Path) -> Result<PathBuf> {
     let abs = std::fs::canonicalize(repo).with_context(|| format!("{}", repo.display()))?;
     let key = blake3::hash(abs.to_string_lossy().as_bytes()).to_hex();

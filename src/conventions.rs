@@ -360,9 +360,10 @@ fn org_baseline(per_repo: &[Convention]) -> Vec<Convention> {
                 generic: cs[0].generic.clone(),
                 support: cs.len(),
                 total: repos.len(),
+                // `repo:path:line`, since the baseline spans repositories.
                 exemplars: cs
                     .iter()
-                    .flat_map(|c| c.exemplars.first().cloned())
+                    .flat_map(|c| c.exemplars.first().map(|e| format!("{}:{e}", c.repo)))
                     .take(3)
                     .collect(),
                 counterexamples: Vec::new(),
