@@ -1,12 +1,14 @@
 name: Benchmarks
 
+# Nightly when main moved since the last run, or by hand; never a gate for releases.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: bench-${{ github.ref }}
@@ -20,19 +22,38 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install critcmp --locked
+      # The base is the commit the last successful run measured; nothing new on main, nothing to do.
+      - name: Find the last benchmarked commit
+        id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow bench.yml --status success \
+            --limit 1 --json headSha --jq '.[0].headSha // ""')
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [ "$base" = "$GITHUB_SHA" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No commits since the last benchmark run." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: steps.last.outputs.skip != 'true'
+        uses: actions/checkout@v7
+      - if: steps.last.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      - if: steps.last.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: steps.last.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@v2
+      - if: steps.last.outputs.skip != 'true'
+        run: cargo install critcmp --locked
 
       # Report-only: shared runners are noisy, so regressions never fail the build.
       - name: Benchmark the base commit
+        if: steps.last.outputs.skip != 'true'
         continue-on-error: true
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ steps.last.outputs.base }}
         run: |
-          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "$GITHUB_SHA" ]; then
             echo "No base commit to compare against."
             exit 0
           fi
@@ -46,11 +67,12 @@ jobs:
           cargo bench --bench graph -- --save-baseline base
 
       - name: Benchmark the head commit
+        if: steps.last.outputs.skip != 'true'
         continue-on-error: true
         run: cargo bench --bench graph -- --save-baseline head
 
       - name: Write the comparison to the job summary
-        if: always()
+        if: always() && steps.last.outputs.skip != 'true'
         run: |
           {
             echo "## Benchmarks"
