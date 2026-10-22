@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Non-secret preferences, all optional. Read from `config.toml` if present.
 #[derive(Debug, Default, Deserialize)]
@@ -60,6 +60,16 @@ pub struct RepoEntry {
     pub remote: Option<String>,
 }
 
+/// Write `config.toml`; a server also keeps it with its accounts, so a new container starts with it.
+fn write_config(path: &Path, text: &str) -> Result<()> {
+    std::fs::create_dir_all(path.parent().context("config dir")?)?;
+    std::fs::write(path, text).with_context(|| format!("write {}", path.display()))?;
+    if let Some(store) = crate::server::store() {
+        store.keep_config(text)?;
+    }
+    Ok(())
+}
+
 /// Replace the repository list in `config.toml`.
 pub fn set_repos(list: &[RepoEntry]) -> Result<()> {
     let path = config_path();
@@ -79,8 +89,7 @@ pub fn set_repos(list: &[RepoEntry]) -> Result<()> {
     } else {
         doc["repos"] = toml_edit::Item::ArrayOfTables(tables);
     }
-    std::fs::create_dir_all(path.parent().context("config dir")?)?;
-    std::fs::write(&path, doc.to_string()).with_context(|| format!("write {}", path.display()))
+    write_config(&path, &doc.to_string())
 }
 
 impl Config {
@@ -223,8 +232,7 @@ pub fn update(changes: &[(&str, Setting)]) -> Result<()> {
             }
         }
     }
-    std::fs::create_dir_all(path.parent().context("config dir")?)?;
-    std::fs::write(&path, doc.to_string()).with_context(|| format!("write {}", path.display()))
+    write_config(&path, &doc.to_string())
 }
 
 /// A team setting, which wins over personal ones so everyone on an index runs the same.
@@ -296,7 +304,7 @@ pub fn init(force: bool) -> Result<PathBuf> {
         crate::llm::DEFAULT_MODEL,
         crate::embed::DEFAULT_MODEL,
     );
-    std::fs::write(&path, body).with_context(|| format!("write {}", path.display()))?;
+    write_config(&path, &body)?;
     Ok(path)
 }
 

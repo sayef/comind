@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A server keeps its settings and repository list with its accounts at the index location and restores
+  them when a new container starts; until now a redeploy forgot which repositories it indexes.
+
 ## [0.3.1](https://github.com/sayef/comindly/compare/v0.3.0...v0.3.1) - 2026-10-22
 
 ### Fixed

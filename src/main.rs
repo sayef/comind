@@ -1544,7 +1544,18 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                         "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
                     );
                 }
-                comindly::server::init(&root).context("open the server table")?;
+                let store = comindly::server::init(&root).context("open the server table")?;
+                let config = comindly::config::config_path();
+                // The kept copy is the server's settings; the file is what commands read.
+                match store.kept_config() {
+                    Some(kept) => {
+                        std::fs::create_dir_all(config.parent().context("config dir")?)?;
+                        std::fs::write(&config, kept)?;
+                        comindly::ui::note("settings and repository list loaded from the index location");
+                    }
+                    None if config.exists() => store.keep_config(&std::fs::read_to_string(&config)?)?,
+                    None => {}
+                }
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
                 comindly::ui::note(match sign_in {
                     comindly::server::SignIn::Email => "members sign in by email",

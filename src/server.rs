@@ -318,6 +318,8 @@ struct State {
     codes: HashMap<String, Code>,
     /// When admins named by the deployment were last seen; they have no `user` row.
     seen: HashMap<String, String>,
+    /// The server's `config.toml`, for containers that start without it.
+    config: HashMap<String, String>,
     failures: Vec<(String, String)>,
 }
 
@@ -352,6 +354,7 @@ impl State {
             "secret" => add(&mut self.secrets, key, json),
             "code" => add(&mut self.codes, key, json),
             "seen" => add(&mut self.seen, key, json),
+            "config" => add(&mut self.config, key, json),
             _ => {}
         }
     }
@@ -370,6 +373,7 @@ impl State {
                     "secret" => drop(self.secrets.remove(key)),
                     "code" => drop(self.codes.remove(key)),
                     "seen" => drop(self.seen.remove(key)),
+                    "config" => drop(self.config.remove(key)),
                     _ => {}
                 },
             }
@@ -378,8 +382,9 @@ impl State {
 }
 
 const TABLE: &str = "server";
-const KINDS: [&str; 8] = [
-    "user", "invite", "link", "session", "token", "secret", "code", "seen",
+const CONFIG: &str = "config.toml";
+const KINDS: [&str; 9] = [
+    "user", "invite", "link", "session", "token", "secret", "code", "seen", "config",
 ];
 
 /// LanceDB work on its own runtime, so callers may be async or not.
@@ -1319,6 +1324,19 @@ impl Store {
             changes.push(put("secret", &name, &again));
         }
         self.commit(changes)
+    }
+
+    /// Keep the server's `config.toml` (repositories, indexing settings) with the accounts.
+    pub fn keep_config(&self, text: &str) -> Result<()> {
+        if self.state().config.get(CONFIG).map(String::as_str) == Some(text) {
+            return Ok(());
+        }
+        self.commit(vec![put("config", CONFIG, &text.to_string())])
+    }
+
+    /// The kept `config.toml`, if any.
+    pub fn kept_config(&self) -> Option<String> {
+        self.state().config.get(CONFIG).cloned()
     }
 
     fn write_lock(&self) -> std::sync::MutexGuard<'_, ()> {
