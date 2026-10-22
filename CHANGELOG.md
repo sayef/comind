@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/sayef/comindly/compare/v0.3.1...v0.3.2) - 2026-10-22
+
 ### Fixed
 
 - A server keeps its settings and repository list with its accounts at the index location and restores
