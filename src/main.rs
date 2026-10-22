@@ -1544,7 +1544,7 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                         "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
                     );
                 }
-                comindly::server::store().context("open the server database")?;
+                comindly::server::init(&root).context("open the server table")?;
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
                 comindly::ui::note(match sign_in {
                     comindly::server::SignIn::Email => "members sign in by email",

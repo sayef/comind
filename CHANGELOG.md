@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A server keeps its members, sessions, tokens and stored secrets in a LanceDB table at the index
+  location instead of a SQLite file, so containers need no volume; every record is signed with
+  `COMINDLY_SECRET_KEY`, which server mode now requires. Members of a 0.2.0 server are invited again.
+
 ## [0.2.0](https://github.com/sayef/comindly/compare/v0.1.0...v0.2.0) - 2026-10-21
 
 ### Added

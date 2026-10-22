@@ -16,8 +16,8 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_PUBLIC_URL` | yes | The address members open, e.g. `https://comindly.example.com`. Setting it turns server mode on. |
 | `COMINDLY_ADMIN_EMAILS` | yes | Comma-separated admins. Always admins; they cannot be removed in the app. |
 | `COMINDLY_ADMIN_TOKEN` | recommended | Your own key, at least 32 random characters: API access as the first admin, and sign-in when email is unavailable. |
-| `COMINDLY_SECRET_KEY` | for stored tokens | Encrypts tokens and keys saved in the app. Without it, they can only come from the environment. |
-| `COMINDLY_SECRET_KEY_PREVIOUS` | when rotating | The old key: on start, stored secrets are re-encrypted with the new one. |
+| `COMINDLY_SECRET_KEY` | yes | Encrypts tokens and keys saved in the app and signs every account record, so records added to the bucket by anyone else are ignored. Keep it in your secret store. |
+| `COMINDLY_SECRET_KEY_PREVIOUS` | when rotating | The old key: on start, stored secrets and records are re-encrypted and re-signed with the new one. |
 | `COMINDLY_SMTP_URL` | for email sign-in | Mail server, e.g. `smtps://user:password@smtp.example.com`. Without it, members sign in with codes. |
 | `COMINDLY_SIGN_IN` | optional | `email` or `code`; by default email when `COMINDLY_SMTP_URL` is set, else code. |
 | `COMINDLY_SMTP_FROM` | with SMTP | Sender, e.g. `comindly <comindly@example.com>`. |
@@ -27,8 +27,10 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
-Everything else (members, sessions, personal tokens, stored secrets) is in a SQLite file under
-`/data`. Keep that volume, and back it up with the index.
+Members, sessions, personal tokens and stored secrets live next to the index, in `_server` at the
+index location, so a container keeps nothing it needs on its own disk. Token values are never
+stored, only their hashes; saved git and LLM keys are encrypted with `COMINDLY_SECRET_KEY`. Email
+addresses, roles and token names are readable to anyone who can read the bucket, like the index.
 
 ## Signing in
 
@@ -77,8 +79,9 @@ with `read_repository` and `read_api`, or a fine-grained GitHub token with Conte
 
 ## Deploying
 
-The image listens on port 7878 and keeps everything it writes under `/data`: give it a volume there,
-its settings and secrets, and HTTPS in front.
+The image listens on port 7878. Give it its settings and secrets, access to the index location,
+and HTTPS in front. It keeps clones of repositories under `/data`; a volume there saves cloning
+them again after a restart but is not required.
 
 ### Docker
 
@@ -140,8 +143,8 @@ spec:
 ```
 
 Route your ingress to the service with TLS. On ECS, Cloud Run or Azure Container Apps the same
-applies: the image, a volume at `/data`, the variables above, secrets from the platform's store, and
-the task's or workload's role for the bucket.
+applies: the image, the variables above, secrets from the platform's store, and the task's or
+workload's role for the bucket.
 
 ### Behind a proxy
 
@@ -153,9 +156,8 @@ your proxy appends to `X-Forwarded-For`.
 
 ### Backups and upgrades
 
-Back up the `/data` volume (members, sessions, tokens and stored secrets live in `server.db`) together
-with the index location. To upgrade, start the new image tag on the same volume and settings; the
-database upgrades itself.
+Back up the index location (bucket versioning works); it holds the index, the ledger and the
+accounts. To upgrade, start the new image tag with the same settings.
 
 ## Trying it locally
 
