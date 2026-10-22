@@ -1,10 +1,11 @@
 // Captures the web UI's pages in light and dark: node scripts/screenshots.mjs <ui url with token> <out dir>
+// With `server` after them, signs in with SHOT_ADMIN_TOKEN and captures the team server's pages.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const [url, out] = process.argv.slice(2);
+const [url, out, mode] = process.argv.slice(2);
 const base = new URL(url).origin;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -56,9 +57,29 @@ await send("Page.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
 await send("Page.navigate", { url });
 await sleep(2000);
-const focus = await evaluate(`fetch("/api/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
+const post = (path, body, credentials = "include") =>
+  `fetch(${JSON.stringify(path)}, { method: "POST", credentials: "${credentials}", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`;
 
-for (const theme of ["light", "dark"]) {
+if (mode === "server") {
+  await evaluate(post("/api/auth/redeem", { token: process.env.SHOT_ADMIN_TOKEN }));
+  // One member who joined, one invitation still open, and an agent's token.
+  const invite = await evaluate(post("/api/members/invite", { email: "sam@acme.example", role: "member" }));
+  await evaluate(post("/api/auth/code", { email: "sam@acme.example", code: invite.code }, "omit"));
+  await evaluate(post("/api/members/invite", { email: "kim@acme.example", role: "member" }));
+  await evaluate(post("/api/tokens", { name: "Claude Code on my laptop" }));
+  for (const theme of ["light", "dark"]) {
+    await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
+    const suffix = theme === "dark" ? "-dark" : "";
+    await go("/settings/members");
+    await shot(`members${suffix}`);
+    await go("/settings/access");
+    await shot(`access${suffix}`);
+  }
+}
+
+const focus = mode === "server" ? null : await evaluate(`fetch("/api/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
+
+for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
   const suffix = theme === "dark" ? "-dark" : "";
   await go("/");

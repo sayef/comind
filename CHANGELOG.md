@@ -6,8 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `GET /health` answers without signing in, for load balancer and orchestrator health checks.
+- Settings → Members shows when admins named by the deployment were last seen.
+
 ### Changed
 
+- Agents that connect to a server before its first index get `503` with the reason instead of `500`.
 - A server keeps its members, sessions, tokens and stored secrets in a LanceDB table at the index
   location instead of a SQLite file, so containers need no volume; every record is signed with
   `COMINDLY_SECRET_KEY`, which server mode now requires. Members of a 0.2.0 server are invited again.

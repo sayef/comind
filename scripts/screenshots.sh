@@ -80,4 +80,14 @@ for _ in $(seq 1 50); do grep -q 'token=' "$WORK/ui.log" && break; sleep 0.2; do
 URL=$(grep -o 'http://[^ ]*token=[A-Za-z0-9_-]*' "$WORK/ui.log" | head -1)
 
 node "$ROOT/scripts/screenshots.mjs" "$URL" "$OUT"
+
+# The same index as a team server, for the Members and Your access pages.
+kill "$SERVER"; wait "$SERVER" 2>/dev/null || true
+for f in admin_token secret_key; do head -c 32 /dev/urandom | base64 | tr -d '/+=\n' > "$WORK/$f"; done
+COMINDLY_PUBLIC_URL="http://localhost:$PORT" COMINDLY_ADMIN_EMAILS=lead@acme.example COMINDLY_SIGN_IN=code \
+  COMINDLY_ADMIN_TOKEN_FILE="$WORK/admin_token" COMINDLY_SECRET_KEY_FILE="$WORK/secret_key" \
+  "$BIN" ui --web --port "$PORT" --index-dir "$INDEX" > "$WORK/server.log" 2>&1 &
+SERVER=$!
+for _ in $(seq 1 50); do curl -fs "http://localhost:$PORT/health" >/dev/null && break; sleep 0.2; done
+SHOT_ADMIN_TOKEN="$(cat "$WORK/admin_token")" node "$ROOT/scripts/screenshots.mjs" "http://localhost:$PORT" "$OUT" server
 echo "screenshots in $OUT"

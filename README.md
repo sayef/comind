@@ -258,7 +258,8 @@ src/main.rs    the comindly binary (CLI)
 
 One container runs comindly as a server for a team: members sign in by email or with codes admins
 hand out, admins invite people and manage the GitHub, GitLab and LLM tokens it uses, and the index
-lives in your own storage (a volume, S3, Google Cloud Storage or Azure). See
+and the accounts live in your own storage (a folder, S3, Google Cloud Storage or Azure), so the
+container keeps nothing on its own disk. See
 [Self-hosting](https://comindly.pages.dev/guides/self-hosting/); `scripts/docker-local.sh` and
 `docker compose up` try it locally. Agents connect to it over HTTP with a personal token.
 

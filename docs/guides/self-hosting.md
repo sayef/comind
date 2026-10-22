@@ -50,6 +50,9 @@ address for 15 minutes from the same client only, so nobody can lock someone els
 **In both**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
 sessions last 30 days; removing a member ends their sessions, codes and tokens.
 
+![Settings → Members on a server](../assets/screenshots/members.webp#only-light)
+![Settings → Members on a server](../assets/screenshots/members-dark.webp#only-dark)
+
 ## Agents
 
 Agents reach the server's tools at `https://<your server>/mcp` (MCP over HTTP) with a personal
@@ -61,7 +64,11 @@ claude mcp add --transport http --scope user comindly https://comindly.example.c
   --header "Authorization: Bearer <token>"
 ```
 
-Nothing is installed on the developer's machine, and no storage credentials leave the server. A
+![Settings → Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access.webp#only-light)
+![Settings → Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access-dark.webp#only-dark)
+
+Until the first index exists, agents get `503` with the reason; they connect once an admin has
+indexed. Nothing is installed on the developer's machine, and no storage credentials leave the server. A
 personal access token is for agents and scripts: it reads and writes the index and the ledger, but
 cannot manage the account, its tokens, members or the server's secrets; that needs signing in.
 Records an agent writes say which member it works for; after each re-index, agents get the new
@@ -80,13 +87,14 @@ with `read_repository` and `read_api`, or a fine-grained GitHub token with Conte
 ## Deploying
 
 The image listens on port 7878. Give it its settings and secrets, access to the index location,
-and HTTPS in front. It keeps clones of repositories under `/data`; a volume there saves cloning
+and HTTPS in front. `GET /health` answers `200` without signing in, for load balancer and
+orchestrator health checks. It keeps clones of repositories under `/data`; a volume there saves cloning
 them again after a restart but is not required.
 
 ### Docker
 
 ```sh
-docker run -d --name comindly -p 127.0.0.1:7878:7878 -v comindly:/data \
+docker run -d --name comindly -p 127.0.0.1:7878:7878 \
   -e COMINDLY_PUBLIC_URL=https://comindly.example.com \
   -e COMINDLY_ADMIN_EMAILS=you@example.com \
   -e COMINDLY_INDEX_DIR=s3://bucket/comindly \
@@ -96,7 +104,7 @@ docker run -d --name comindly -p 127.0.0.1:7878:7878 -v comindly:/data \
   ghcr.io/sayef/comindly:latest
 ```
 
-Pin a version tag (`ghcr.io/sayef/comindly:0.2.0`) for anything you rely on. Generate the two
+Pin a version tag (`ghcr.io/sayef/comindly:0.3.0`) for anything you rely on. Generate the two
 secrets once, for example with `openssl rand -base64 32`, and keep them in your secret store.
 
 ### Kubernetes
@@ -106,8 +114,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata: { name: comindly }
 spec:
-  replicas: 1
-  strategy: { type: Recreate }   # one writer per data volume
+  replicas: 1   # indexing runs inside this one instance
   selector: { matchLabels: { app: comindly } }
   template:
     metadata: { labels: { app: comindly } }
@@ -115,7 +122,7 @@ spec:
       serviceAccountName: comindly   # its cloud role reads the bucket
       containers:
         - name: comindly
-          image: ghcr.io/sayef/comindly:0.2.0
+          image: ghcr.io/sayef/comindly:0.3.0
           ports: [{ containerPort: 7878 }]
           env:
             - { name: COMINDLY_PUBLIC_URL, value: https://comindly.example.com }
@@ -125,12 +132,13 @@ spec:
             - { name: COMINDLY_ADMIN_TOKEN_FILE, value: /run/secrets/admin_token }
             - { name: COMINDLY_SECRET_KEY_FILE, value: /run/secrets/secret_key }
           volumeMounts:
-            - { name: data, mountPath: /data }
+            - { name: data, mountPath: /data }   # clones of repositories; scratch is fine
             - { name: secrets, mountPath: /run/secrets, readOnly: true }
-          readinessProbe: { httpGet: { path: /api/auth/me, port: 7878 } }
+          readinessProbe: { httpGet: { path: /health, port: 7878 } }
+          livenessProbe: { httpGet: { path: /health, port: 7878 } }
       volumes:
         - name: data
-          persistentVolumeClaim: { claimName: comindly-data }
+          emptyDir: {}
         - name: secrets
           secret: { secretName: comindly }
 ---

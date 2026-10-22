@@ -269,6 +269,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/join", post(team::join))
         .route("/api/team/create", post(team::create))
         .route("/api/auth/me", get(auth::me))
+        .route("/health", get(health))
         .fallback(get(asset));
     let app = match access {
         Access::Local(token) => app
@@ -289,10 +290,12 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/tokens", get(auth::tokens).post(auth::create_token))
             .route("/api/tokens/revoke", post(auth::revoke_token))
             .route("/api/secrets", get(auth::secrets).post(auth::set_secret))
-            .nest_service(
-                "/mcp",
-                crate::mcp::http(state.mcp.clone().unwrap_or_default(), auth::hosts()),
-            )
+            .merge({
+                let shared = state.mcp.clone().unwrap_or_default();
+                Router::new()
+                    .nest_service("/mcp", crate::mcp::http(shared.clone(), auth::hosts()))
+                    .layer(axum::middleware::from_fn_with_state(shared, mcp_ready))
+            })
             .layer(axum::middleware::from_fn(auth::guard)),
     }
     .with_state(state);
@@ -306,6 +309,28 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .await
         .context("serve")
     })
+}
+
+/// For load balancers and orchestrators: answers while the process serves requests.
+async fn health() -> Json<Value> {
+    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+}
+
+/// Agents get 503 with a reason until there is an index to answer from.
+async fn mcp_ready(
+    State(shared): State<crate::mcp::Shared>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if shared.read().map(|s| s.is_none()).unwrap_or(true) {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, "60")],
+            Json(json!({"error": "no index yet: an admin indexes repositories first"})),
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 /// A random token for one UI session.

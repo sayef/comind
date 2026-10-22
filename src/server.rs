@@ -316,6 +316,8 @@ struct State {
     tokens: HashMap<String, Token>,
     secrets: BTreeMap<String, Secret>,
     codes: HashMap<String, Code>,
+    /// When admins named by the deployment were last seen; they have no `user` row.
+    seen: HashMap<String, String>,
     failures: Vec<(String, String)>,
 }
 
@@ -349,6 +351,7 @@ impl State {
             "token" => add(&mut self.tokens, key, json),
             "secret" => add(&mut self.secrets, key, json),
             "code" => add(&mut self.codes, key, json),
+            "seen" => add(&mut self.seen, key, json),
             _ => {}
         }
     }
@@ -366,6 +369,7 @@ impl State {
                     "token" => drop(self.tokens.remove(key)),
                     "secret" => drop(self.secrets.remove(key)),
                     "code" => drop(self.codes.remove(key)),
+                    "seen" => drop(self.seen.remove(key)),
                     _ => {}
                 },
             }
@@ -374,8 +378,8 @@ impl State {
 }
 
 const TABLE: &str = "server";
-const KINDS: [&str; 7] = [
-    "user", "invite", "link", "session", "token", "secret", "code",
+const KINDS: [&str; 8] = [
+    "user", "invite", "link", "session", "token", "secret", "code", "seen",
 ];
 
 /// LanceDB work on its own runtime, so callers may be async or not.
@@ -736,8 +740,8 @@ impl Store {
 
     pub fn members(&self) -> Result<Vec<Member>> {
         let admins = admin_emails();
-        let mut out: Vec<Member> = self
-            .state()
+        let st = self.state();
+        let mut out: Vec<Member> = st
             .users
             .iter()
             .map(|(email, u)| Member {
@@ -757,11 +761,11 @@ impl Store {
         for a in admins {
             if !out.iter().any(|m| m.email == a) {
                 out.push(Member {
+                    last_seen: st.seen.get(&a).cloned(),
                     email: a,
                     role: Role::Admin,
                     fixed: true,
                     created: String::new(),
-                    last_seen: None,
                 });
             }
         }
@@ -1161,10 +1165,17 @@ impl Store {
                 tok.last_used = Some(t.clone());
                 changes.push(put("token", &id, &tok));
             }
-            let user = self.state().users.get(&email).cloned();
-            if let Some(mut u) = user.filter(|u| u.last_seen.as_ref().is_none_or(|s| *s < since)) {
-                u.last_seen = Some(t);
-                changes.push(put("user", &email, &u));
+            let (user, seen) = {
+                let st = self.state();
+                (st.users.get(&email).cloned(), st.seen.get(&email).cloned())
+            };
+            if let Some(mut u) = user {
+                if u.last_seen.as_ref().is_none_or(|s| *s < since) {
+                    u.last_seen = Some(t);
+                    changes.push(put("user", &email, &u));
+                }
+            } else if seen.is_none_or(|s| s < since) {
+                changes.push(put("seen", &email, &t));
             }
             if let Err(e) = self.commit(changes) {
                 eprintln!("comindly: recording last use: {e:#}");
