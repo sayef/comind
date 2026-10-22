@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/sayef/comindly/compare/v0.1.0...v0.2.0) - 2026-10-21
+
 ### Added
 
 - Server mode for teams (`COMINDLY_PUBLIC_URL`): sign-in entirely by email or entirely by codes
