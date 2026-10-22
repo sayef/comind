@@ -47,7 +47,10 @@ jobs:
     container: rust:1.97-bullseye
     steps:
       - uses: actions/checkout@v7
-      - run: apt-get update && apt-get install -y protobuf-compiler cmake
+      # Debian 11's security archive is retired; the build tools come from the main archive.
+      - run: |
+          sed -i '/bullseye-security/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          apt-get update && apt-get install -y protobuf-compiler cmake
       - run: cargo build --release
       - uses: actions/upload-artifact@v7
         with:
