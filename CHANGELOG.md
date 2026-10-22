@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/sayef/comindly/compare/v0.3.0...v0.3.1) - 2026-10-22
+
 ### Fixed
 
 - On a server, indexing started from the app uses the LLM key and git tokens saved under Integrations;
