@@ -543,6 +543,23 @@ impl Store {
     }
 
     fn open_keyed(index_root: &str, key: &str, previous: Option<&str>) -> Result<Store> {
+        let store = Store::attach_keyed(index_root, key, previous)?;
+        store.rotate_key()?;
+        store.prune();
+        let unreadable = store.unreadable_secrets();
+        if !unreadable.is_empty() {
+            eprintln!(
+                "comindly: {} stored secret(s) cannot be decrypted with COMINDLY_SECRET_KEY ({}); \
+                 set COMINDLY_SECRET_KEY_PREVIOUS to the old key, or save them again",
+                unreadable.len(),
+                unreadable.join(", ")
+            );
+        }
+        Ok(store)
+    }
+
+    /// The table as it is, without the server's upkeep; for processes a server starts.
+    fn attach_keyed(index_root: &str, key: &str, previous: Option<&str>) -> Result<Store> {
         let uri = format!("{}/_server", index_root.trim_end_matches('/'));
         let store = Store {
             uri,
@@ -556,17 +573,6 @@ impl Store {
             writing: Mutex::new(()),
         };
         store.reload()?;
-        store.rotate_key()?;
-        store.prune();
-        let unreadable = store.unreadable_secrets();
-        if !unreadable.is_empty() {
-            eprintln!(
-                "comindly: {} stored secret(s) cannot be decrypted with COMINDLY_SECRET_KEY ({}); \
-                 set COMINDLY_SECRET_KEY_PREVIOUS to the old key, or save them again",
-                unreadable.len(),
-                unreadable.join(", ")
-            );
-        }
         Ok(store)
     }
 
@@ -1371,9 +1377,21 @@ pub fn init(index_root: &str) -> Result<&'static Store> {
     Ok(STORE.get_or_init(|| store))
 }
 
-/// The store, when this process runs as a server.
+/// The store, when this process runs as a server or was started by one (indexing).
 pub fn store() -> Option<&'static Store> {
-    STORE.get()
+    static ATTACHED: std::sync::OnceLock<Option<Store>> = std::sync::OnceLock::new();
+    STORE.get().or_else(|| {
+        ATTACHED
+            .get_or_init(|| {
+                let key = env_secret("COMINDLY_SECRET_KEY").filter(|_| enabled())?;
+                let root = crate::config::Config::load().index_dir(None);
+                let previous = env_secret("COMINDLY_SECRET_KEY_PREVIOUS");
+                Store::attach_keyed(&root, &key, previous.as_deref())
+                    .map_err(|e| eprintln!("comindly: the server's stored keys: {e:#}"))
+                    .ok()
+            })
+            .as_ref()
+    })
 }
 
 /// Secret names for a git host's token and for the LLM key.

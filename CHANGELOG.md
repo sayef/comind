@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- On a server, indexing started from the app uses the LLM key and git tokens saved under Integrations;
+  0.3.0 skipped summaries, flow walkthroughs and style guides when the key was only saved there.
+- The indexing log also goes to the server's output, so platform logs (Datadog, CloudWatch) show it.
+
 ## [0.3.0](https://github.com/sayef/comindly/compare/v0.2.0...v0.3.0) - 2026-10-22
 
 ### Added

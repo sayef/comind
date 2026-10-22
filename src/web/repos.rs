@@ -306,7 +306,9 @@ pub(super) async fn begin(
     if !llm {
         cmd.arg("--no-llm");
     }
-    cmd.env("NO_COLOR", "1")
+    // A server's stored keys are read from the same index location.
+    cmd.env("COMINDLY_INDEX_DIR", &root)
+        .env("NO_COLOR", "1")
         .env("CLICOLOR", "0")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -332,11 +334,10 @@ pub(super) async fn begin(
                 while let Ok(Some(l)) = lines.next_line().await {
                     let l = strip_ansi(&l);
                     if !l.trim().is_empty() {
-                        app.job
-                            .lock()
-                            .await
-                            .lines
-                            .push(crate::storage::without_userinfo(&l));
+                        let l = crate::storage::without_userinfo(&l);
+                        // Also in the process's own output, for the platform's logs.
+                        eprintln!("index: {l}");
+                        app.job.lock().await.lines.push(l);
                     }
                 }
             }
