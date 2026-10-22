@@ -78,6 +78,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        include:
+          # Four parallel builds of the test binaries need more than its 16 GB and 3 GB swap.
+          - os: ubuntu-24.04-arm
+            jobs: 2
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -87,6 +91,6 @@ jobs:
         run: brew install protobuf cmake
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test
+      - run: cargo test ${{ matrix.jobs && format('-j {0}', matrix.jobs) || '' }}
       # Resolver and contract quality on the fixture org (also asserted by tests/eval_graph.rs).
       - run: cargo run -q -- eval graph
