@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/sayef/comindly/compare/v0.2.0...v0.3.0) - 2026-10-22
+
 ### Added
 
 - `GET /health` answers without signing in, for load balancer and orchestrator health checks.
