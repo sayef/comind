@@ -199,7 +199,8 @@ impl AppState {
             + 1;
         let latest = self.mcp_generation.clone();
         tokio::spawn(async move {
-            match crate::mcp::load(&uri, true).await {
+            let markdown = crate::config::Config::load().format() != "json";
+            match crate::mcp::load(&uri, markdown).await {
                 // A slower, older load never replaces a newer one.
                 Ok(server) if latest.load(std::sync::atomic::Ordering::SeqCst) == generation => {
                     if let Ok(mut m) = mcp.write() {
@@ -207,7 +208,9 @@ impl AppState {
                     }
                 }
                 Ok(_) => {}
-                Err(e) => eprintln!("comindly: agents cannot use {uri} yet: {}", error_text(&e)),
+                Err(e) => {
+                    crate::ui::warn(&format!("agents cannot use {uri} yet: {}", error_text(&e)))
+                }
             }
         });
     }

@@ -21,9 +21,6 @@ pub const DEFAULT_MODEL: &str = "gpt-6-luna";
 /// Where requests go without an endpoint setting: OpenAI.
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
-/// Max concurrent in-flight enrichment requests.
-const CONCURRENCY: usize = 8;
-
 pub struct LlmClient {
     // Chat Completions API (works with OpenAI *and* any OpenAI-compatible endpoint), not the
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
@@ -140,7 +137,7 @@ impl LlmClient {
     ) -> Vec<Option<Enrichment>> {
         stream::iter(items.iter())
             .map(|(n, s, c)| async move { self.enrich_symbol(n, s, c).await.ok() })
-            .buffered(CONCURRENCY)
+            .buffered(crate::config::Config::load().llm_concurrency())
             .collect()
             .await
     }

@@ -228,12 +228,12 @@ pub(super) async fn request_link(Json(q): Json<EmailQ>) -> Response {
             tokio::spawn(async move {
                 if let Err(e) = server::send_mail(&email, "Your comindly sign-in link", &body).await
                 {
-                    eprintln!("comindly: {}", super::error_text(&e));
+                    crate::ui::warn(&super::error_text(&e));
                 }
             });
         }
         Ok(None) => {}
-        Err(e) => eprintln!("comindly: sign-in link: {}", super::error_text(&e)),
+        Err(e) => crate::ui::warn(&format!("sign-in link: {}", super::error_text(&e))),
     }
     Json(json!({"ok": true, "message": "If that address belongs to a member, a sign-in link is on its way"}))
         .into_response()

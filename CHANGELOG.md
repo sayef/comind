@@ -6,7 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Team settings for what LLM steps cost: most symbols to summarise, most flows to walk through, LLM
+  requests at once and the model's prices; search embeddings on or off; and whether agents get
+  markdown or JSON text. In the app and in `comindly team set`.
+- `COMINDLY_LOG_FORMAT=json` (set in the container image): every message as one JSON event with
+  timestamp, level, step and fields, including progress, tokens and cost, for Datadog, CloudWatch or Loki.
+- The app shows indexing as steps with results and warnings, with a live progress bar and its tokens
+  and cost; the header shows a short status.
+- **Add all** for repositories the index has but this server has no folder for.
+
+### Changed
+
+- Summaries, flow walkthroughs and style guides are reused while their input is unchanged and saved as
+  they are written, so an interrupted indexing run continues where it stopped instead of starting over.
+- A limit always picks the same symbols (ties are broken by id).
+- Team settings saved on a server record the admin who saved them; the separate LLM card is gone there.
 ## [0.3.2](https://github.com/sayef/comindly/compare/v0.3.1...v0.3.2) - 2026-10-22
+||||||| parent of b145d1b (Cost controls and resumable LLM steps, structured JSON logs, a step-by-step indexing log, and Add all)
 
 ### Fixed
 

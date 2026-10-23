@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { shortStatus } from "@/components/index-log";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +12,11 @@ export function Activity() {
   const qc = useQueryClient();
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : 10_000) });
   const busy = useIsMutating();
-  const stopIndex = useMutation({ mutationFn: api.cancelIndex, meta: { quiet: true }, onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }) });
+  const stopIndex = useMutation({
+    mutationFn: api.cancelIndex,
+    meta: { quiet: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
+  });
 
   const j = job.data;
   const was = useRef<boolean | undefined>(undefined);
@@ -20,20 +25,23 @@ export function Activity() {
     if (was.current && !j.running) {
       if (j.cancelled) toast.info("Indexing cancelled");
       else if (j.ok) toast.success("Indexing finished; every page shows the new index");
-      else toast.error("Indexing failed", { action: { label: "See the log", onClick: () => window.location.assign("/settings/repositories") } });
+      else
+        toast.error("Indexing failed", {
+          action: { label: "See the log", onClick: () => window.location.assign("/settings/repositories") },
+        });
       qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "index-job" });
     }
     was.current = j.running;
   }, [j, qc]);
 
-  const step = j?.lines.at(-1)?.replace(/^[^A-Za-z0-9]+/, "") ?? "";
+  const step = shortStatus(j?.events ?? []);
   if (j?.running)
     return (
       <Pill>
-        <Link to="/settings/repositories" className="flex min-w-0 items-center gap-2" title={step}>
+        <Link to="/settings/repositories" className="flex min-w-0 items-center gap-2" title={step ? `Indexing: ${step}` : "Indexing"}>
           <Loader2 className="size-3.5 shrink-0 animate-spin text-brand" />
           <span className="font-medium">Indexing</span>
-          <span className="hidden max-w-56 truncate text-muted-foreground lg:inline">{step}</span>
+          <span className="hidden max-w-44 truncate text-muted-foreground 2xl:inline">{step}</span>
         </Link>
         <Stop label="Cancel indexing" pending={stopIndex.isPending} onClick={() => stopIndex.mutate()} />
       </Pill>
@@ -55,13 +63,16 @@ function Pill({ children }: { children: React.ReactNode }) {
 function Stop({ label, pending, onClick }: { label: string; pending: boolean; onClick: () => void }) {
   return (
     <button
-      className={cn("-mr-1 flex items-center gap-1 rounded-full px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground", pending && "opacity-50")}
+      className={cn(
+        "-mr-1 flex items-center gap-1 rounded-full px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground",
+        pending && "opacity-50",
+      )}
       disabled={pending}
       onClick={onClick}
       aria-label={label}
       title={label}
     >
-      <X className="size-3.5" /> Cancel
+      <X className="size-3.5" />
     </button>
   );
 }

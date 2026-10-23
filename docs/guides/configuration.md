@@ -25,7 +25,10 @@ guide       = true
 # record_names = false                          # keep names off new records
 ```
 
-Environment: `COMINDLY_INDEX_DIR`, `COMINDLY_LLM_MODEL`, `COMINDLY_EMBED_MODEL`, `COMINDLY_LLM_BASE_URL`,
+Team settings (`comindly team`, or Settings → General in the app) win over the matching entries here:
+the models, the LLM steps and their limits, `format`, plus `llm_concurrency` and the LLM's prices.
+
+Environment: `COMINDLY_LOG_FORMAT=json` (structured logs), `COMINDLY_INDEX_DIR`, `COMINDLY_LLM_MODEL`, `COMINDLY_EMBED_MODEL`, `COMINDLY_LLM_BASE_URL`,
 `COMINDLY_FORMAT`, `COMINDLY_SIGNING_KEY`, `COMINDLY_ALLOWED_SIGNERS`, `COMINDLY_AUTHOR_NAME`, `COMINDLY_AGENT`.
 
 Settings everyone on an index must share (the LLM endpoint and model, the embedding model) are team settings stored

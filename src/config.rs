@@ -103,7 +103,7 @@ impl Config {
         match toml::from_str(&text) {
             Ok(cfg) => cfg,
             Err(e) => {
-                eprintln!("comindly: ignoring {}: {e}", path.display());
+                crate::ui::warn(&format!("ignoring {}: {e}", path.display()));
                 Self::default()
             }
         }
@@ -160,17 +160,38 @@ impl Config {
 
     /// Cap on enriched symbols (`max_enrich` in the file); `usize::MAX` = no cap.
     pub fn max_enrich(&self) -> usize {
-        self.max_enrich.unwrap_or(usize::MAX)
+        team(|t| t.max_enrich)
+            .or(self.max_enrich)
+            .unwrap_or(usize::MAX)
     }
 
     /// Cap on narrated flows (`max_flows` in the file); `usize::MAX` = no cap.
     pub fn max_flows(&self) -> usize {
-        self.max_flows.unwrap_or(usize::MAX)
+        team(|t| t.max_flows)
+            .or(self.max_flows)
+            .unwrap_or(usize::MAX)
+    }
+
+    /// The team's LLM prices in USD per million `(input, output)` tokens, when set.
+    pub fn llm_prices(&self) -> Option<(f64, f64)> {
+        let t = crate::team::current()?;
+        (t.llm_price_in.is_some() || t.llm_price_out.is_some()).then(|| {
+            (
+                t.llm_price_in.unwrap_or(0.0),
+                t.llm_price_out.unwrap_or(0.0),
+            )
+        })
+    }
+
+    /// LLM requests in flight at once: team setting, else 8.
+    pub fn llm_concurrency(&self) -> usize {
+        team(|t| t.llm_concurrency).unwrap_or(8).clamp(1, 64)
     }
 
     /// Default output format: `COMINDLY_FORMAT` → file → `md`.
     pub fn format(&self) -> String {
         non_empty_env("COMINDLY_FORMAT")
+            .or_else(|| team(|t| t.format.clone()))
             .or_else(|| self.format.clone())
             .unwrap_or_else(|| "md".to_string())
     }
@@ -178,7 +199,7 @@ impl Config {
     /// Step defaults (file → built-in). All on by default; the LLM steps skip gracefully with a
     /// warning when `OPENAI_API_KEY` is missing, so a keyless `index` still succeeds.
     pub fn embed(&self) -> bool {
-        self.embed.unwrap_or(true)
+        team(|t| t.embed).or(self.embed).unwrap_or(true)
     }
     pub fn enrich(&self) -> bool {
         team(|t| t.enrich).or(self.enrich).unwrap_or(true)

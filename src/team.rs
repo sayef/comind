@@ -30,6 +30,27 @@ pub struct TeamSettings {
     pub flows: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guide: Option<bool>,
+    /// Search embeddings when indexing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embed: Option<bool>,
+    /// Most symbols summarised by the LLM, most central first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_enrich: Option<usize>,
+    /// Most flows given a written walkthrough, furthest-reaching first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_flows: Option<usize>,
+    /// LLM requests in flight at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_concurrency: Option<usize>,
+    /// The LLM's price in USD per million input tokens, to show what indexing costs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_price_in: Option<f64>,
+    /// The LLM's price in USD per million output tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_price_out: Option<f64>,
+    /// What MCP tools return as text: `md` (default) or `json`; the JSON is always attached too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
     /// Clone URLs of the team's repositories, so everyone can get the same set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<String>,
@@ -73,6 +94,18 @@ pub async fn load(root: &str) -> Result<Stored> {
 
 /// Save `settings` if nobody saved since `expected` (the version they were loaded at).
 pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) -> Result<u64> {
+    let by = crate::ledger::author_name().unwrap_or_else(crate::ledger::actor);
+    save_as(root, settings, expected, &by).await
+}
+
+/// [`save`], recorded as changed by `by`.
+pub async fn save_as(
+    root: &str,
+    settings: &TeamSettings,
+    expected: Option<u64>,
+    by: &str,
+) -> Result<u64> {
+    let by = by.to_string();
     let db = crate::storage::connect(&uri(root)).execute().await?;
     let now = match db.open_table(TABLE).execute().await {
         Ok(t) => Some(t.version().await?),
@@ -81,7 +114,6 @@ pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) ->
     if now != expected {
         bail!("the team settings were changed by someone else; reload and try again");
     }
-    let by = crate::ledger::author_name().unwrap_or_else(crate::ledger::actor);
     let schema = Arc::new(Schema::new(vec![
         Field::new("settings", DataType::Utf8, false),
         Field::new("changed_by", DataType::Utf8, false),

@@ -178,9 +178,13 @@ export function Layout() {
             <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             {version > 0 && (
-              <span className="hidden items-center gap-2 font-mono text-xs text-muted-foreground lg:flex" title={latest ?? undefined}>
-                <span className="size-[7px] rounded-full bg-brand shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-brand)_18%,transparent)]" />
-                index v{version} · {ago(latest)}
+              <span
+                className="hidden items-center gap-2 whitespace-nowrap font-mono text-xs text-muted-foreground lg:flex"
+                title={latest ? `index v${version}, ${ago(latest)} (${latest})` : undefined}
+              >
+                <span className="size-[7px] shrink-0 rounded-full bg-brand shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-brand)_18%,transparent)]" />
+                index v{version}
+                <span className="hidden 2xl:inline">· {ago(latest)}</span>
               </span>
             )}
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">

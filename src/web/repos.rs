@@ -23,7 +23,8 @@ pub(super) struct Job {
     pid: Option<u32>,
     cancelled: bool,
     ok: Option<bool>,
-    lines: Vec<String>,
+    /// The indexer's events: `timestamp`, `level`, `kind`, `step`, `message` and fields.
+    events: Vec<Value>,
     started: Option<String>,
     finished: Option<String>,
 }
@@ -232,14 +233,24 @@ pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
     }
 }
 
+/// An event the server adds to the indexer's own.
+fn event(level: &str, kind: &str, message: &str) -> Value {
+    json!({
+        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "level": level,
+        "kind": kind,
+        "message": message,
+    })
+}
+
 pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
     let j = app.job.lock().await;
-    let from = j.lines.len().saturating_sub(400);
+    let from = j.events.len().saturating_sub(400);
     Json(json!({
         "running": j.running,
         "cancelled": j.cancelled,
         "ok": j.ok,
-        "lines": &j.lines[from..],
+        "events": &j.events[from..],
         "started": j.started,
         "finished": j.finished,
     }))
@@ -297,7 +308,7 @@ pub(super) async fn begin(
         *j = Job {
             running: true,
             started: Some(chrono::Utc::now().to_rfc3339()),
-            lines: why.into_iter().collect(),
+            events: why.into_iter().map(|w| event("info", "note", &w)).collect(),
             ..Default::default()
         };
     }
@@ -308,6 +319,7 @@ pub(super) async fn begin(
     }
     // A server's stored keys are read from the same index location.
     cmd.env("COMINDLY_INDEX_DIR", &root)
+        .env("COMINDLY_LOG_FORMAT", "json")
         .env("NO_COLOR", "1")
         .env("CLICOLOR", "0")
         .stdin(std::process::Stdio::null())
@@ -335,9 +347,18 @@ pub(super) async fn begin(
                     let l = strip_ansi(&l);
                     if !l.trim().is_empty() {
                         let l = crate::storage::without_userinfo(&l);
-                        // Also in the process's own output, for the platform's logs.
-                        eprintln!("index: {l}");
-                        app.job.lock().await.lines.push(l);
+                        let mut e = serde_json::from_str::<Value>(&l)
+                            .ok()
+                            .filter(Value::is_object)
+                            .unwrap_or_else(|| event("info", "note", &l));
+                        e["source"] = "index".into();
+                        // Also in the server's own output, for the platform's logs.
+                        if crate::ui::json_logs() {
+                            eprintln!("{e}");
+                        } else {
+                            eprintln!("index: {}", e["message"].as_str().unwrap_or_default());
+                        }
+                        app.job.lock().await.events.push(e);
                     }
                 }
             }
@@ -349,12 +370,20 @@ pub(super) async fn begin(
         let ok = !cancelled && child.wait().await.map(|s| s.success()).unwrap_or(false);
         if cancelled {
             let _ = child.wait().await;
-            app2.job.lock().await.lines.push("Cancelled.".into());
+            app2.job
+                .lock()
+                .await
+                .events
+                .push(event("warn", "warning", "Cancelled."));
         }
         if ok {
             if let Err(e) = app2.reload(&root).await {
                 let msg = format!("reload failed: {e:#}");
-                app2.job.lock().await.lines.push(msg);
+                app2.job
+                    .lock()
+                    .await
+                    .events
+                    .push(event("error", "error", &msg));
             }
         }
         let mut j = app2.job.lock().await;

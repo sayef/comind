@@ -1739,9 +1739,36 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 s.embed_model.clone(),
                 comindly::embed::DEFAULT_MODEL,
             );
-            for (k, v) in [("enrich", s.enrich), ("flows", s.flows), ("guide", s.guide)] {
+            for (k, v) in [
+                ("embed", s.embed),
+                ("enrich", s.enrich),
+                ("flows", s.flows),
+                ("guide", s.guide),
+            ] {
                 show(k, v.map(|b| b.to_string()), "true");
             }
+            show(
+                "max_enrich",
+                s.max_enrich.map(|n| n.to_string()),
+                "no limit",
+            );
+            show("max_flows", s.max_flows.map(|n| n.to_string()), "no limit");
+            show(
+                "llm_concurrency",
+                s.llm_concurrency.map(|n| n.to_string()),
+                "8",
+            );
+            show(
+                "llm_price_in",
+                s.llm_price_in.map(|n| n.to_string()),
+                "not set",
+            );
+            show(
+                "llm_price_out",
+                s.llm_price_out.map(|n| n.to_string()),
+                "not set",
+            );
+            show("format", s.format.clone(), "md");
             let source = match comindly::credentials::llm_key(s.name.as_deref()).1 {
                 comindly::credentials::Source::Team => "your key for this team (credentials file)",
                 comindly::credentials::Source::Default => "your default key (credentials file)",
@@ -1777,6 +1804,26 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                     .with_context(|| format!("`{p}` is not KEY=VALUE"))?;
                 let v = v.trim();
                 let text = (!v.is_empty()).then(|| v.to_string());
+                let number = |k: &str, v: &str| -> anyhow::Result<Option<usize>> {
+                    Ok(if v.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            v.parse()
+                                .with_context(|| format!("{k} is a whole number"))?,
+                        )
+                    })
+                };
+                let price =
+                    |k: &str, v: &str| -> anyhow::Result<Option<f64>> {
+                        Ok(if v.is_empty() {
+                            None
+                        } else {
+                            Some(v.parse().with_context(|| {
+                                format!("{k} is a number, USD per million tokens")
+                            })?)
+                        })
+                    };
                 let flag = || -> anyhow::Result<Option<bool>> {
                     Ok(if v.is_empty() {
                         None
@@ -1794,9 +1841,25 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                         );
                         s.embed_model = text
                     }
+                    "embed" => s.embed = flag()?,
                     "enrich" => s.enrich = flag()?,
                     "flows" => s.flows = flag()?,
                     "guide" => s.guide = flag()?,
+                    "max_enrich" => s.max_enrich = number(k, v)?,
+                    "max_flows" => s.max_flows = number(k, v)?,
+                    "llm_concurrency" => {
+                        s.llm_concurrency = number(k, v)?;
+                        anyhow::ensure!(
+                            s.llm_concurrency.is_none_or(|n| (1..=64).contains(&n)),
+                            "llm_concurrency is between 1 and 64"
+                        );
+                    }
+                    "llm_price_in" => s.llm_price_in = price(k, v)?,
+                    "llm_price_out" => s.llm_price_out = price(k, v)?,
+                    "format" => {
+                        anyhow::ensure!(matches!(v, "" | "md" | "json"), "format is md or json");
+                        s.format = text
+                    }
                     other => anyhow::bail!("unknown team setting `{other}`"),
                 }
             }
@@ -2817,7 +2880,7 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
         comindly::ui::note("flows: no multi-step flows found to narrate");
         return ExitCode::SUCCESS;
     }
-    comindly::ui::warn("--flows sends call traces to the OpenAI API — opt-in egress.");
+    comindly::ui::warn("Walkthroughs send call traces to the LLM.");
 
     // Precompute call traces (graph ops) up front, then narrate concurrently.
     let prep: Vec<(comindly::model::GlobalSymbolId, String, String, String)> = candidates
@@ -2844,42 +2907,91 @@ fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitC
         })
         .collect();
 
-    let pb = comindly::ui::progress(prep.len() as u64, "narrating flows");
-    let rows: Vec<(comindly::model::GlobalSymbolId, String, Vec<String>)> = rt.block_on(async {
-        use futures::StreamExt;
-        futures::stream::iter(prep.iter())
-            .map(|(id, name, sig, trace)| {
-                let (pb, client) = (&pb, &client);
-                async move {
-                    let r = client
-                        .narrate_flow(name, sig, trace)
-                        .await
-                        .ok()
-                        .map(|(narr, q)| (id.clone(), narr, q));
-                    let (i, o) = client.token_usage();
-                    pb.set_message(format!("{} in / {} out tok", kfmt(i), kfmt(o)));
-                    pb.inc(1);
-                    r
-                }
-            })
-            .buffered(8)
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
-    });
+    // Reuse a walkthrough when its input (name, signature, trace) is unchanged; save every
+    // CHECKPOINT so an interrupted run keeps what it narrated.
+    const CHECKPOINT: usize = 25;
+    let key = |name: &str, sig: &str, trace: &str| {
+        blake3::hash(format!("{name}\0{sig}\0{trace}").as_bytes())
+            .to_hex()
+            .to_string()
+    };
+    let stored_keys = comindly::index::read_keys_blocking(dst, "flow_keys");
+    let stored: HashMap<String, (String, Vec<String>)> = comindly::index::read_flows_blocking(dst)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, n, q)| (id.render(), (n, q)))
+        .collect();
+    let mut rows: Vec<(comindly::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
+    let mut keys: Vec<(String, String)> = Vec::new();
+    let mut todo = Vec::new();
+    for p @ (id, name, sig, trace) in &prep {
+        let (rid, k) = (id.render(), key(name, sig, trace));
+        match stored
+            .get(&rid)
+            .filter(|_| stored_keys.get(&rid) == Some(&k))
+        {
+            Some((n, q)) => {
+                rows.push((id.clone(), n.clone(), q.clone()));
+                keys.push((rid, k));
+            }
+            None => todo.push(p),
+        }
+    }
+    let reused = rows.len();
+    comindly::ui::note(&format!(
+        "{} flows to walk through ({reused} reused)",
+        todo.len()
+    ));
+    let pb = comindly::ui::progress(todo.len() as u64, "narrating flows");
+    let concurrency = comindly::config::Config::load().llm_concurrency();
+    for chunk in todo.chunks(CHECKPOINT) {
+        let done: Vec<_> = rt.block_on(async {
+            use futures::StreamExt;
+            futures::stream::iter(chunk.iter())
+                .map(|(id, name, sig, trace)| {
+                    let (pb, client) = (&pb, &client);
+                    async move {
+                        let r = client
+                            .narrate_flow(name, sig, trace)
+                            .await
+                            .ok()
+                            .map(|(narr, q)| (id.clone(), narr, q, key(name, sig, trace)));
+                        let (i, o) = client.token_usage();
+                        pb.set_message(spend(i, o));
+                        pb.inc(1);
+                        r
+                    }
+                })
+                .buffered(concurrency)
+                .collect::<Vec<_>>()
+                .await
+        });
+        for (id, narr, q, k) in done.into_iter().flatten() {
+            keys.push((id.render(), k));
+            rows.push((id, narr, q));
+        }
+        if chunk.len() == CHECKPOINT {
+            let saved = comindly::index::write_flows_blocking(dst, &rows)
+                .and_then(|_| comindly::index::write_keys_blocking(dst, "flow_keys", &keys));
+            if let Err(e) = saved {
+                comindly::ui::warn(&format!("saving walkthroughs so far failed: {e:#}"));
+            }
+        }
+    }
     pb.finish_and_clear();
     let (i, o) = client.token_usage();
-    comindly::ui::note(&format!(
-        "tokens: {} in / {} out ({} total)",
-        kfmt(i),
-        kfmt(o),
-        kfmt(i + o)
-    ));
+    comindly::ui::note(&format!("spent: {}", spend(i, o)));
 
-    match comindly::index::write_flows_blocking(dst, &rows) {
-        Ok(v) => comindly::ui::ok(&format!("flows v{v}: {} narrated", rows.len())),
+    match comindly::index::write_flows_blocking(dst, &rows)
+        .and_then(|v| comindly::index::write_keys_blocking(dst, "flow_keys", &keys).map(|_| v))
+    {
+        Ok(v) => comindly::ui::ok(&format!(
+            "flows v{v}: {} narrated ({reused} reused, {} written)",
+            rows.len(),
+            rows.len() - reused
+        )),
         Err(e) => {
             comindly::ui::err(&format!("write flows failed: {e:#}"));
             return ExitCode::FAILURE;
@@ -3108,7 +3220,11 @@ fn run_enrich(
             )
         })
         .collect();
-    defs.sort_by_key(|s| Reverse(g.dependents_count(&s.id.render())));
+    // Ties by id, so a limit always picks the same symbols.
+    defs.sort_by_cached_key(|s| {
+        let id = s.id.render();
+        (Reverse(g.dependents_count(&id)), id)
+    });
     defs.truncate(top);
 
     // Reuse prior enrichment for non-stale symbols; only hit the API for the rest.
@@ -3147,46 +3263,51 @@ fn run_enrich(
             )
         })
         .collect();
-    let results: Vec<Option<comindly::llm::Enrichment>> = if items.is_empty() {
-        Vec::new()
-    } else {
-        comindly::ui::warn(
-            "--enrich sends code (names/signatures) to the OpenAI API — opt-in egress.",
-        );
+    // Saved every CHECKPOINT summaries, so an interrupted run keeps them and the next reuses them.
+    const CHECKPOINT: usize = 500;
+    let mut generated = 0usize;
+    if !items.is_empty() {
+        comindly::ui::warn("Summaries send symbol names, signatures and file paths to the LLM.");
+        comindly::ui::note(&format!(
+            "{} symbols to summarise ({} reused)",
+            items.len(),
+            rows.len()
+        ));
         let pb = comindly::ui::progress(items.len() as u64, "enriching symbols");
-        let out = rt.block_on(async {
-            use futures::StreamExt;
-            futures::stream::iter(items.iter())
-                .map(|(n, s, c)| {
-                    let (pb, client) = (&pb, &client);
-                    async move {
-                        let r = client.enrich_symbol(n, s, c).await.ok();
-                        let (i, o) = client.token_usage();
-                        pb.set_message(format!("{} in / {} out tok", kfmt(i), kfmt(o)));
-                        pb.inc(1);
-                        r
-                    }
-                })
-                .buffered(8)
-                .collect::<Vec<_>>()
-                .await
-        });
+        let concurrency = comindly::config::Config::load().llm_concurrency();
+        for (chunk, syms) in items.chunks(CHECKPOINT).zip(to_call.chunks(CHECKPOINT)) {
+            let out = rt.block_on(async {
+                use futures::StreamExt;
+                futures::stream::iter(chunk.iter())
+                    .map(|(n, s, c)| {
+                        let (pb, client) = (&pb, &client);
+                        async move {
+                            let r = client.enrich_symbol(n, s, c).await.ok();
+                            let (i, o) = client.token_usage();
+                            pb.set_message(spend(i, o));
+                            pb.inc(1);
+                            r
+                        }
+                    })
+                    .buffered(concurrency)
+                    .collect::<Vec<_>>()
+                    .await
+            });
+            for (s, r) in syms.iter().zip(out) {
+                if let Some(e) = r {
+                    rows.push((s.id.clone(), e.summary, e.queries));
+                    generated += 1;
+                }
+            }
+            if chunk.len() == CHECKPOINT {
+                if let Err(e) = comindly::index::write_enrichment_blocking(dst, &rows) {
+                    comindly::ui::warn(&format!("saving summaries so far failed: {e:#}"));
+                }
+            }
+        }
         pb.finish_and_clear();
         let (i, o) = client.token_usage();
-        comindly::ui::note(&format!(
-            "tokens: {} in / {} out ({} total)",
-            kfmt(i),
-            kfmt(o),
-            kfmt(i + o)
-        ));
-        out
-    };
-    let mut generated = 0usize;
-    for (s, r) in to_call.iter().zip(results) {
-        if let Some(e) = r {
-            rows.push((s.id.clone(), e.summary, e.queries));
-            generated += 1;
-        }
+        comindly::ui::note(&format!("spent: {}", spend(i, o)));
     }
     // rows = reused (prior) + generated (this run); failed API calls are dropped, so derive
     // `reused` from the total to avoid underflow when some calls fail.
@@ -3246,12 +3367,17 @@ fn run_style_guides(
         }
     };
     comindly::ui::header("Style guides (per repo)");
-    comindly::ui::warn("--guide sends code samples + config to the LLM — opt-in egress.");
+    comindly::ui::warn("Style guides send code samples and configuration to the LLM.");
     let conventions = match comindly::index::read_facts_blocking(dst) {
         Ok(Some(facts)) => comindly::conventions::mine(symbols, edges, &facts),
         _ => Vec::new(),
     };
-    let mut guide_rows: Vec<(String, String)> = Vec::new();
+    // Reuse a repo's guide while its input is unchanged; save after each repo.
+    let stored_keys = comindly::index::read_keys_blocking(dst, "guide_keys");
+    let mut guide_rows: Vec<(String, String)> =
+        comindly::index::read_style_guide_blocking(dst).unwrap_or_default();
+    let mut keys: Vec<(String, String)> = stored_keys.clone().into_iter().collect();
+    let mut reused = 0usize;
     for (repo, root) in repo_roots {
         let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
         if rsyms.is_empty() {
@@ -3271,6 +3397,20 @@ fn run_style_guides(
         if sections.is_empty() {
             continue;
         }
+        let key = blake3::hash(
+            sections
+                .iter()
+                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence))
+                .collect::<Vec<_>>()
+                .join("\0\0")
+                .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+        if stored_keys.get(repo) == Some(&key) && guide_rows.iter().any(|(r, _)| r == repo) {
+            reused += 1;
+            continue;
+        }
         let pb = comindly::ui::progress(sections.len() as u64, &format!("{repo}: guide sections"));
         // One focused LLM call per section, concurrently; preserves order for stitching.
         let bodies: Vec<Option<String>> = rt.block_on(async {
@@ -3287,7 +3427,7 @@ fn run_style_guides(
                         r
                     }
                 })
-                .buffered(4)
+                .buffered(comindly::config::Config::load().llm_concurrency())
                 .collect()
                 .await
         });
@@ -3311,17 +3451,38 @@ fn run_style_guides(
             "{repo}: style guide ({} sections)",
             doc.matches("\n## ").count() + 1
         ));
+        guide_rows.retain(|(r, _)| r != repo);
         guide_rows.push((repo.clone(), doc));
+        keys.retain(|(r, _)| r != repo);
+        keys.push((repo.clone(), key));
+        let saved = comindly::index::write_style_guide_blocking(dst, &guide_rows)
+            .and_then(|_| comindly::index::write_keys_blocking(dst, "guide_keys", &keys));
+        if let Err(e) = saved {
+            comindly::ui::warn(&format!("saving the style guide failed: {e:#}"));
+        }
     }
-    if !guide_rows.is_empty() {
-        let _ = comindly::index::write_style_guide_blocking(dst, &guide_rows);
+    if reused > 0 {
+        comindly::ui::note(&format!("{reused} unchanged style guide(s) reused"));
     }
     let (i, o) = client.token_usage();
-    comindly::ui::note(&format!("tokens: {} in / {} out", kfmt(i), kfmt(o)));
+    comindly::ui::note(&format!("spent: {}", spend(i, o)));
     ExitCode::SUCCESS
 }
 
 /// Compact `1.2k`-style formatting for token counts.
+/// Tokens so far, and their cost when the team set the LLM's prices.
+fn spend(input: u64, output: u64) -> String {
+    let tokens = format!("{} in / {} out tokens", kfmt(input), kfmt(output));
+    let usd = comindly::config::Config::load()
+        .llm_prices()
+        .map(|(pi, po)| (input as f64 * pi + output as f64 * po) / 1_000_000.0);
+    comindly::ui::usage(input, output, usd);
+    match usd {
+        Some(usd) => format!("{tokens} ≈ ${usd:.2}"),
+        None => tokens,
+    }
+}
+
 fn kfmt(n: u64) -> String {
     if n >= 1000 {
         format!("{:.1}k", n as f64 / 1000.0)

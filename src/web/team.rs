@@ -34,6 +34,8 @@ pub(super) fn defaults() -> Value {
         "llm_model": crate::llm::DEFAULT_MODEL,
         "llm_base_url": crate::llm::DEFAULT_BASE_URL,
         "embed_model": crate::embed::DEFAULT_MODEL,
+        "llm_concurrency": 8,
+        "format": "md",
     })
 }
 
@@ -64,7 +66,11 @@ pub(super) struct Save {
 }
 
 /// Save the shared settings for everyone using this index.
-pub(super) async fn save(State(app): State<Shared>, Json(b): Json<Save>) -> impl IntoResponse {
+pub(super) async fn save(
+    who: super::Member,
+    State(app): State<Shared>,
+    Json(b): Json<Save>,
+) -> impl IntoResponse {
     let run = async {
         let root = root(&app).await?;
         let current = team::load(&root).await?;
@@ -79,9 +85,23 @@ pub(super) async fn save(State(app): State<Shared>, Json(b): Json<Save>) -> impl
                 *v = None;
             }
         }
+        if let Some(f) = next.format.as_deref() {
+            anyhow::ensure!(matches!(f, "md" | "json"), "the format is md or json");
+        }
+        anyhow::ensure!(
+            next.llm_concurrency.is_none_or(|n| (1..=64).contains(&n)),
+            "LLM requests at once: between 1 and 64"
+        );
         let reindex = next.embed_model != current.settings.embed_model;
-        team::save(&root, &next, b.version).await?;
+        let format_changed = next.format != current.settings.format;
+        match who.as_deref() {
+            Some(w) => team::save_as(&root, &next, b.version, &w.email).await?,
+            None => team::save(&root, &next, b.version).await?,
+        };
         team::set_current(next);
+        if format_changed {
+            app.reload_mcp(&root);
+        }
         anyhow::Ok(if reindex {
             "saved; the new embedding model needs a full re-index"
         } else {

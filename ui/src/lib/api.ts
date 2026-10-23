@@ -200,6 +200,13 @@ export interface TeamSettings {
   enrich?: boolean;
   flows?: boolean;
   guide?: boolean;
+  embed?: boolean;
+  max_enrich?: number;
+  max_flows?: number;
+  llm_concurrency?: number;
+  llm_price_in?: number;
+  llm_price_out?: number;
+  format?: "md" | "json";
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
@@ -219,6 +226,8 @@ export interface Defaults {
   llm_model: string;
   llm_base_url: string;
   embed_model: string;
+  llm_concurrency?: number;
+  format?: string;
 }
 
 export type SettingsChange = Partial<{
@@ -299,11 +308,25 @@ export interface ScanHit {
   remote: string | null;
 }
 
+/** One indexing event: what comindly logs, also as JSON in the server's output. */
+export interface IndexEvent {
+  timestamp?: string;
+  level: "info" | "warn" | "error";
+  kind: "step" | "done" | "note" | "warning" | "error" | "progress";
+  message: string;
+  step?: string;
+  done?: number;
+  total?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  usd?: number;
+}
+
 export interface IndexJob {
   running: boolean;
   cancelled: boolean;
   ok: boolean | null;
-  lines: string[];
+  events: IndexEvent[];
   started: string | null;
   finished: string | null;
 }
@@ -433,7 +456,11 @@ export const api = {
   settings: () => get<Settings>("/api/settings"),
   repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/repos"),
   remoteRepos: (url: string, auth?: { username: string; token: string }, signal?: AbortSignal) =>
-    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[]; warning?: string | null }>("/api/repos/remote/list", { url, ...auth }, signal),
+    post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[]; warning?: string | null }>(
+      "/api/repos/remote/list",
+      { url, ...auth },
+      signal,
+    ),
   addRemoteRepos: (urls: string[], share: boolean) => post("/api/repos/remote/add", { urls, share }),
   changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
   scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }, signal),
@@ -503,5 +530,4 @@ export const attention = (e: Entry) =>
   isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3;
 
 export const isChallenged = (e: Entry) =>
-  !["superseded", "retracted"].includes(e.status) &&
-  e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));
+  !["superseded", "retracted"].includes(e.status) && e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));

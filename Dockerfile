@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 USER comindly
 WORKDIR /data
 ENV HOME=/data
+# One JSON event per line, for platform logs (Datadog, CloudWatch, Loki).
+ENV COMINDLY_LOG_FORMAT=json
 VOLUME /data
 EXPOSE 7878
 ENTRYPOINT ["comindly"]

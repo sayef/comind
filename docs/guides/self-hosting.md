@@ -25,6 +25,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. `GH_TOKEN` is used for github.com, `GITLAB_TOKEN` for gitlab.com. |
 | `COMINDLY_GITLAB_HOSTS` | for self-managed GitLab | Comma-separated hosts that also get `GITLAB_TOKEN`, e.g. `gitlab.example.com`. |
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
+| `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, step, message, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
 Members, sessions, personal tokens and stored secrets live next to the index, in `_server` at the
@@ -104,7 +105,7 @@ docker run -d --name comindly -p 127.0.0.1:7878:7878 \
   ghcr.io/sayef/comindly:latest
 ```
 
-Pin a version tag (`ghcr.io/sayef/comindly:0.3.2`) for anything you rely on. Generate the two
+Pin a version tag (`ghcr.io/sayef/comindly:0.3.3`) for anything you rely on. Generate the two
 secrets once, for example with `openssl rand -base64 32`, and keep them in your secret store.
 
 ### Kubernetes
@@ -122,7 +123,7 @@ spec:
       serviceAccountName: comindly   # its cloud role reads the bucket
       containers:
         - name: comindly
-          image: ghcr.io/sayef/comindly:0.3.2
+          image: ghcr.io/sayef/comindly:0.3.3
           ports: [{ containerPort: 7878 }]
           env:
             - { name: COMINDLY_PUBLIC_URL, value: https://comindly.example.com }

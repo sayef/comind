@@ -136,7 +136,7 @@ export function SettingsPage() {
         </Section>
       )}
 
-      {teamLlm ? (
+      {server ? null : teamLlm ? (
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
             LLM: the team's settings apply (model {team.data?.settings.llm_model ?? s.defaults.llm_model}),{" "}

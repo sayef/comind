@@ -53,6 +53,19 @@ comindly team                    # what is set, and where your API key comes fro
 Saving needs write access to the index (on a team server: an admin); two people saving at once cannot overwrite each other (the
 second save is refused and asks to reload).
 
+| Setting | What it does | Default |
+|---|---|---|
+| `llm_base_url`, `llm_model`, `embed_model` | The endpoint and models everyone uses | OpenAI, `gpt-6-luna`, `minishlab/potion-base-8M` |
+| `embed`, `enrich`, `flows`, `guide` | Which steps run while indexing: search embeddings, summaries, flow walkthroughs, style guides | all on |
+| `max_enrich` | Most symbols summarised, the most-used first | no limit |
+| `max_flows` | Most flows given a walkthrough, those reaching furthest first | no limit |
+| `llm_concurrency` | LLM requests at once; lower it if the provider rate-limits | 8 |
+| `llm_price_in`, `llm_price_out` | The model's price in USD per million input and output tokens, so indexing shows its cost | not set |
+| `format` | What agents get as text, `md` or `json`; every answer also carries the data as structured JSON | `md` |
+
+Summaries, walkthroughs and style guides are kept and reused while their input is unchanged, and saved as
+they are written (summaries every 500), so an interrupted run continues where it stopped.
+
 ### API keys
 
 Everyone brings their own LLM API key. comindly looks for it, in order:

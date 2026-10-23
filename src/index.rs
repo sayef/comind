@@ -4,6 +4,7 @@
 //! Each overwrite creates a new Lance version (prior versions retained), so the newest manifest
 //! is the atomic "latest" pointer. Remote stores use the platform's own credentials.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::facts::FileFacts;
@@ -909,6 +910,51 @@ pub fn write_enrichment_blocking(uri: &str, rows: &[TextRow]) -> Result<u64> {
 /// Blocking wrapper for [`read_enrichment`].
 pub fn read_enrichment_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
     runtime()?.block_on(read_enrichment(uri))
+}
+
+/// What each generated text was written from, as `(id, fingerprint)` in `table`; same fingerprint,
+/// same input, so the text is reused instead of asking the LLM again.
+pub fn write_keys_blocking(uri: &str, table: &str, keys: &[(String, String)]) -> Result<u64> {
+    runtime()?.block_on(async {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("symbol_id", DataType::Utf8, false),
+            Field::new("key", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from_iter_values(
+                    keys.iter().map(|(i, _)| i.as_str()),
+                )) as ArrayRef,
+                Arc::new(StringArray::from_iter_values(
+                    keys.iter().map(|(_, k)| k.as_str()),
+                )) as ArrayRef,
+            ],
+        )?;
+        let db = crate::storage::connect(uri).execute().await?;
+        write_versioned(&db, table, batch).await
+    })
+}
+
+/// The fingerprints [`write_keys_blocking`] stored in `table`, by id; empty when none.
+pub fn read_keys_blocking(uri: &str, table: &str) -> HashMap<String, String> {
+    let read = async {
+        let db = crate::storage::connect(uri).execute().await?;
+        let tbl = db.open_table(table).execute().await?;
+        let mut out = HashMap::new();
+        let mut st = tbl.query().execute().await?;
+        while let Some(b) = st.try_next().await? {
+            let (ids, keys) = (str_col(&b, "symbol_id")?, str_col(&b, "key")?);
+            for i in 0..b.num_rows() {
+                out.insert(ids.value(i).to_string(), keys.value(i).to_string());
+            }
+        }
+        anyhow::Ok(out)
+    };
+    runtime()
+        .ok()
+        .and_then(|rt| rt.block_on(read).ok())
+        .unwrap_or_default()
 }
 
 fn flows_schema() -> Arc<Schema> {

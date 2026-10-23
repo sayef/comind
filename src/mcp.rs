@@ -1494,7 +1494,9 @@ pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
     {
         Ok(e) => Some(e),
         Err(e) => {
-            eprintln!("comindly serve: embedding model unavailable, `search` disabled: {e:#}");
+            crate::ui::warn(&format!(
+                "embedding model unavailable, `search` disabled: {e:#}"
+            ));
             None
         }
     };

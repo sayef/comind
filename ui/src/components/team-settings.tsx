@@ -67,8 +67,12 @@ export function TeamSection() {
     qc.invalidateQueries({ queryKey: ["settings"] });
   };
   const save = useMutation({ mutationFn: () => api.saveTeam(form, t?.version ?? null), meta: { inline: true }, onSuccess: refresh });
-  const set = (k: keyof TeamSettings, v: string | boolean | undefined) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof TeamSettings, v: string | number | boolean | undefined) => setForm((f) => ({ ...f, [k]: v }));
+  const num = (k: "max_enrich" | "max_flows" | "llm_concurrency", v: string) =>
+    set(k, v.trim() === "" ? undefined : Math.max(1, Number(v)));
+  const price = (k: "llm_price_in" | "llm_price_out", v: string) => set(k, v.trim() === "" ? undefined : Math.max(0, Number(v)));
   const steps: [keyof TeamSettings, string][] = [
+    ["embed", "Search embeddings"],
     ["enrich", "Summaries"],
     ["flows", "Flow walkthroughs"],
     ["guide", "Style guide"],
@@ -121,6 +125,84 @@ export function TeamSection() {
                 {label} when indexing
               </label>
             ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={field}>
+              Most symbols to summarise
+              <Input
+                type="number"
+                min={1}
+                value={form.max_enrich ?? ""}
+                onChange={(e) => num("max_enrich", e.target.value)}
+                placeholder="no limit"
+              />
+              <span className="text-xs text-muted-foreground">
+                The most-used first. Each summary is one LLM request and sends that code.
+              </span>
+            </label>
+            <label className={field}>
+              Most flows to walk through
+              <Input
+                type="number"
+                min={1}
+                value={form.max_flows ?? ""}
+                onChange={(e) => num("max_flows", e.target.value)}
+                placeholder="no limit"
+              />
+              <span className="text-xs text-muted-foreground">
+                Those reaching furthest first. Every flow is still traced without the LLM.
+              </span>
+            </label>
+            <label className={field}>
+              LLM requests at once
+              <Input
+                type="number"
+                min={1}
+                max={64}
+                value={form.llm_concurrency ?? ""}
+                onChange={(e) => num("llm_concurrency", e.target.value)}
+                placeholder={String(d?.llm_concurrency ?? 8)}
+              />
+              <span className="text-xs text-muted-foreground">Lower it if the provider rate-limits; higher indexes faster.</span>
+            </label>
+            <label className={field}>
+              Price per million input tokens (USD)
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.llm_price_in ?? ""}
+                onChange={(e) => price("llm_price_in", e.target.value)}
+                placeholder="not set"
+              />
+              <span className="text-xs text-muted-foreground">
+                From your provider's price list; the indexing log then shows what it costs.
+              </span>
+            </label>
+            <label className={field}>
+              Price per million output tokens (USD)
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.llm_price_out ?? ""}
+                onChange={(e) => price("llm_price_out", e.target.value)}
+                placeholder="not set"
+              />
+              <span className="text-xs text-muted-foreground">Without prices, the log shows tokens only.</span>
+            </label>
+            <label className={field}>
+              Agents get text as
+              <select
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                value={form.format ?? "md"}
+                onChange={(e) => set("format", e.target.value === "md" ? undefined : e.target.value)}
+              >
+                <option value="md">Markdown (reads best)</option>
+                <option value="json">JSON</option>
+              </select>
+              <span className="text-xs text-muted-foreground">Every answer also carries the same data as structured JSON.</span>
+            </label>
           </div>
           {admin && (
             <div>

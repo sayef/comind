@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
+import { IndexLog } from "@/components/index-log";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -199,7 +200,6 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const qc = useQueryClient();
   const [llm, setLlm] = useState(false);
   const [drop, setDrop] = useState(false);
-  const [full, setFull] = useState(false);
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
   const start = useMutation({
     mutationFn: () => api.startIndex(llm, drop),
@@ -225,8 +225,6 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     mutationFn: (on: boolean) => api.saveSettings({ auto_index: on }),
     onSuccess: () => (qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
-  const lines = j?.lines ?? [];
-  const shown = full ? lines : lines.slice(-12);
 
   return (
     <Card>
@@ -289,18 +287,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             {j.finished && <span className="text-xs text-muted-foreground">{new Date(j.finished).toLocaleString()}</span>}
           </p>
         )}
-        {lines.length > 0 && (
-          <>
-            <pre className="max-h-80 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
-              {shown.join("\n")}
-            </pre>
-            {lines.length > 12 && (
-              <button className="self-start text-xs text-muted-foreground hover:text-foreground" onClick={() => setFull((f) => !f)}>
-                {full ? "Show less" : `Show all ${lines.length} lines`}
-              </button>
-            )}
-          </>
-        )}
+        <IndexLog events={j?.events ?? []} running={!!j?.running} />
       </CardContent>
     </Card>
   );
@@ -477,6 +464,10 @@ export function RepositoriesPage() {
     mutationFn: (url: string) => api.addRemoteRepos([url], false),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }),
   });
+  const addAll = useMutation({
+    mutationFn: (urls: string[]) => api.addRemoteRepos(urls, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["repos"] }),
+  });
   const remote = useMemo(() => repos.data?.root?.includes("://"), [repos.data]);
   const unlisted = repos.data?.unlisted ?? [];
   const close = (o: boolean) => !o && setDialog(null);
@@ -531,6 +522,17 @@ export function RepositoriesPage() {
             {server ? "Add it and comindly clones it" : "Locate your copy, or Add it and comindly clones it"}; comindly indexes all
             repositories together so their links stay complete.
           </span>
+          {admin && unlisted.filter((r) => r.remote).length > 1 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto shrink-0"
+              loading={addAll.isPending}
+              onClick={() => addAll.mutate(unlisted.flatMap((r) => (r.remote ? [r.remote] : [])))}
+            >
+              <Plus /> Add all {unlisted.filter((r) => r.remote).length}
+            </Button>
+          )}
         </p>
       ) : (
         remote &&

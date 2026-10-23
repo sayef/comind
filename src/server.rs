@@ -35,7 +35,7 @@ fn read_secret(name: &str) -> Option<String> {
     match std::fs::read_to_string(&path) {
         Ok(v) => Some(v.trim().to_string()).filter(|v| !v.is_empty()),
         Err(e) => {
-            eprintln!("comindly: {name}_FILE ({path}) cannot be read: {e}");
+            crate::ui::warn(&format!("{name}_FILE ({path}) cannot be read: {e}"));
             None
         }
     }
@@ -553,12 +553,12 @@ impl Store {
         store.prune();
         let unreadable = store.unreadable_secrets();
         if !unreadable.is_empty() {
-            eprintln!(
-                "comindly: {} stored secret(s) cannot be decrypted with COMINDLY_SECRET_KEY ({}); \
+            crate::ui::warn(&format!(
+                "{} stored secret(s) cannot be decrypted with COMINDLY_SECRET_KEY ({}); \
                  set COMINDLY_SECRET_KEY_PREVIOUS to the old key, or save them again",
                 unreadable.len(),
                 unreadable.join(", ")
-            );
+            ));
         }
         Ok(store)
     }
@@ -604,9 +604,9 @@ impl Store {
             fresh.load(&kind, key, &json);
         }
         if forged > 0 {
-            eprintln!(
-                "comindly: ignored {forged} server row(s) not signed with COMINDLY_SECRET_KEY"
-            );
+            crate::ui::warn(&format!(
+                "ignored {forged} server row(s) not signed with COMINDLY_SECRET_KEY"
+            ));
         }
         let mut st = self.lock();
         fresh.failures = std::mem::take(&mut st.failures);
@@ -631,7 +631,7 @@ impl Store {
             drop(seen);
             if changed {
                 if let Err(e) = self.reload() {
-                    eprintln!("comindly: re-reading the server table: {e:#}");
+                    crate::ui::warn(&format!("re-reading the server table: {e:#}"));
                 }
             }
         }
@@ -685,10 +685,10 @@ impl Store {
             st.failures.retain(|(_, at)| *at >= day);
         }
         if let Err(e) = self.commit(changes) {
-            eprintln!("comindly: pruning the server table: {e:#}");
+            crate::ui::warn(&format!("pruning the server table: {e:#}"));
         }
         if let Err(e) = run(optimize(self.uri.clone())) {
-            eprintln!("comindly: optimizing the server table: {e:#}");
+            crate::ui::warn(&format!("optimizing the server table: {e:#}"));
         }
     }
 
@@ -732,7 +732,7 @@ impl Store {
             self.keys[0],
             vec![("audit", key, Some(row.to_string()))],
         )) {
-            eprintln!("comindly: audit log: {e:#}");
+            crate::ui::warn(&format!("audit log: {e:#}"));
         }
     }
 
@@ -933,7 +933,9 @@ impl Store {
             .count() as i64;
         // Answered like any other address, so the limit does not reveal who is a member.
         if recent >= MAX_LINKS_PER_HOUR {
-            eprintln!("comindly: a member asked for more than {MAX_LINKS_PER_HOUR} sign-in links in an hour");
+            crate::ui::warn(&format!(
+                "a member asked for more than {MAX_LINKS_PER_HOUR} sign-in links in an hour"
+            ));
             return Ok(None);
         }
         let token = new_token("lnk_");
@@ -1189,7 +1191,7 @@ impl Store {
                 changes.push(put("seen", &email, &t));
             }
             if let Err(e) = self.commit(changes) {
-                eprintln!("comindly: recording last use: {e:#}");
+                crate::ui::warn(&format!("recording last use: {e:#}"));
             }
         }
         Ok(who.map(|w| (w, via)))
@@ -1405,7 +1407,7 @@ pub fn store() -> Option<&'static Store> {
                 let root = crate::config::Config::load().index_dir(None);
                 let previous = env_secret("COMINDLY_SECRET_KEY_PREVIOUS");
                 Store::attach_keyed(&root, &key, previous.as_deref())
-                    .map_err(|e| eprintln!("comindly: the server's stored keys: {e:#}"))
+                    .map_err(|e| crate::ui::warn(&format!("the server's stored keys: {e:#}")))
                     .ok()
             })
             .as_ref()
