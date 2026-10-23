@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+
 ## [0.3.4](https://github.com/sayef/comindly/compare/v0.3.3...v0.3.4) - 2026-10-23
 
 ### Fixed
