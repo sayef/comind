@@ -506,10 +506,14 @@ pub(crate) fn own_group(cmd: &mut tokio::process::Command) {
 
 /// Stop the process group `pid` leads (a cancelled indexer or sign-in, with its children).
 pub(crate) fn stop_group(pid: u32) {
+    // Signalled directly: slim container images have no `kill` program.
     #[cfg(unix)]
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", "--", &format!("-{pid}")])
-        .status();
+    if let Ok(pid) = i32::try_from(pid) {
+        // SAFETY: kill(2) only sends a signal; a negative pid addresses the group.
+        unsafe {
+            libc::kill(-pid, libc::SIGTERM);
+        }
+    }
 }
 
 /// An error for the UI: short, with S3 replies explained and credentials removed.

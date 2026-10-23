@@ -6,7 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Cancel stops indexing in container images too; it relied on a `kill` program that slim images lack.
+
 ## [0.3.3](https://github.com/sayef/comindly/compare/v0.3.2...v0.3.3) - 2026-10-23
+||||||| parent of 785ad0e (Cancel indexing by signalling the process group directly, which works in slim images)
 
 ### Added
 

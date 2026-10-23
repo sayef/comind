@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "comindly"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -1577,6 +1577,7 @@ dependencies = [
  "lance-io",
  "lancedb",
  "lettre",
+ "libc",
  "model2vec-rs",
  "muda",
  "objc2",
