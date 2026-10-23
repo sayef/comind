@@ -48,7 +48,7 @@ model2vec-rs = "0.3"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
 lancedb = { version = "0.37.1", default-features = false, features = ["aws", "gcs", "azure"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
-lance-io = { version = "=10.0.0", default-features = false } # object stores for the ledger, as lancedb opens them
+lance-io = { version = "=13.0.0", default-features = false } # object stores for the ledger, as lancedb opens them
 # LLM enrichment via Rig — provider-agnostic (OpenAI now; Bedrock/Vertex/others behind features later).
 rig = { package = "rig-core", version = "0.44", features = ["reqwest"] }
 rmcp = { version = "3.5.1", features = ["server", "transport-io", "transport-streamable-http-server"] } # MCP server, over stdio and HTTP
